@@ -4,7 +4,7 @@
 // rest of the suite uses, and check each answer against openapi.json, so a
 // handler cannot serve a body the server would not.
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
-import { http, HttpResponse, type HttpHandler } from "msw";
+import { http, HttpResponse, type HttpHandler } from "msw/http";
 import { setupServer } from "msw/node";
 import { openApiSchemas } from "./openapi_schema";
 
@@ -48,7 +48,7 @@ export const server = setupServer();
 export function useMockApi(): void {
   beforeAll(() => {
     vi.stubGlobal("Request", PageRequest);
-    server.listen({ onUnhandledRequest: "error" });
+    server.listen({ onUnhandledFrame: "error" });
   });
   afterEach(() => server.resetHandlers());
   afterAll(() => {

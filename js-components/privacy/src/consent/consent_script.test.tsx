@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, http } from "msw/http";
 import { setupServer } from "msw/node";
 import ConsentScript from "./consent_script";
 import { ConsentProvider } from "./consent_provider";
@@ -12,7 +12,7 @@ import { renderWithConsent } from "./test/render";
 const stub = new ServerStub();
 const server = setupServer(...stub.handlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   server.resetHandlers();
   stub.state = freshState();

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { http } from "msw";
+import { http } from "msw/http";
 import { makeProfile, makeTicket } from "@/test/fixtures";
 import { problem, serve, server, useMockApi } from "@/test/msw_server";
 

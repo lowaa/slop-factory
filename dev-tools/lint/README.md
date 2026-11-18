@@ -48,10 +48,11 @@ touch. The other way, the repo-wide tools in every `test.sh`, would have
 needed the root's full `npm ci` in every job and run knip a dozen times.
 
 **oxlint's `vite-plus` peer.** oxlint lists `vite-plus` as an optional peer,
-and npm still resolves it when the lockfile is regenerated: the latest one
-peers `@vitest/browser-playwright` 5, which conflicts with the 4.x here. The
-root `package.json` overrides oxlint's `vite-plus` to 0.2.9, whose peers are
-4.1.x. Drop the override once vitest 5 lands.
+and npm still resolves it when the lockfile is regenerated. Each release
+peers one `@vitest/browser-playwright` (1.7.0 wants 5.1.0, the version the
+workspaces pin), so it tracks vitest. If a regeneration fails on it, the
+vitest bump it is asking for is the fix; an `overrides` entry pinning an
+older `vite-plus` only defers it.
 
 **oxlint on the host.** In CI it runs inside the frontend and js-components
 test images, whose `npm ci` is the root's, of every workspace. `lint.sh`

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse } from "msw";
+import { HttpResponse } from "msw/http";
 import { setupServer } from "msw/node";
 import { ServerStub, decidedState, freshState, newStore, wirePurpose, wireState } from "./test/fixtures";
 import { renderWithConsent } from "./test/render";
@@ -11,7 +11,7 @@ import ConsentSettings from "./consent_settings";
 const stub = new ServerStub();
 const server = setupServer(...stub.handlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   server.resetHandlers();
   stub.state = freshState();

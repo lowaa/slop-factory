@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw/http";
 import { setupServer } from "msw/node";
 import { createFetchConsentApi, parseConsentState } from "./consent_api";
 import { ConsentApiError } from "./types";
@@ -8,7 +8,7 @@ import { BASE, ServerStub, decidedState, freshState, wirePurpose, wireState, typ
 const stub = new ServerStub();
 const server = setupServer(...stub.handlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   server.resetHandlers();
   stub.state = freshState();

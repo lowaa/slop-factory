@@ -34,10 +34,6 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     css: false,
-    // Node 25+ (the Playwright test image runs 26) defines its own global
-    // localStorage, which is undefined without --localstorage-file and hides
-    // jsdom's. Tests should see jsdom's Storage on every Node version.
-    execArgv: ["--no-experimental-webstorage"],
     // Must exceed setup.ts's asyncUtilTimeout (5s): a findBy* waiting on a
     // lazy route's first load otherwise hits the 5s default test timeout
     // before it can report anything, and CI load made that routine.

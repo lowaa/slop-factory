@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw/http";
 import { setupServer } from "msw/node";
 import { EQUAL_ACTION_PROPS } from "./equal_actions";
 import {
@@ -19,7 +19,7 @@ import CookiePreferencesButton from "./cookie_preferences_button";
 const stub = new ServerStub();
 const server = setupServer(...stub.handlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   server.resetHandlers();
   stub.state = freshState();

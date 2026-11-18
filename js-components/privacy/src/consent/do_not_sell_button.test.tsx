@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse } from "msw/http";
 import { setupServer } from "msw/node";
 import { BASE, ServerStub, decidedState, freshState, newStore, wirePurpose, wireState } from "./test/fixtures";
 import { renderWithConsent } from "./test/render";
@@ -11,7 +11,7 @@ import LegalFooterLinks from "../legal_docs/legal_footer_links";
 const stub = new ServerStub();
 const server = setupServer(...stub.handlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   server.resetHandlers();
   stub.state = freshState();

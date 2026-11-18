@@ -1,4 +1,5 @@
-import { http, HttpResponse, type JsonBodyType } from "msw";
+import type { JsonBodyType } from "msw";
+import { http, HttpResponse } from "msw/http";
 import { createFetchConsentApi } from "../consent_api";
 import { ConsentStore, type ConsentStoreOptions } from "../consent_store";
 
