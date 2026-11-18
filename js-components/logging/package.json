@@ -26,7 +26,7 @@
     "@slop-factory/ui": "*",
     "@opentelemetry/api-logs": "^0.223.0",
     "@opentelemetry/core": "^2.9.0",
-    "@opentelemetry/exporter-logs-otlp-http": "^0.220.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.300.0",
     "@opentelemetry/resources": "^2.9.0",
     "@opentelemetry/sdk-logs": "^0.220.0",
     "@opentelemetry/semantic-conventions": "^1.44.0"
