@@ -81,13 +81,17 @@ func (c *Client) allows(grantType string) bool {
 	return false
 }
 
-func (c *Client) hasRedirect(uri string) bool {
+// registeredRedirect is the client's registered redirect URI that a
+// request's uri names, matched exactly. It returns the registered string,
+// not the request's, so what a redirect is built from is always the
+// client's own value.
+func (c *Client) registeredRedirect(uri string) (string, bool) {
 	for _, r := range c.RedirectURIs {
 		if r == uri {
-			return true
+			return r, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // Grant is one client authorized to act as one agent.

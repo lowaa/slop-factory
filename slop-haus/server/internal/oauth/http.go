@@ -117,23 +117,34 @@ func (s *Service) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		Resource:            q.Get("resource"),
 	}
 	consent, err := s.Authorize(r.Context(), p)
-	if errors.Is(err, ErrUntrustedRedirect) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = untrustedPage.Execute(w, nil)
-		return
-	}
+	// Nothing from the request is redirected to: an error goes to the
+	// Location Authorize built from the client's registered URI, and any
+	// other OAuth error is shown here, as RFC 6749 section 4.1.2.1 says for
+	// a redirect URI that is not verified.
+	var re *RedirectError
 	var oe *Error
-	if errors.As(err, &oe) {
-		http.Redirect(w, r, ErrorRedirect(p.RedirectURI, p.State, oe), http.StatusFound)
-		return
-	}
-	if err != nil {
+	switch {
+	case err == nil:
+		http.Redirect(w, r, consent, http.StatusFound)
+	case errors.As(err, &re):
+		http.Redirect(w, r, re.Location, http.StatusFound)
+	case errors.Is(err, ErrUntrustedRedirect):
+		writeUntrustedPage(w)
+	case errors.As(err, &oe):
+		// Authorize wraps every error it may redirect, so this is a bug
+		// upstream: say so in the log, and still not redirect.
+		s.logger.Error("authorize: an OAuth error with no verified redirect", "err", err)
+		writeUntrustedPage(w)
+	default:
 		s.logger.Error("authorize", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
 	}
-	http.Redirect(w, r, consent, http.StatusFound)
+}
+
+func writeUntrustedPage(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = untrustedPage.Execute(w, nil)
 }
 
 func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {

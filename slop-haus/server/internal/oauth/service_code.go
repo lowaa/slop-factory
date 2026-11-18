@@ -28,17 +28,44 @@ type AuthorizeParams struct {
 // would make this server an open redirector.
 var ErrUntrustedRedirect = errors.New("oauth: unknown client or unregistered redirect URI")
 
+// RedirectError is an authorization request's error that can be reported
+// to the client: Location is the client's registered redirect URI with the
+// error and state on it. Only Authorize makes one, and only once the
+// redirect URI is verified, so it is the one error the authorize endpoint
+// redirects for.
+type RedirectError struct {
+	Location string
+	Err      *Error
+}
+
+func (e *RedirectError) Error() string { return e.Err.Error() }
+
+func (e *RedirectError) Unwrap() error { return e.Err }
+
 // Authorize validates an authorization request and stores it for the
-// consent page. It returns the consent page's URL, or -- once the redirect
-// URI is trusted -- an error to deliver to it.
+// consent page. It returns the consent page's URL; a *RedirectError for an
+// invalid request from a verified client and redirect URI; or
+// ErrUntrustedRedirect, which must be shown to the user and not redirected.
 func (s *Service) Authorize(ctx context.Context, p *AuthorizeParams) (consentURL string, err error) {
 	client, err := s.store.GetClient(ctx, p.ClientID)
 	if err != nil {
 		return "", ErrUntrustedRedirect
 	}
-	if !client.hasRedirect(p.RedirectURI) {
+	redirectURI, ok := client.registeredRedirect(p.RedirectURI)
+	if !ok {
 		return "", ErrUntrustedRedirect
 	}
+	consentURL, err = s.authorizeFor(ctx, client, redirectURI, p)
+	var oe *Error
+	if errors.As(err, &oe) {
+		return "", &RedirectError{Location: ErrorRedirect(redirectURI, p.State, oe), Err: oe}
+	}
+	return consentURL, err
+}
+
+// authorizeFor is Authorize once the client and redirectURI, its
+// registered value, are verified.
+func (s *Service) authorizeFor(ctx context.Context, client *Client, redirectURI string, p *AuthorizeParams) (string, error) {
 	if p.ResponseType != "code" {
 		return "", oauthErr(400, "unsupported_response_type", "only the code response type is supported")
 	}
@@ -57,7 +84,7 @@ func (s *Service) Authorize(ctx context.Context, p *AuthorizeParams) (consentURL
 	req := &AuthRequest{
 		ID:            uuid.New(),
 		ClientID:      client.ID,
-		RedirectURI:   p.RedirectURI,
+		RedirectURI:   redirectURI,
 		CodeChallenge: p.CodeChallenge,
 		State:         p.State,
 		Resource:      resource,
