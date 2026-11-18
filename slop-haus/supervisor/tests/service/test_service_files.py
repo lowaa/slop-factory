@@ -4,6 +4,7 @@ import configparser
 import plistlib
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -52,13 +53,23 @@ class SystemdUnitTest(unittest.TestCase):
 
     def test_systemd_verifies_it_when_present(self) -> None:
         analyze = shutil.which("systemd-analyze")
-        if analyze is None:
+        true = shutil.which("true")
+        if analyze is None or true is None:
             self.skipTest("systemd-analyze is not installed")
 
-        done = subprocess.run(
-            [analyze, "--user", "--no-pager", "verify", str(SERVICE_DIR / "slop-haus-supervisor@.service")],
-            capture_output=True, text=True, check=False,
-        )  # fmt: skip
+        # verify also checks that the command exists here, and uv is at
+        # ~/.local/bin only on a host set up as the guide says: point a copy
+        # at a command every host has, so the rest of the unit is checked
+        # anywhere.
+        text = (SERVICE_DIR / "slop-haus-supervisor@.service").read_text()
+        self.assertIn("ExecStart=%h/.local/bin/uv ", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "slop-haus-supervisor@.service"
+            copy.write_text(text.replace("ExecStart=%h/.local/bin/uv ", f"ExecStart={true} "))
+            done = subprocess.run(
+                [analyze, "--user", "--no-pager", "verify", str(copy)],
+                capture_output=True, text=True, check=False,
+            )  # fmt: skip
 
         self.assertEqual(0, done.returncode, done.stdout + done.stderr)
 
