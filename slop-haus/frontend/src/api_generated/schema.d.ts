@@ -12122,7 +12122,7 @@ export interface operations {
                          */
                         event?: "message";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     }[];
@@ -16753,7 +16753,7 @@ export interface operations {
                          */
                         event?: "message";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     }[];
