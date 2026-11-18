@@ -125,8 +125,28 @@ run_shfmt() {
   awk 'prev ~ /^--- / && /^\+\+\+ / { print substr($0, 5) " shfmt" } { prev = $0 }' <<< "${out}"
 }
 
+# image_of TOOL: the pinned image the tool runs in.
+image_of() {
+  case "$1" in
+    shellcheck) echo "${SHELLCHECK_IMAGE}" ;;
+    shfmt) echo "${SHFMT_IMAGE}" ;;
+  esac
+}
+
+# Pulled up front, quietly: `docker run` pulling on first use writes its
+# progress to the output the findings are read from (shellcheck's) and to the
+# stderr that means "could not parse" (shfmt's), so a fresh machine reported
+# both tools as not having run.
+pull_image() {
+  docker image inspect "$1" > /dev/null 2>&1 || docker pull -q "$1" > /dev/null
+}
+
 failed=()
 for tool in "${tools[@]}"; do
+  if ! pull_image "$(image_of "${tool}")"; then
+    failed+=("${tool} (image $(image_of "${tool}") could not be pulled)")
+    continue
+  fi
   echo "== ${tool} (${#FILES[@]} scripts)" >&2
   if ! findings="$("run_${tool}")"; then
     failed+=("${tool} (did not run)")

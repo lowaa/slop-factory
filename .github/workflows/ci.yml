@@ -131,12 +131,15 @@ jobs:
         with:
           persist-credentials: false
       # Go and uv for dev-tools/lint's go.bats and ruff.bats, which lint
-      # scratch projects.
+      # scratch projects. Every workspace, not just the root's tools: the
+      # style-check coverage tests compile SCSS with the workspaces' sass and
+      # render pages and stories in Playwright's Chromium.
       - uses: ./.github/actions/setup
         with:
           go: "true"
           uv: "true"
-          npm-ci: tools
+          npm-ci: root
+      - run: npx playwright install --with-deps chromium
       - run: bats/run.sh --recursive dev-tools
 
   slop-review:
