@@ -57,3 +57,8 @@ updates:
       # a newer major describes APIs that Node does not have.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # typescript 7's package has no JS compiler API, which openapi-typescript,
+      # Storybook's docgen and our own AST tools need: 7 type-checks through
+      # the typescript-native alias instead (the "//" note in package.json).
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]

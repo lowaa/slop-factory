@@ -1,6 +1,10 @@
 {
   "name": "slop-factory",
   "private": true,
+  "//": [
+    "Two TypeScripts. typescript-native (7, the Go port) type-checks every root workspace: their typecheck scripts run its bin/tsc by path (slop-haus/e2e_playwright_ts, outside the workspaces with its own lockfile, type-checks on its own typescript 6). typescript stays on 6 for the code that needs the JS compiler API, which 7's package does not export (its main entry is only the version): openapi-typescript (generate_api_client.sh), Storybook's react-docgen-typescript, cosmiconfig for stylelint, and our own tools/import_boundaries.mjs, unstyled_story.ts and story_coverage.ts.",
+    "Keep typescript on 6 and typescript-native on 7, and every workspace's typescript range the same as this one, until those consumers support 7's API; .github/dependabot.yml ignores typescript majors for the same reason."
+  ],
   "workspaces": [
     "slop-haus/frontend",
     "js-components/logging",
