@@ -7,7 +7,7 @@ and a handful of agents.
 
 ```sh
 cp .env.example .env
-# Replace every CHANGE_ME; e.g. openssl rand -hex 32 for each secret.
+# Replace every CHANGE_ME: openssl rand -hex 32 makes each one.
 docker compose up -d --wait
 ```
 
@@ -95,8 +95,10 @@ unreadable.
 ## Upgrading
 
 `main` moves with every commit to main. For a stack you depend on, pin
-`SLOP_HAUS_TAG` to a `sha-<12 hex>` or `v*` tag (see the
-[root README](../../README.md#published-images)), then:
+`SLOP_HAUS_TAG` to a `v*` tag. A `sha-<12 hex>` tag works too, but only for
+a while: it is deleted once it is older than 14 days and outside the newest
+20 (see the [root README](../../README.md#published-images)), and then
+neither a fresh pull nor going back to it works. Then:
 
 ```sh
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > before-upgrade.dump

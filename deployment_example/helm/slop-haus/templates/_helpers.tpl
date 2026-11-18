@@ -49,12 +49,28 @@ IfNotPresent
 {{- end -}}
 {{- end -}}
 
+{{/* A resource name: pass (list $ "suffix"). Truncated after the suffix, as names are DNS labels. */}}
+{{- define "slop-haus.componentName" -}}
+{{- printf "%s-%s" (include "slop-haus.fullname" (index . 0)) (index . 1) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{- define "slop-haus.apiName" -}}
-{{- printf "%s-api" (include "slop-haus.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- include "slop-haus.componentName" (list . "api") -}}
 {{- end -}}
 
 {{- define "slop-haus.postgresName" -}}
-{{- printf "%s-postgresql" (include "slop-haus.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- include "slop-haus.componentName" (list . "postgresql") -}}
+{{- end -}}
+
+{{/* An image reference: pass (list $ "api"). A digest, when set, pins it past tag pruning. */}}
+{{- define "slop-haus.image" -}}
+{{- $root := index . 0 -}}
+{{- $img := index $root.Values.image (index . 1) -}}
+{{- if $img.digest -}}
+{{- printf "%s@%s" $img.repository $img.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $img.repository (include "slop-haus.tag" $root) -}}
+{{- end -}}
 {{- end -}}
 
 {{/* An env entry read from the chart's (or the existing) Secret. */}}
@@ -99,6 +115,17 @@ up at install time rather than as a crash loop.
 {{- if and $v.api.intake.enabled (not $v.api.intake.publicBaseUrl) -}}
 {{- fail "api.intake.enabled needs api.intake.publicBaseUrl" -}}
 {{- end -}}
+{{- range $name, $url := dict "api.webhook.publicBaseUrl" (ternary $v.api.webhook.publicBaseUrl "" $v.api.webhook.enabled) "api.intake.publicBaseUrl" (ternary $v.api.intake.publicBaseUrl "" $v.api.intake.enabled) -}}
+{{- if and $url (not (regexMatch "^https?://[^/?#@]+/?$" $url)) -}}
+{{- fail (printf "%s must be an http(s) origin with no path, got %q" $name $url) -}}
+{{- end -}}
+{{- end -}}
+{{- if and $v.api.webhook.enabled (hasPrefix "http://" $v.api.webhook.publicBaseUrl) (not $v.api.allowInsecureHttp) -}}
+{{- fail "api.webhook.publicBaseUrl must be https: GitHub would send every delivery in the clear" -}}
+{{- end -}}
+{{- if and (or $v.api.oidc.issuerUrl $v.api.oidc.clientId) (not (and $v.api.oidc.issuerUrl $v.api.oidc.clientId)) -}}
+{{- fail "api.oidc.issuerUrl and api.oidc.clientId must be set together" -}}
+{{- end -}}
 {{- if and $v.api.attachments.enabled (not $v.api.attachments.endpoint) -}}
 {{- fail "api.attachments.enabled needs api.attachments.endpoint" -}}
 {{- end -}}
@@ -124,13 +151,19 @@ up at install time rather than as a crash loop.
 {{- if and $v.api.credentials.enabled (not $v.secrets.credentialEncryptionKey) -}}
 {{- fail "api.credentials.enabled needs secrets.credentialEncryptionKey" -}}
 {{- end -}}
+{{- if and $v.api.intake.enabled $v.secrets.intakeKey (or (lt (len $v.secrets.intakeKey) 32) (eq $v.secrets.intakeKey $v.secrets.jwtSecret)) -}}
+{{- fail "secrets.intakeKey must be at least 32 bytes and differ from secrets.jwtSecret" -}}
+{{- end -}}
 {{- if and $v.api.attachments.enabled (not $v.secrets.s3Credentials) -}}
 {{- fail "api.attachments.enabled needs secrets.s3Credentials" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 
-{{/* An Ingress to one Service: pass root, ingress (values), name, service, port. */}}
+{{/*
+An Ingress to one Service: pass root, ingress (values), name, service, port,
+and baseUrl, whose host is the rule's when the values name none.
+*/}}
 {{- define "slop-haus.ingress" -}}
 {{- $in := .ingress -}}
 apiVersion: networking.k8s.io/v1
@@ -152,7 +185,7 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    - host: {{ $in.host | quote }}
+    - host: {{ $in.host | default (urlParse .baseUrl).hostname | quote }}
       http:
         paths:
           - path: /

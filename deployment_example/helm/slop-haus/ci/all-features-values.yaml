@@ -2,6 +2,8 @@
 # Placeholders only: nothing here is a real secret.
 image:
   tag: sha-0123456789ab
+  api:
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 publicBaseUrl: https://slop-haus.example.com
 secrets:
   appDbPassword: placeholder-app-db-password

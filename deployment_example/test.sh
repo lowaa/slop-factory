@@ -22,7 +22,7 @@ kubeconform() {
 }
 
 # expect_render_failure VALUES... MESSAGE: the chart refuses those values,
-# naming MESSAGE, as the api would refuse to start on them.
+# naming MESSAGE: values the api would refuse to start on.
 expect_render_failure() {
   local message="${*: -1}" out
   local -a sets=("${@:1:$#-1}")
@@ -54,14 +54,28 @@ done
 echo "-- argo_cd/values-override.yaml"
 helm template slop-haus "${CHART}" -n slop-haus -f argo_cd/values-override.yaml | kubeconform
 
-echo "== the chart refuses what the api would"
+echo "== the chart refuses the commonest values the api would"
+webhook=(--set api.webhook.enabled=true --set api.credentials.enabled=true --set secrets.credentialEncryptionKey=placeholder)
 expect_render_failure --set publicBaseUrl= "publicBaseUrl is required"
 expect_render_failure --set publicBaseUrl=http://slop-haus.example.com "plain http on a non-loopback host"
 expect_render_failure --set secrets.jwtSecret=too-short "at least 32 bytes"
 expect_render_failure --set api.email.backend=smpt "must be log or smtp"
 expect_render_failure --set api.passwordSignIn=false "nobody can sign in"
 expect_render_failure --set api.webhook.enabled=true --set api.webhook.publicBaseUrl=https://hooks.example.com "needs api.credentials.enabled"
+expect_render_failure "${webhook[@]}" --set api.webhook.publicBaseUrl=https://hooks.example.com/github "origin with no path"
+expect_render_failure "${webhook[@]}" --set api.webhook.publicBaseUrl=http://hooks.example.com "must be https"
+expect_render_failure --set api.oidc.issuerUrl=https://sso.example.com --set secrets.oidcClientSecret=x "must be set together"
+expect_render_failure --set api.intake.enabled=true --set api.intake.publicBaseUrl=http://intake:8082 --set secrets.intakeKey=short "secrets.intakeKey must be at least 32 bytes"
 helm template t "${CHART}" -f "${CHART}/ci/minimal-values.yaml" --set publicBaseUrl=http://localhost:8080 > /dev/null
+
+echo "== ingress hosts default to their base URLs"
+hosts="$(helm template t "${CHART}" -f "${CHART}/ci/minimal-values.yaml" "${webhook[@]}" \
+  --set api.webhook.publicBaseUrl=https://hooks.example.com --set ingress.enabled=true --set api.webhook.ingress.enabled=true |
+  grep -E '^    - host: ' | sort | tr -d '\n')"
+[[ "${hosts}" == '    - host: "hooks.example.com"    - host: "slop-haus.example.com"' ]] || {
+  echo "FAIL: ingress hosts were: ${hosts}" >&2
+  exit 1
+}
 
 echo "== argo_cd manifests"
 kubeconform < <(cat "${HERE}/argo_cd/application.yaml" <(echo ---) "${HERE}/argo_cd/appproject.yaml")

@@ -4,12 +4,18 @@
 
 image:
   # Defaults to the chart's appVersion ("main"), which moves with every commit
-  # to main. Pin a sha-<12 hex> or v* tag for production.
+  # to main. Pin a v* tag for production. sha-<12 hex> tags are deleted once
+  # older than 14 days and outside the newest 20 (their images with them), so
+  # use one only short-term, or mirrored to a registry of your own.
   tag: ""
   api:
     repository: ghcr.io/lowaa/slop-haus-api
+    # sha256:..., which takes precedence over the tag: what is pulled can then
+    # never change under the same reference. It does not survive the prune.
+    digest: ""
   frontend:
     repository: ghcr.io/lowaa/slop-haus-frontend
+    digest: ""
   # Empty: Always for the moving `main` tag, IfNotPresent for any other.
   pullPolicy: ""
   pullSecrets: []
@@ -143,6 +149,7 @@ api:
       enabled: false
       className: ""
       annotations: {}
+      # Empty: webhook.publicBaseUrl's host.
       host: ""
       tls: []
   # The intake door (8082) external systems open tickets through
@@ -211,7 +218,8 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
-  host: slop-haus.example.com
+  # Empty: publicBaseUrl's host.
+  host: ""
   tls: []
   #  - secretName: slop-haus-tls
   #    hosts: [slop-haus.example.com]

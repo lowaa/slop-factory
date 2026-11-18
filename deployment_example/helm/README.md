@@ -41,7 +41,7 @@ kubectl -n slop-haus create secret generic slop-haus-secrets \
 helm install slop-haus ./slop-haus -n slop-haus \
   --set publicBaseUrl=https://slop-haus.example.com \
   --set secrets.existingSecret=slop-haus-secrets \
-  --set image.tag=sha-0123456789ab \
+  --set image.tag=v1.2.3 \
   --set ingress.enabled=true --set ingress.host=slop-haus.example.com
 ```
 
@@ -49,8 +49,9 @@ helm install slop-haus ./slop-haus -n slop-haus \
 
 ## Settings the api requires
 
-The api refuses to start without these. The chart checks them at render
-time, so a mistake fails `helm install` instead of looping the api pod:
+The api refuses to start without these. The chart checks them, and the
+commonest invalid combinations, at render time, so those mistakes fail
+`helm install` instead of looping the api pod:
 
 | Setting | Value | Notes |
 | --- | --- | --- |
@@ -95,8 +96,13 @@ since those images and charts have changed distribution terms.)
 
 ## Upgrading
 
-Pin `image.tag` to a `sha-<12 hex>` or `v*` tag. `main` (the chart's
-`appVersion`) moves with every commit, and it is pulled `Always`. On an
+Pin `image.tag` to a `v*` tag. `main` (the chart's `appVersion`) moves with
+every commit, and it is pulled `Always`. A `sha-<12 hex>` tag is deleted once
+it is older than 14 days and outside the newest 20. After that, a pod
+rescheduled to a new node cannot pull it. Use one only short-term, or mirror
+it to your own registry (`image.*.repository`). `image.api.digest` and
+`image.frontend.digest` pin exactly which image a tag resolves to, but they
+do not keep it from being pruned. On an
 upgrade the new api pod runs the migrations while the old pod still serves,
 then takes over once it is ready. Migrations only go forward, so take a
 backup first. Rolling back means restoring that backup.
@@ -105,5 +111,6 @@ backup first. Rolling back means restoring that backup.
 
 `../test.sh` lints the chart and validates its rendered output against the
 Kubernetes schemas with kubeconform, once for each file in `slop-haus/ci/`.
-It also checks that the chart refuses values the api would refuse. CI runs
+It also checks that the chart refuses the commonest values the api would
+refuse at startup. The api's own check (`config.go`) remains the full one. CI runs
 the same script.

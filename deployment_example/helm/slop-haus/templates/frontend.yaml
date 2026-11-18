@@ -2,7 +2,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "slop-haus.fullname" . }}-frontend
+  name: {{ include "slop-haus.componentName" (list . "frontend") }}
   labels:
     {{- include "slop-haus.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: "{{ .Values.image.frontend.repository }}:{{ include "slop-haus.tag" . }}"
+          image: {{ include "slop-haus.image" (list . "frontend") | quote }}
           imagePullPolicy: {{ include "slop-haus.pullPolicy" . }}
           env:
             # Fully qualified: nginx's resolver never applies search domains.
@@ -114,7 +114,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "slop-haus.fullname" . }}-frontend
+  name: {{ include "slop-haus.componentName" (list . "frontend") }}
   labels:
     {{- include "slop-haus.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend

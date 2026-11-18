@@ -27,8 +27,9 @@
    [The chart README](../helm/README.md#settings-the-api-requires) lists the
    keys and what the api requires of each.
 3. Replace the placeholders. `targetRevision` takes a release tag or a full
-   commit SHA of this repository, and `image.tag` takes a `sha-<12 hex>` or
-   `v*` image tag. Then apply the manifests:
+   commit SHA of this repository. `image.tag` takes a `v*` image tag. A
+   `sha-*` tag is pruned after a while, so use one only short-term or
+   mirrored. Then apply the manifests:
    `kubectl apply -n argocd -f appproject.yaml -f application.yaml`.
 4. Sync. Then create the first admin, who invites everyone else. Argo CD
    does not show the chart's `NOTES.txt`, so here is its command. It reads

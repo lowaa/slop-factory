@@ -64,12 +64,14 @@ services:
       LOGS_OTLP_ENDPOINT: ${LOGS_OTLP_ENDPOINT:-}
     healthcheck:
       # /healthz answers 200 once migrations are done and the database
-      # answers a ping.
+      # answers a ping. The start period gives an upgrade's migrations up to
+      # five minutes; the first passing check ends it early.
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 5s
       timeout: 5s
       retries: 12
-      start_period: 30s
+      start_period: 300s
+      start_interval: 2s
     depends_on:
       postgres:
         condition: service_healthy

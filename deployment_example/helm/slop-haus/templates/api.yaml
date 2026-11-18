@@ -55,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: "{{ .Values.image.api.repository }}:{{ include "slop-haus.tag" . }}"
+          image: {{ include "slop-haus.image" (list . "api") | quote }}
           imagePullPolicy: {{ include "slop-haus.pullPolicy" . }}
           envFrom:
             - configMapRef:
@@ -220,7 +220,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "slop-haus.apiName" . }}-webhook
+  name: {{ include "slop-haus.componentName" (list . "api-webhook") }}
   labels:
     {{- include "slop-haus.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
@@ -237,7 +237,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "slop-haus.apiName" . }}-intake
+  name: {{ include "slop-haus.componentName" (list . "api-intake") }}
   labels:
     {{- include "slop-haus.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
@@ -255,7 +255,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "slop-haus.apiName" . }}-metrics
+  name: {{ include "slop-haus.componentName" (list . "api-metrics") }}
   labels:
     {{- include "slop-haus.labels" . | nindent 4 }}
     app.kubernetes.io/component: api

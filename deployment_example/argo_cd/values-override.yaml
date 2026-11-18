@@ -3,7 +3,9 @@
 # are in the slop-haus-secrets Secret, created by hand or by a secrets
 # operator (README.md).
 image:
-  # A sha-<12 hex> or v* tag, never `main`, so a sync deploys what you chose.
+  # A v* tag, never `main`, so a sync deploys what you chose. A sha-* tag is
+  # deleted after a while (14 days, once outside the newest 20): use one only
+  # short-term, or mirrored to your own registry (image.*.repository).
   tag: CHANGE_ME_IMAGE_TAG
 
 publicBaseUrl: https://slop-haus.example.com
