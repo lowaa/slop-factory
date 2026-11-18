@@ -18,8 +18,8 @@ web UI to drive it all. Start at [slop-haus/README.md](slop-haus/README.md).
 
 ## Getting started
 
-You need Docker, Go (the version in `slop-haus/server/go.mod`), Node.js 22
-and [uv](https://docs.astral.sh/uv/).
+You need Docker, Go (the version in `slop-haus/server/go.mod`), Node.js 22.15 or
+newer (the OpenTelemetry SDK's floor) and [uv](https://docs.astral.sh/uv/).
 
 ```
 npm ci --ignore-scripts

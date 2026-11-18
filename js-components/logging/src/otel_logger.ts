@@ -2,7 +2,7 @@ import type { KeyValueStore } from "@slop-factory/storage";
 import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { ConsentCheckingExporter } from "./consent_exporter";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
-import { SeverityNumber, type Logger as OtelApiLogger } from "@opentelemetry/api-logs";
+import { SeverityNumber, type Logger as OtelApiLogger } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import type { Attrs, Logger } from "./logger";
