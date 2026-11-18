@@ -51,14 +51,19 @@ globalThis.EventSource ??= InertEventSource as unknown as typeof EventSource;
 // jsdom has no layout, so a virtualised list would see a zero-height
 // viewport and draw no rows. Give the list's viewport a size, so tests of
 // the pages that use it see rows; the list's own tests pin one explicitly.
+// The virtualizer reads the viewport's clientHeight and, for the row
+// measurements it has no cached size for, offsetHeight.
 const JSDOM_VIEWPORT_HEIGHT = 600;
-const naturalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-  configurable: true,
-  get() {
-    const element = this as HTMLElement;
-    return element.classList.contains("virtual-list__viewport")
-      ? JSDOM_VIEWPORT_HEIGHT
-      : ((naturalOffsetHeight?.get?.call(element) as number | undefined) ?? 0);
-  },
-});
+for (const property of ["offsetHeight", "clientHeight"] as const) {
+  const natural = Object.getOwnPropertyDescriptor(HTMLElement.prototype, property)
+    ?? Object.getOwnPropertyDescriptor(Element.prototype, property);
+  Object.defineProperty(HTMLElement.prototype, property, {
+    configurable: true,
+    get() {
+      const element = this as HTMLElement;
+      return element.classList.contains("virtual-list__viewport")
+        ? JSDOM_VIEWPORT_HEIGHT
+        : ((natural?.get?.call(element) as number | undefined) ?? 0);
+    },
+  });
+}

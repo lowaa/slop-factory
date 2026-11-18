@@ -10,11 +10,15 @@ describe("mockOffsetSize", () => {
     el.id = "wide";
     expect(el.offsetHeight).toBe(600);
     expect(el.offsetWidth).toBe(900);
+    expect(el.clientHeight).toBe(600);
+    expect(el.clientWidth).toBe(900);
   });
 
   it("is gone again in the next test", () => {
     const el = document.createElement("div");
     expect(el.offsetHeight).toBe(0);
     expect(el.offsetWidth).toBe(0);
+    expect(el.clientHeight).toBe(0);
+    expect(el.clientWidth).toBe(0);
   });
 });

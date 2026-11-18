@@ -2,7 +2,7 @@
 # Playwright base image supplies it, with the OS libraries it needs, for the
 # Playwright version this suite's lockfile pins.
 #
-FROM mcr.microsoft.com/playwright:v1.61.1-noble
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 # npm ci must not fetch a second browser beside the image's.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

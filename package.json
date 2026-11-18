@@ -24,7 +24,7 @@
     "jscpd": "5.4.2",
     "jsdom": "^29.1.1",
     "knip": "6.44.1",
-    "oxlint": "1.74.0",
+    "oxlint": "1.91.0",
     "oxlint-tsgolint": "7.0.2005",
     "postcss-scss": "^4.0.9",
     "stylelint": "^17.16.0",
@@ -35,6 +35,9 @@
   "overrides": {
     "openapi-typescript": {
       "typescript": "$typescript"
+    },
+    "oxlint": {
+      "vite-plus": "0.2.9"
     }
   }
 }

@@ -47,6 +47,12 @@ what `lint.sh --changed` runs, and more: the projects a change did not
 touch. The other way, the repo-wide tools in every `test.sh`, would have
 needed the root's full `npm ci` in every job and run knip a dozen times.
 
+**oxlint's `vite-plus` peer.** oxlint lists `vite-plus` as an optional peer,
+and npm still resolves it when the lockfile is regenerated: the latest one
+peers `@vitest/browser-playwright` 5, which conflicts with the 4.x here. The
+root `package.json` overrides oxlint's `vite-plus` to 0.2.9, whose peers are
+4.1.x. Drop the override once vitest 5 lands.
+
 **oxlint on the host.** In CI it runs inside the frontend and js-components
 test images, whose `npm ci` is the root's, of every workspace. `lint.sh`
 runs it on the host instead, where it finds the same with the same install:
@@ -66,7 +72,7 @@ less, so `lint.sh` first checks `node_modules` against the lockfile
 | gocognit | 1.3.0 | MIT | cognitive complexity over 20, not tests | `go.sh` |
 | revive | 1.17.1 | MIT | function length, nesting, context first, argument count (`revive.toml`) | `go.sh` |
 | deadcode | x/tools 0.52.0 | BSD-3-Clause | exported code no main reaches | `go.sh`, for a module with a `deadcode/` directory |
-| oxlint | 1.74.0 | MIT | `oxlintrc.base.json`, type-aware | `oxlint.sh`, from `slop-haus/frontend/native_test.sh` and `js-components/native_test.sh unit` |
+| oxlint | 1.91.0 | MIT | `oxlintrc.base.json`, type-aware | `oxlint.sh`, from `slop-haus/frontend/native_test.sh` and `js-components/native_test.sh unit` |
 | oxlint-tsgolint | 7.0.2005 | MIT | the type-aware rules, for oxlint | with oxlint |
 | knip | 6.44.1 | ISC | unused files, exports, types, dependencies (`/knip.jsonc`) | `repo.sh` |
 | jscpd | 5.4.2 | MIT | duplicated Go and TypeScript (`/.jscpd.json`) | `repo.sh` |

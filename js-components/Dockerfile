@@ -41,7 +41,7 @@ CMD ["js-components/native_test.sh", "unit"]
 
 # The Storybook stories as browser tests, in the Chromium the Playwright image
 # ships for the locked Playwright version.
-FROM mcr.microsoft.com/playwright:v1.61.1-noble AS storybook
+FROM mcr.microsoft.com/playwright:v1.64.1-noble AS storybook
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 

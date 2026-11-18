@@ -41,7 +41,7 @@ COPY slop-haus/docs/guide ./slop-haus/docs/guide
 # be reused across the switch because some packages ship native binaries
 # built per libc. Debian also
 # has the bash agents_panel.test.tsx's `bash -n` check needs.
-FROM mcr.microsoft.com/playwright:v1.61.1-noble AS test
+FROM mcr.microsoft.com/playwright:v1.64.1-noble AS test
 
 # The image already holds the browser the locked Playwright version expects
 # (the base image); npm ci must not fetch another.
