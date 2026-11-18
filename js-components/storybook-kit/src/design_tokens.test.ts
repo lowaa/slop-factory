@@ -2,7 +2,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appTokenGaps, scanTokenUsage, themeTokenSets, tokensDefined, tokensMissingFrom, tokensUsed } from "./design_tokens";
+import {
+  appTokenGaps,
+  scanTokenUsage,
+  stripComments,
+  themeTokenSets,
+  tokensDefined,
+  tokensMissingFrom,
+  tokensUsed,
+} from "./design_tokens";
 
 describe("tokensUsed and tokensDefined", () => {
   it("reads var() calls, with or without a fallback", () => {
@@ -28,6 +36,42 @@ describe("tokensUsed and tokensDefined", () => {
   it("does not take the // of a url() for a comment", () => {
     const source = "a { background: url(https://example.com/x.png); color: var(--y); }";
     expect([...tokensUsed(source)]).toEqual(["--y"]);
+  });
+
+  it("keeps a url() whose // follows a colon, and strips a comment after it", () => {
+    const source = "a { background: url(https://example.com/x.png); } // var(--gone)\nb { color: var(--kept); }";
+    expect(stripComments(source)).toBe("a { background: url(https://example.com/x.png); } \nb { color: var(--kept); }");
+  });
+
+  it("strips a line comment to the end of its line only, and one that ends the source", () => {
+    expect(stripComments("a // one\nb // two")).toBe("a \nb ");
+  });
+
+  it("strips block comments across lines, and one directly after another", () => {
+    expect(stripComments("a/* x\ny */b/**//* z */c")).toBe("abc");
+  });
+
+  it("leaves an unterminated block comment alone, so a glob in a string hides nothing", () => {
+    const source = 'const g = "docs/*.md";\nel.style.setProperty("--after", "1");\na { color: var(--used); }';
+    expect(stripComments(source)).toBe(source);
+    expect([...tokensDefined(source)]).toEqual(["--after"]);
+    expect([...tokensUsed(source)]).toEqual(["--used"]);
+  });
+
+  it("still strips a line comment after an unterminated block comment", () => {
+    expect(stripComments("/* open\na // gone\nb")).toBe("/* open\na \nb");
+  });
+
+  it("does not take /* inside a line comment for a block comment", () => {
+    expect(stripComments("// /* not a block\nvar(--x)")).toBe("\nvar(--x)");
+  });
+
+  // Each `/*` without a `*/` rescanned to the end of the input under the
+  // regex this replaced: quadratic, about 15s at this size. Vitest cannot
+  // interrupt a synchronous loop, so a regression shows as a slow, timed-out run.
+  it("finishes on many unterminated block comments", () => {
+    const source = `a${"/* ".repeat(200_000)}`;
+    expect(stripComments(source)).toBe(source);
   });
 
   it("reads a name passed to setProperty as a definition", () => {

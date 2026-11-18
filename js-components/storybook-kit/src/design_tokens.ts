@@ -15,10 +15,40 @@ const TOKEN_DEFINITION = /(?:(?:^|[;{\s])(--[a-zA-Z0-9_-]+)\s*:|["'`](--[a-zA-Z0
 
 // A token named in a comment is documentation, not a read or a definition.
 // A `//` right after a `:` is a URL scheme (url(https://...)), not a comment.
-const COMMENTS = /\/\*[\s\S]*?\*\/|(?<!:)\/\/[^\n]*/g;
-
-function stripComments(source: string): string {
-  return source.replace(COMMENTS, "");
+// An unterminated `/*` is left as it is: this also reads .ts sources, where a
+// lone `/*` is usually a glob in a string, and it must not hide what follows.
+//
+// A scanner rather than a regex: `/\*[\s\S]*?\*\/` rescans to the end of the
+// input from every `/*` that has no `*/`, which is quadratic.
+export function stripComments(source: string): string {
+  let out = "";
+  let copied = 0;
+  let i = 0;
+  // Once no `*/` is left, no later `/*` can close either.
+  let blockCanClose = true;
+  while (i < source.length) {
+    const isBlock = blockCanClose && source.startsWith("/*", i);
+    const isLine = !isBlock && source.startsWith("//", i) && source[i - 1] !== ":";
+    if (!isBlock && !isLine) {
+      i++;
+      continue;
+    }
+    if (isBlock) {
+      const close = source.indexOf("*/", i + 2);
+      if (close < 0) {
+        blockCanClose = false;
+        continue;
+      }
+      out += source.slice(copied, i);
+      i = close + 2;
+    } else {
+      out += source.slice(copied, i);
+      const newline = source.indexOf("\n", i + 2);
+      i = newline < 0 ? source.length : newline;
+    }
+    copied = i;
+  }
+  return out + source.slice(copied);
 }
 
 export function tokensUsed(source: string): Set<string> {
