@@ -1,0 +1,5 @@
+consent/consenttest/consenttest.go function-length
+dsr/dsrtest/dsrtest.go function-length
+inventory/validate.go function-length
+inventory/validate.go function-length
+telemetry/logs.go function-length

@@ -1,0 +1,67 @@
+{
+  "name": "@slop-factory/ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": [
+    "**/*.scss",
+    "**/*.css"
+  ],
+  "exports": {
+    "./tokens": "./src/tokens.ts",
+    ".": "./src/index.ts",
+    "./dropdown": "./src/dropdown/dropdown.tsx",
+    "./filterable_dropdown": "./src/dropdown/filterable_dropdown.tsx",
+    "./button": "./src/button/button.tsx",
+    "./latest_request": "./src/latest_request/use_latest_request.ts",
+    "./loading_spinner": "./src/loading_spinner/loading_spinner.tsx",
+    "./tooltip": "./src/tooltip/tooltip.tsx",
+    "./modeless_dialog": "./src/modeless_dialog/modeless_dialog.tsx",
+    "./dialog_dock": "./src/modeless_dialog/dialog_dock.tsx",
+    "./markdown_view": "./src/markdown_view/markdown_view.tsx",
+    "./styles": "./src/styles/index.ts",
+    "./styles/layout": "./src/styles/_layout.scss",
+    "./styles/z_index": "./src/styles/_z_index.scss",
+    "./styles/scss_breakpoints": "./src/styles/scss_breakpoints.ts"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "typecheck": "../../node_modules/typescript-native/bin/tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "storybook": "storybook dev -p 6007",
+    "build-storybook": "storybook build",
+    "test:storybook": "vitest run --config vitest.storybook.config.ts"
+  },
+  "peerDependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "dependencies": {
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@slop-factory/storybook-kit": "*",
+    "@storybook/addon-a11y": "^10.6.2",
+    "@storybook/addon-vitest": "^10.6.2",
+    "@storybook/react-vite": "^10.6.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/browser-playwright": "^4.1.10",
+    "jsdom": "^29.1.1",
+    "oxlint": "^1.71.0",
+    "playwright": "^1.61.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "sass": "^1.101.0",
+    "storybook": "^10.6.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
+  }
+}

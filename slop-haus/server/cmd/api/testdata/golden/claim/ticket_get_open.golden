@@ -1,0 +1,22 @@
+-- error: false --
+-- text --
+#1 Scoped work [open, revision 0]
+Build the thing.
+
+Out of scope: the other thing.
+Scopes: server/cmd/b.go, server/internal/a/
+Link: {board}/tickets/1?tenant={tenant}
+-- structured --
+{
+  "body": "Build the thing.\n\nOut of scope: the other thing.",
+  "id": 1,
+  "paths": [
+    "server/cmd/b.go",
+    "server/internal/a/"
+  ],
+  "priority": "high",
+  "revision": 0,
+  "status": "open",
+  "title": "Scoped work",
+  "url": "{board}/tickets/1?tenant={tenant}"
+}

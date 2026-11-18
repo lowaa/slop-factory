@@ -1,0 +1,8 @@
+-- error: false --
+-- text --
+Denied: ticket #1 already holds "srv/c/". Narrow your approach, or release with a comment.
+-- structured --
+{
+  "denied": "Denied: ticket #1 already holds \"srv/c/\". Narrow your approach, or release with a comment.",
+  "granted": false
+}

@@ -1,0 +1,22 @@
+// The look of a text field and of a checkbox, as mixins so a component
+// applies it to its own field selectors without a global input rule, which
+// would restyle every form in the app at once. Buttons are not here: they
+// are @slop-factory/ui's Button.
+
+@mixin text-control {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  resize: vertical;
+
+  &:focus {
+    border-color: var(--color-accent);
+  }
+}
+
+@mixin checkbox-control {
+  width: auto;
+  accent-color: var(--color-accent);
+}

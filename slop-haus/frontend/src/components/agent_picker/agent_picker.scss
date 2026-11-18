@@ -1,0 +1,52 @@
+@use "@/styles/forms";
+@use "@/styles/layout";
+@use "@/styles/typography";
+
+.agent-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+
+  legend {
+    padding: 0 var(--space-1);
+
+    @include typography.heading-label(11px);
+  }
+
+  input[type="text"] {
+    margin-left: var(--space-5);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    color: var(--color-text);
+  }
+
+  &__select {
+    margin-left: var(--space-5);
+    display: flex;
+
+    .dropdown {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .dropdown__trigger {
+      min-height: layout.$touch-target;
+    }
+  }
+
+  &__choice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-md);
+
+    input {
+      @include forms.checkbox-control;
+    }
+  }
+}

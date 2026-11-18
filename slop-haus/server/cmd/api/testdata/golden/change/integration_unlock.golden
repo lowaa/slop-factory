@@ -1,0 +1,8 @@
+-- error: false --
+-- text --
+Integration lock released.
+-- structured --
+{
+  "message": "Integration lock released.",
+  "ok": true
+}

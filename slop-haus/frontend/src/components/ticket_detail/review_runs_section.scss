@@ -1,0 +1,126 @@
+.review-runs {
+  &__muted {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__group {
+    margin-top: var(--space-3);
+
+    h3 {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin: 0 0 var(--space-2);
+      font-size: var(--text-md);
+    }
+  }
+
+  &__runs,
+  &__findings {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__run {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+  }
+
+  &__run-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  &__badge {
+    padding: 0 var(--space-2);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 999px;
+    font-size: var(--text-sm);
+
+    &--current {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+
+    &--bad {
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+    }
+
+    &--warn {
+      font-weight: 600;
+    }
+  }
+
+  &__failure {
+    margin: var(--space-1) 0;
+    color: var(--color-danger);
+    overflow-wrap: anywhere;
+  }
+
+  &__summary {
+    margin: var(--space-1) 0;
+    overflow-wrap: anywhere;
+  }
+
+  &__findings {
+    margin-top: var(--space-1);
+  }
+
+  &__finding-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-1) 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  &__severity {
+    font-size: var(--text-sm);
+    font-weight: 600;
+
+    &--blocker,
+    &--major {
+      color: var(--color-danger);
+    }
+  }
+
+  &__where {
+    overflow-wrap: anywhere;
+  }
+
+  &__finding-body {
+    padding-left: var(--space-3);
+  }
+
+  &__detail {
+    margin: 0 0 var(--space-1);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  &__label {
+    margin: 0;
+    font-size: var(--text-sm);
+
+    &--none {
+      color: var(--color-text-muted);
+    }
+  }
+}

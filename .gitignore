@@ -1,0 +1,42 @@
+# Compiled Form Modules
+*.fmx
+
+# Compiled Menu Modules
+*.mmx
+
+# Compiled Pre-Linked Libraries
+*.plx
+
+.idea
+.fleet
+
+# Local secrets -- never committed.
+.env
+
+**/__pycache__
+**/node_modules
+
+**/*.egg-info
+.aider*
+
+**/*tmp_plan.md
+
+# slop-haus agent workspaces. Any checkout of this repo can be pointed at
+# a slop-haus server (see slop-haus/README.md), which writes these into it.
+# All of them are per-checkout: .slop-haus.env holds that agent's bearer
+# token, and settings.json names an absolute path on one machine.
+.slop-haus/
+.slop-haus.env
+.mcp.json
+.claude/settings.json
+.claude/settings.local.json
+.claude/agents/ticket-worker.md
+
+# dev-tools/style-check/coverage/collect_stories.mjs: a scratch Storybook config
+.storybook-css-coverage-*/
+security-reports/
+
+**/*.iml
+
+# Claude Code agent worktrees, created inside the checkout
+.claude/worktrees/

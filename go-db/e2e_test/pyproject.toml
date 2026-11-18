@@ -1,0 +1,12 @@
+[project]
+name = "go-db-e2e-tests"
+version = "0.1.0"
+description = "Playwright e2e tests driving go-db's demo-api over real HTTP, proving tenant isolation end-to-end"
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.48,<2",
+    "pytest>=8.3,<9",
+]
+
+[tool.uv]
+package = false

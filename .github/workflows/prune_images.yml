@@ -1,0 +1,48 @@
+name: prune-images
+
+# ghcr.io keeps every version forever. This trims what publish_images.yml
+# pushes, and its exclude-tags must follow that workflow's tag scheme:
+#   kept always   v* (releases) and `main`
+#   kept          everything younger than older-than, and the newest
+#                 keep-n-tagged sha-* tags older than that
+#   deleted       older sha-* tags and untagged versions
+# The grace period covers a push in progress (its manifests land before the
+# tag does) and anything that pulled by digest.
+#
+# A plain "delete untagged versions" (actions/delete-package-versions) is not
+# safe here: buildx pushes each image as an index whose platform image and
+# provenance attestation are untagged versions of their own, and deleting
+# those breaks the tagged image. ghcr-cleanup-action walks the index.
+on:
+  schedule:
+    - cron: "41 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Log what would be deleted without deleting it
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prune-images
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          packages: slop-haus-api,slop-haus-frontend
+          exclude-tags: v*,main
+          keep-n-tagged: 20
+          delete-untagged: true
+          older-than: 14 days
+          # Scheduled runs have no inputs: delete for real.
+          dry-run: ${{ inputs.dry-run || false }}

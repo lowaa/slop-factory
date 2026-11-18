@@ -1,0 +1,22 @@
+-- error: false --
+-- text --
+https://github.com/acme/repo/pull/12: checks on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa are failure
+- lint: success
+- test: failure
+-- structured --
+{
+  "checks": [
+    {
+      "name": "lint",
+      "state": "success"
+    },
+    {
+      "name": "test",
+      "state": "failure"
+    }
+  ],
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "passed": false,
+  "state": "failure",
+  "url": "https://github.com/acme/repo/pull/12"
+}

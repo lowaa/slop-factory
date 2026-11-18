@@ -1,0 +1,86 @@
+.ticket-history {
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+  }
+
+  // Reads like a comment's "who and when" line, since that is what it is.
+  &__meta {
+    display: flex;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  &__title {
+    margin: 0;
+    font-size: var(--text-md);
+    overflow-wrap: anywhere;
+
+    del {
+      color: var(--color-text-muted);
+    }
+
+    ins {
+      text-decoration: none;
+      font-weight: 600;
+    }
+  }
+
+  &__body {
+    font-size: var(--text-sm);
+
+    summary {
+      cursor: pointer;
+      color: var(--color-text-muted);
+    }
+  }
+
+  // Monospaced with whitespace kept, like the description itself, so an
+  // indented line diffs the way it reads.
+  &__diff {
+    margin: var(--space-2) 0 0;
+    padding: var(--space-1-5) 0;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  &__diff-line,
+  &__diff-gap {
+    display: block;
+    padding: 0 var(--space-2);
+  }
+
+  &__diff-line--delete {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+  }
+
+  &__diff-line--insert {
+    color: var(--color-success);
+    font-weight: 600;
+  }
+
+  &__diff-gap {
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+}

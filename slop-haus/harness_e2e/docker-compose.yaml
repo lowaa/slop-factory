@@ -1,0 +1,135 @@
+# Overlay for ../docker-compose-dev.yaml: the slop-haus stack the e2e suite
+# uses (api, Postgres, the seeded account, the frontend), plus the scripted
+# model server and one container per harness. Dex, the fake GitHub and the
+# Playwright runner of ../e2e_playwright_ts are not here: the suite signs in
+# with the seeded password and needs no code host.
+#
+# Like that overlay, it unpublishes the base file's host ports so concurrent
+# runs coexist, and gives the api the origin the harness reaches it on.
+#
+# The harness containers are on `harness-net` alone, which is `internal`:
+# they reach the frontend (so the api, through its one origin) and the
+# scripted model server, and nothing else -- no internet, no other service.
+# That is what makes the suite hermetic, and what turns any outward
+# dependency of a harness into a failed connection instead of a quiet one.
+x-harness: &harness
+  # Only run explicitly (test.sh), once the rest is up.
+  profiles:
+    - harness
+  environment:
+    - HARNESS_E2E_SERVER=http://frontend:80
+    - HARNESS_E2E_MODEL_SERVER=http://scripted-model:8000
+    - HARNESS_E2E_EMAIL=${DEV_USER_EMAIL:-dev@slop-haus.local}
+    - HARNESS_E2E_PASSWORD=${DEV_USER_PASSWORD:-slop-haus-dev-password}
+    - HARNESS_E2E_TIMEOUT=${HARNESS_E2E_TIMEOUT:-30}
+    - HARNESS_E2E_INTERACTIVE_HOOKS=${HARNESS_E2E_INTERACTIVE_HOOKS:-0}
+    - HARNESS_E2E_REQUIRE_SANDBOX=${HARNESS_E2E_REQUIRE_SANDBOX:-0}
+  depends_on:
+    frontend:
+      condition: service_healthy
+    seed:
+      condition: service_completed_successfully
+    scripted-model:
+      condition: service_healthy
+  networks:
+    - harness-net
+
+services:
+  postgres:
+    ports: !override []
+    # In memory, as in ../e2e_playwright_ts's overlay (which says why).
+    volumes: !override []
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  mailhog:
+    ports: !override []
+
+  api:
+    ports: !override []
+    # A name of this run's own (test.sh sets HARNESS_E2E_API_IMAGE), so
+    # concurrent runs on one daemon cannot retag each other's build.
+    image: ${HARNESS_E2E_API_IMAGE:?set by test.sh}
+    environment:
+      # The address the harness containers reach the board on: the issuer
+      # and every link the server builds are made from it.
+      - PUBLIC_BASE_URL=http://frontend:80
+      # config.go refuses plain http on anything but a loopback host; this
+      # stack is thrown away at the end of every run.
+      - ALLOW_INSECURE_HTTP=true
+      # The scenarios claim in a tenant with no repo declared.
+      - SETUP_CLAIM_GATE=false
+
+  seed:
+    image: ${HARNESS_E2E_API_IMAGE:?set by test.sh}
+
+  frontend:
+    ports: !override []
+    # The harness waits on it: the board's one origin is its only way in.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - slophaus-network
+      - harness-net
+
+  scripted-model:
+    build:
+      # Relative to ../docker-compose-dev.yaml's directory, like every build
+      # path in an overlay.
+      context: harness_e2e
+      dockerfile: Dockerfile
+      target: scripted-model
+    environment:
+      # Short, so a gate nobody opens fails the run in seconds.
+      - SCRIPTED_MODEL_GATE_TIMEOUT=${HARNESS_E2E_GATE_TIMEOUT:-60}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - harness-net
+
+  harness-claude:
+    <<: *harness
+    build:
+      context: harness_e2e
+      dockerfile: Dockerfile
+      target: harness-claude
+      args:
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:?set by test.sh}
+
+  harness-pi:
+    <<: *harness
+    build:
+      context: harness_e2e
+      dockerfile: Dockerfile
+      target: harness-pi
+      args:
+        PI_VERSION: ${PI_VERSION:?set by test.sh}
+
+  harness-codex:
+    <<: *harness
+    # Codex confines the steward's shell with bubblewrap, which needs user namespaces: Docker's default
+    # seccomp profile and AppArmor policy refuse them. The container stays on the internal network.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      # bubblewrap mounts a fresh /proc, which a container's masked paths forbid.
+      - systempaths=unconfined
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+    build:
+      context: harness_e2e
+      dockerfile: Dockerfile
+      target: harness-codex
+      args:
+        CODEX_VERSION: ${CODEX_VERSION:?set by test.sh}
+
+networks:
+  harness-net:
+    internal: true

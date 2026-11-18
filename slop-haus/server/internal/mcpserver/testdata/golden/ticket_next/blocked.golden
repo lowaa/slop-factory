@@ -1,0 +1,7 @@
+-- error: false --
+-- text --
+No ticket available. #7 is next but its scope "server/internal/mcpserver/" is held by ticket #5. Nothing can be taken until it frees: stop here.
+-- structured --
+{
+  "blocked": "No ticket available. #7 is next but its scope \"server/internal/mcpserver/\" is held by ticket #5. Nothing can be taken until it frees: stop here."
+}

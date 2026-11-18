@@ -1,0 +1,33 @@
+{
+  "schema_version": 2,
+  "id": "6f1d2c3b-4a5e-4f60-8a7b-1c2d3e4f5a6b",
+  "kind": "review",
+  "repo_remote": "git@github.com:example/widgets.git",
+  "branch": "feature",
+  "base_ref": "0123456789abcdef0123456789abcdef01234567",
+  "head_sha": "89abcdef0123456789abcdef0123456789abcdef",
+  "head_author": "Ada Lovelace <ada@example.com>",
+  "dirty": true,
+  "scope_path": "slop-review/",
+  "diff": "diff --git a/a.go b/a.go\n+new line\n",
+  "tool_version": {"kind": "git_sha", "value": "c4ca88d", "attributes": {"dirty": "false"}},
+  "provider": "openrouter",
+  "model": "openai/gpt-5.6-luna-pro",
+  "personas": ["security", "standard"],
+  "config": {"max_turns": 40, "max_diff_bytes": 200000, "chunk_diff_bytes": 60000, "context_budget_bytes": 400000, "parallelism": 4, "seam_pass": true, "allow_secrets": false},
+  "verdict": "request_changes",
+  "summary": "Merged from 2 review sessions.",
+  "incomplete": false,
+  "warnings": ["standard: 1 changed file(s) were never looked at by this review: b.go"],
+  "sessions": [
+    {"persona": "security", "part": 1, "parts": 1, "files": ["a.go"], "verdict": "approve", "summary": "fine", "findings": 0,
+     "turns": 3, "elisions": 0, "input_tokens": 1200, "output_tokens": 300, "duration_ms": 4100},
+    {"persona": "standard", "part": 1, "parts": 1, "files": ["a.go", "b.go"], "verdict": "request_changes", "summary": "a bug", "findings": 1,
+     "incomplete": true, "turns": 40, "elisions": 2, "unseen_files": ["b.go"], "input_tokens": 90000, "output_tokens": 2100, "duration_ms": 61000}
+  ],
+  "findings": [
+    {"id": "0b9f8e7d-6c5b-4a39-8281-7f6e5d4c3b2a", "file": "a.go", "line": 3, "severity": "major", "summary": "nil dereference", "detail": "d", "personas": ["standard"]}
+  ],
+  "started_at": "2026-09-25T10:00:00Z",
+  "finished_at": "2026-09-25T10:01:05Z"
+}

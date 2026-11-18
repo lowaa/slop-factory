@@ -1,0 +1,10 @@
+# <file> <symbol> #<ticket that wires it>
+# Delete the line when that ticket merges.
+internal/landing/states.go Allowed #1697
+internal/landing/states.go Causes #1697
+internal/landing/states.go CausesOf #1697
+internal/landing/states.go EntryState.CanMoveTo #1697
+internal/landing/states.go EntryState.Valid #1697
+internal/landing/states.go From #1697
+internal/landing/states.go Transition.String #1697
+internal/landing/states.go Transitions #1697

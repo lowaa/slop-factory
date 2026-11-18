@@ -1,0 +1,23 @@
+# gitleaks config for dev-tools/security/scan_lib.sh (scan_secrets).
+# Every allowlist entry needs a reason. Allowlist whole files only for test
+# fixtures whose values were read and are made up; a real-looking value
+# stays a finding for the owner to rotate.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Build output that is never committed"
+paths = ['''(^|/)__pycache__/''', '''(^|/)node_modules/''']
+
+[[allowlists]]
+description = "Made-up credentials in tests and fixtures (checked by hand when this file was written)"
+paths = [
+  '''slop-haus/server/internal/secretscan/secretscan_test\.go''',    # it tests the secret detector, so holds secret-shaped strings
+  '''slop-haus/server/cmd/api/serve_test\.go''',                     # a-jwt-secret placeholders
+  '''slop-haus/server/internal/intake/fixture_test\.go''',           # 0123456789ab... placeholder
+  '''slop-haus/server/internal/workspace/assets/ts/pi-extension\.test\.ts''', # sk-live-0123... placeholder
+  '''slop-haus/frontend/src/components/github_app_panel/github_app_panel\.stories\.tsx''', # 0123456789ab... placeholder
+  '''slop-haus/e2e_playwright_ts/docker-compose-dev\.e2e\.yaml''',   # base64 of "e2e-only-credential-key-not-real"
+  '''slop-haus/supervisor/tests/remote_control/(pi/test_pi_rpc|codex/test_codex_records|claude/test_claude_records)\.py''', # sk-live-0123... placeholder
+]

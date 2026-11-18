@@ -1,0 +1,135 @@
+@use "@/styles/layout";
+
+// The header row stays one line; the panel drops over the page below it
+// rather than pushing the page down, and spans the header's full width
+// (.app__header is its positioned ancestor).
+.header-menu {
+  &__button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: layout.$touch-target;
+    height: layout.$touch-target;
+    padding: 0;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--color-text);
+    cursor: pointer;
+
+    &[aria-expanded="true"] {
+      border-color: var(--color-accent);
+      color: var(--color-accent-hot);
+    }
+  }
+
+  // The pending-approvals count, pinned to the button's corner.
+  &__button .app__badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    margin: 0;
+  }
+
+  // Three bars drawn from one element: the bar itself and two shadows.
+  &__icon {
+    width: 18px;
+    height: 2px;
+    border-radius: 1px;
+    background: currentcolor;
+    box-shadow:
+      0 -6px 0 currentcolor,
+      0 6px 0 currentcolor;
+  }
+
+  &__panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: var(--z-menu);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+    // The panel can be taller than a phone held sideways.
+    max-height: calc(100dvh - 100%);
+    overflow-y: auto;
+    padding: var(--space-3-5);
+    background: var(--color-bg-raised);
+    border-bottom: 1px solid var(--color-border);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+
+    &[hidden] {
+      display: none;
+    }
+  }
+}
+
+// The desktop header's More and account menus: a text button styled like a
+// tab, with a panel dropped from the button rather than across the header.
+.header-menu {
+  &--dropdown {
+    position: relative;
+  }
+
+  &--dropdown &__button {
+    gap: var(--space-1-5);
+    width: auto;
+    height: auto;
+    padding: var(--space-1-5) 10px;
+    border-color: transparent;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+    transition:
+      color 120ms ease,
+      background 120ms ease;
+
+    &:hover {
+      color: var(--color-text);
+      background: var(--color-bg-muted);
+    }
+
+    &[aria-expanded="true"] {
+      border-color: var(--color-border-strong);
+      color: var(--color-text);
+    }
+  }
+
+  // Marked as .app__nav-item--active is, so a page in the More menu still
+  // shows which tab is open.
+  &--dropdown &__button--active,
+  &--dropdown &__button--active[aria-expanded="true"] {
+    color: var(--color-accent-hot);
+    background: var(--color-bg-muted);
+    border-color: var(--color-accent-dim);
+  }
+
+  &__caret {
+    width: 6px;
+    height: 6px;
+    margin-top: -3px;
+    border-right: 1.5px solid currentcolor;
+    border-bottom: 1.5px solid currentcolor;
+    transform: rotate(45deg);
+  }
+
+  &--dropdown &__panel {
+    top: calc(100% + var(--space-1));
+    right: auto;
+    width: max-content;
+    max-width: calc(100vw - 2 * var(--space-5));
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+  }
+
+  &--start &__panel {
+    left: 0;
+  }
+
+  &--end &__panel {
+    right: 0;
+    left: auto;
+  }
+}

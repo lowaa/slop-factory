@@ -1,0 +1,36 @@
+**
+
+!package.json
+!package-lock.json
+# oxlint skips whatever .gitignore does -- without these it lints node_modules.
+!.gitignore
+
+!js-components/native_test.sh
+!js-components/stylelint-baseline.json
+
+# The style guard: shared config and the ratchet that compares against the baseline.
+!stylelint.config.mjs
+!dev-tools/style-check/stylelint_ratchet/ratchet.mjs
+
+# The oxlint ratchet: the scripts, the shared config and the baseline.
+!dev-tools/lint/oxlint.sh
+!dev-tools/lint/ratchet.sh
+!dev-tools/lint/findings.mjs
+!dev-tools/lint/oxlintrc.base.json
+!js-components/lint_baseline
+!js-components/lint_baseline/**
+
+!js-components/*/package.json
+!js-components/*/tsconfig.json
+!js-components/*/vitest.config.ts
+!js-components/*/vitest.storybook.config.ts
+!js-components/*/.oxlintrc.json
+!js-components/*/.gitignore
+!js-components/*/.storybook
+!js-components/*/.storybook/**
+!js-components/*/src
+!js-components/*/src/**
+
+# The open-redirect cases router's safe_redirect_path.test.ts shares with
+# go-auth's LocalRedirect tests.
+!go-auth/login/testdata/local_redirect_cases.json

@@ -1,0 +1,104 @@
+@use "@/styles/layout";
+
+.processing-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+
+  &--muted {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    letter-spacing: 0.06em;
+  }
+
+  &__switch {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1-5);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 999px;
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+
+    &:hover:not(:disabled) {
+      border-color: var(--color-accent);
+    }
+
+    &:disabled {
+      cursor: progress;
+      opacity: 0.6;
+    }
+
+    // Paused is the state worth noticing across the room: the fleet looks
+    // idle either way, and the difference between "nothing to do" and
+    // "somebody switched it off" is the thing this bar exists to say.
+    &--off {
+      color: var(--color-warning);
+      border-color: var(--color-warning);
+    }
+
+    &--on {
+      color: var(--color-success);
+      border-color: var(--color-border-strong);
+    }
+  }
+
+  &__track {
+    position: relative;
+    display: inline-block;
+    width: 26px;
+    height: 14px;
+    border-radius: 999px;
+    background: var(--color-bg-muted);
+    border: 1px solid var(--color-border-strong);
+  }
+
+  &__thumb {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: currentcolor;
+    // The thumb moves, so the state is readable without relying on the
+    // colour change alone.
+    transition: transform 120ms ease;
+  }
+
+  &__switch--on &__thumb {
+    transform: translateX(12px);
+  }
+
+  &__switch--on &__track {
+    border-color: var(--color-success);
+  }
+
+  &__switch--off &__track {
+    border-color: var(--color-warning);
+  }
+
+  &__hint {
+    color: var(--color-text-muted);
+    // Hidden on narrow windows: the switch and its label already say the
+    // state, and the header wraps badly once this is in the way.
+    @include layout.hint {
+      display: none;
+    }
+  }
+
+  &__error {
+    color: var(--color-danger);
+  }
+}

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# A pre-commit hook that keeps the Go module building and
+# formatted -- the full test suite needs Docker and is far too slow for a
+# commit hook, so that stays in server/test.sh and CI.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+cd "$SCRIPT_DIR/../server"
+
+unformatted=$(gofmt -l .)
+if [[ -n "$unformatted" ]]; then
+  echo "slop-haus: gofmt needed for:" >&2
+  echo "$unformatted" >&2
+  exit 1
+fi
+
+go build ./...
+go vet ./...

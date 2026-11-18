@@ -1,0 +1,1963 @@
+{
+ "cases": [
+  {
+   "operation": "revokeAdminInvite",
+   "params": {
+    "id": "@unmade"
+   }
+  },
+  {
+   "operation": "listAdminInvites"
+  },
+  {
+   "operation": "adminCheck"
+  },
+  {
+   "operation": "createAdminInvite",
+   "body": {
+    "email": "x@example.invalid"
+   }
+  },
+  {
+   "operation": "unlockIntegration"
+  },
+  {
+   "operation": "retireSupervisorSlot",
+   "params": {
+    "id": "@slot"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "releaseSupervisorStewardLease"
+  },
+  {
+   "operation": "getOwnDesiredState"
+  },
+  {
+   "operation": "getSupervisorPackage"
+  },
+  {
+   "operation": "listSupervisorSlots"
+  },
+  {
+   "operation": "getSupervisorStewardAgreement"
+  },
+  {
+   "operation": "getSupervisorStewardBriefing"
+  },
+  {
+   "operation": "listSupervisorStewardEvents"
+  },
+  {
+   "operation": "getSupervisorStewardMode"
+  },
+  {
+   "operation": "getSupervisorView"
+  },
+  {
+   "operation": "getWorkerState"
+  },
+  {
+   "operation": "getWorkspaceHarnessConfig"
+  },
+  {
+   "operation": "getWorkspaceUpdateScript"
+  },
+  {
+   "operation": "getWorkspaceManifestForSlot"
+  },
+  {
+   "operation": "acquireHostLease",
+   "body": {
+    "holder": "h"
+   }
+  },
+  {
+   "operation": "releaseHostLease",
+   "body": {
+    "holder": "h"
+   }
+  },
+  {
+   "operation": "renewHostLease",
+   "body": {
+    "holder": "h"
+   }
+  },
+  {
+   "operation": "claimNext"
+  },
+  {
+   "operation": "escalateClaim",
+   "body": {
+    "note": "n"
+   }
+  },
+  {
+   "operation": "heartbeat"
+  },
+  {
+   "operation": "releaseClaim",
+   "body": {
+    "reason": "r"
+   }
+  },
+  {
+   "operation": "recordClaimSession",
+   "body": {
+    "harness": "claude",
+    "session_id": "s"
+   }
+  },
+  {
+   "operation": "reportConductorEvents",
+   "params": {
+    "conversation_id": "@conversation"
+   },
+   "body": {
+    "host_id": "@unmade",
+    "events": []
+   }
+  },
+  {
+   "operation": "reportConductorLayout",
+   "body": {
+    "root": {
+     "name": "r",
+     "kind": "dir"
+    },
+    "repos": []
+   }
+  },
+  {
+   "operation": "pollConductorWork",
+   "body": {
+    "host_id": "@unmade",
+    "wait_seconds": 0
+   }
+  },
+  {
+   "operation": "releaseConductor",
+   "body": {
+    "host_id": "@unmade"
+   }
+  },
+  {
+   "operation": "lockIntegration"
+  },
+  {
+   "operation": "reportSupervisorObserved",
+   "body": {
+    "agents": []
+   }
+  },
+  {
+   "operation": "issueSupervisorRemoteControlCredential",
+   "params": {
+    "name": "rc"
+   }
+  },
+  {
+   "operation": "revokeSupervisorRemoteControlCredential",
+   "params": {
+    "name": "rc"
+   },
+   "body": {
+    "refresh_token": "x"
+   }
+  },
+  {
+   "operation": "createSupervisorSlot",
+   "body": {
+    "name": "slot-new"
+   }
+  },
+  {
+   "operation": "adoptSupervisorSlot",
+   "body": {
+    "name": "slot-adopt"
+   }
+  },
+  {
+   "operation": "issueSupervisorSlotCredential",
+   "params": {
+    "id": "@slot"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "issueSupervisorStewardCredential"
+  },
+  {
+   "operation": "revokeSupervisorStewardCredential",
+   "body": {
+    "refresh_token": "x"
+   }
+  },
+  {
+   "operation": "acquireSupervisorStewardLease"
+  },
+  {
+   "operation": "pollWorker",
+   "body": {
+    "wait_seconds": 0
+   }
+  },
+  {
+   "operation": "reportWorkerSlot",
+   "body": {
+    "phase": "idle",
+    "phase_age_seconds": 0
+   }
+  },
+  {
+   "operation": "sessionStartHook",
+   "body": {
+    "session_id": "s",
+    "cwd": "/tmp"
+   }
+  },
+  {
+   "operation": "stopHook",
+   "body": {
+    "session_id": "s",
+    "cwd": "/tmp"
+   }
+  },
+  {
+   "operation": "usageHook",
+   "body": {
+    "transcript_key": "k",
+    "harness": "claude",
+    "session_id": "s",
+    "scope": "x",
+    "records": []
+   }
+  },
+  {
+   "operation": "userPromptSubmitHook",
+   "body": {
+    "session_id": "s",
+    "cwd": "/tmp"
+   }
+  },
+  {
+   "operation": "ensureSupervisorRemoteControlHost",
+   "params": {
+    "name": "rc"
+   }
+  },
+  {
+   "operation": "ensureSupervisorSteward"
+  },
+  {
+   "operation": "deleteAgentRole",
+   "params": {
+    "id": "@role"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "removeAgentHarnessConfig",
+   "params": {
+    "id": "@agent"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "removeIdentity",
+   "query": "provider=nosuchprovider&subject=nosuchsubject"
+  },
+  {
+   "operation": "removePassword"
+  },
+  {
+   "operation": "removeGitHubAppCredential",
+   "owner_only": true
+  },
+  {
+   "operation": "deleteConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "revokeIntakeSource",
+   "params": {
+    "id": "@intake_source"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "forceUnlockIntegration"
+  },
+  {
+   "operation": "dropIntegrationLockWaiter",
+   "params": {
+    "agent_id": "@agent"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "revokeInvite",
+   "params": {
+    "id": "@invite"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "revokeGrant",
+   "params": {
+    "id": "@grant"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "removeTicketBlocker",
+   "params": {
+    "id": "@ticket",
+    "blockerId": "@ticket2"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "clearWorkspaceManifest",
+   "owner_only": true
+  },
+  {
+   "operation": "listAgentRoles"
+  },
+  {
+   "operation": "listAgentMessages"
+  },
+  {
+   "operation": "listAgents"
+  },
+  {
+   "operation": "getAgent",
+   "params": {
+    "id": "@agent"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getMe"
+  },
+  {
+   "operation": "listSignInMethods"
+  },
+  {
+   "operation": "listTenants"
+  },
+  {
+   "operation": "getBoard"
+  },
+  {
+   "operation": "getGitHubAppCredential"
+  },
+  {
+   "operation": "getGitHubAppWebhook"
+  },
+  {
+   "operation": "listConductors"
+  },
+  {
+   "operation": "conductorDirectory"
+  },
+  {
+   "operation": "listConversations",
+   "params": {
+    "id": "@conductor"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "getConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "listConversationEvents",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "streamConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "getConductorHost",
+   "params": {
+    "id": "@conductor"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "getFleetInstructions"
+  },
+  {
+   "operation": "getFleetBriefings"
+  },
+  {
+   "operation": "listGitHubWebhooks"
+  },
+  {
+   "operation": "getHarnessConfig"
+  },
+  {
+   "operation": "listIntakeSources"
+  },
+  {
+   "operation": "getIntegrationLock"
+  },
+  {
+   "operation": "getIntegrationLocks"
+  },
+  {
+   "operation": "listInvites"
+  },
+  {
+   "operation": "getLandingCapabilities"
+  },
+  {
+   "operation": "listLandingQueue"
+  },
+  {
+   "operation": "listMySettings"
+  },
+  {
+   "operation": "listMyTenantSettings"
+  },
+  {
+   "operation": "getMyTenantSetting",
+   "params": {
+    "name": "some_setting"
+   }
+  },
+  {
+   "operation": "listMyTenantSettingHistory",
+   "params": {
+    "name": "some_setting"
+   }
+  },
+  {
+   "operation": "listMembers"
+  },
+  {
+   "operation": "listGrants"
+  },
+  {
+   "operation": "getAuthRequest",
+   "params": {
+    "id": "@unmade"
+   }
+  },
+  {
+   "operation": "getOnboardingStatus"
+  },
+  {
+   "operation": "listProposals"
+  },
+  {
+   "operation": "getProposal",
+   "params": {
+    "id": "@proposal"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getQueueBlockage"
+  },
+  {
+   "operation": "getReplayBatchLimits"
+  },
+  {
+   "operation": "getReport"
+  },
+  {
+   "operation": "getLLMUsageReport"
+  },
+  {
+   "operation": "getLLMUsageTickets"
+  },
+  {
+   "operation": "getLockHistoryReport"
+  },
+  {
+   "operation": "getScopeCostReport"
+  },
+  {
+   "operation": "getShadowDecisionsReport"
+  },
+  {
+   "operation": "getReportWaiting",
+   "query": "status=open&priority=normal"
+  },
+  {
+   "operation": "listSettings"
+  },
+  {
+   "operation": "getSetting",
+   "params": {
+    "name": "some_setting"
+   }
+  },
+  {
+   "operation": "getSettingHistory",
+   "params": {
+    "name": "some_setting"
+   }
+  },
+  {
+   "operation": "getStewardDigest"
+  },
+  {
+   "operation": "getStewardNotices"
+  },
+  {
+   "operation": "getSupervisorSetupScript"
+  },
+  {
+   "operation": "getSupervisorStatus"
+  },
+  {
+   "operation": "listSupervisors"
+  },
+  {
+   "operation": "getSupervisorDesiredState",
+   "params": {
+    "id": "@supervisor"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "getSupervisorUnmanagedSlots",
+   "params": {
+    "id": "@supervisor"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "listArchivedTenants"
+  },
+  {
+   "operation": "listTickets"
+  },
+  {
+   "operation": "listBlockedTickets"
+  },
+  {
+   "operation": "getBlockingGraph"
+  },
+  {
+   "operation": "streamBoardChanges"
+  },
+  {
+   "operation": "getTicket",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getBlockerCandidates",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getTicketBlockers",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "listTicketComments",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true,
+   "accept": [
+    200
+   ],
+   "note": "Lists answer 200 with an empty list for a ticket the caller's tenant does not have, as for any number it lacks; the leak check on the body is what bites."
+  },
+  {
+   "operation": "listTicketAgentContexts",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true,
+   "accept": [
+    200
+   ],
+   "note": "Lists answer 200 with an empty list for a ticket the caller's tenant does not have, as for any number it lacks; the leak check on the body is what bites."
+  },
+  {
+   "operation": "listTicketExternal",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getTicketLLMUsage",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getTicketMergeFacts",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "listTicketRevisions",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "listTicketStatusHistory",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getDiscussionDraft",
+   "params": {
+    "ticket_id": "@ticket",
+    "attempt": 1,
+    "round": 1
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "listVariants",
+   "owner_only": true
+  },
+  {
+   "operation": "listVariantOptions"
+  },
+  {
+   "operation": "listEvalSets"
+  },
+  {
+   "operation": "createEvalSet",
+   "body": {
+    "name": "probe",
+    "description": "",
+    "ticket_ids": []
+   }
+  },
+  {
+   "operation": "getEvalSet",
+   "params": {
+    "id": "@evalset"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "replaceEvalSet",
+   "params": {
+    "id": "@evalset"
+   },
+   "body": {
+    "name": "probe",
+    "description": "",
+    "ticket_ids": []
+   },
+   "foreign": true
+  },
+  {
+   "operation": "deleteEvalSet",
+   "params": {
+    "id": "@evalset"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "pinEvalSetMatches",
+   "params": {
+    "id": "@evalset"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "runEvalSet",
+   "params": {
+    "id": "@evalset"
+   },
+   "body": {
+    "version_ids": [
+     null
+    ],
+    "runs": 1,
+    "confirm_attempts": 1
+   },
+   "foreign": true,
+   "accept": [
+    404,
+    409
+   ],
+   "note": "an empty set answers 409 and a server without replays 404, before any ticket is touched"
+  },
+  {
+   "operation": "listEvalSetBatches",
+   "params": {
+    "id": "@evalset"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getWorkspace"
+  },
+  {
+   "operation": "updateAgentRole",
+   "params": {
+    "id": "@role"
+   },
+   "body": {
+    "name": "renamed"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "setAgentDisabled",
+   "params": {
+    "id": "@agent"
+   },
+   "body": {
+    "disabled": false
+   },
+   "foreign": true
+  },
+  {
+   "operation": "setConductorDisabled",
+   "params": {
+    "id": "@conductor"
+   },
+   "body": {
+    "disabled": false
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "renameConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "body": {
+    "title": "t"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "updateSetting",
+   "params": {
+    "name": "some_setting"
+   },
+   "body": {
+    "type": "string",
+    "string_val": "x"
+   }
+  },
+  {
+   "operation": "setSupervisorDisabled",
+   "params": {
+    "id": "@supervisor"
+   },
+   "body": {
+    "disabled": false
+   },
+   "foreign": true
+  },
+  {
+   "operation": "setSupervisorSlotCap",
+   "params": {
+    "id": "@supervisor"
+   },
+   "body": {
+    "slot_cap": 4
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "renameTenant",
+   "body": {
+    "name": "renamed"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "updateTicket",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "priority": "normal"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "createAgentRole",
+   "body": {
+    "name": "r-new"
+   }
+  },
+  {
+   "operation": "createAgent",
+   "body": {
+    "name": "agent-new"
+   }
+  },
+  {
+   "operation": "createAgentSetupScript",
+   "body": {
+    "name": "agent-new2"
+   }
+  },
+  {
+   "operation": "archiveAgent",
+   "params": {
+    "id": "@agent"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "sendAgentMessage",
+   "params": {
+    "id": "@agent"
+   },
+   "body": {
+    "body": "hello"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "rotateAgentSetupScript",
+   "params": {
+    "id": "@agent"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "unarchiveAgent",
+   "params": {
+    "id": "@agent"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "startProviderLink",
+   "params": {
+    "provider": "nosuchprovider"
+   }
+  },
+  {
+   "operation": "reauthWithPassword",
+   "body": {
+    "password": "x"
+   },
+   "accept": [
+    401
+   ],
+   "note": "Checks the caller's own password; the wrong one is refused as such."
+  },
+  {
+   "operation": "startProviderReauth",
+   "params": {
+    "provider": "nosuchprovider"
+   }
+  },
+  {
+   "operation": "switchTenant",
+   "body": {
+    "tenant_id": "@tenant"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getGitHubAppInstallURL",
+   "owner_only": true
+  },
+  {
+   "operation": "completeGitHubAppInstall",
+   "body": {
+    "state": "x"
+   },
+   "owner_only": true,
+   "accept": [
+    400
+   ],
+   "note": "The setup state is a one-time link the route validates before the tenant is consulted; there is none to forge here."
+  },
+  {
+   "operation": "beginGitHubAppManifest",
+   "body": {
+    "account": "acme"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "completeGitHubAppManifest",
+   "body": {
+    "code": "x",
+    "state": "x"
+   },
+   "owner_only": true,
+   "accept": [
+    422
+   ],
+   "note": "The code is validated against GitHub before any tenant state is touched."
+  },
+  {
+   "operation": "verifyGitHubAppCredential",
+   "owner_only": true
+  },
+  {
+   "operation": "checkGitHubAppWebhook",
+   "owner_only": true
+  },
+  {
+   "operation": "rotateGitHubAppWebhookSecret",
+   "owner_only": true
+  },
+  {
+   "operation": "registerConductor",
+   "body": {
+    "name": "c-new"
+   }
+  },
+  {
+   "operation": "archiveConductor",
+   "params": {
+    "id": "@conductor"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "startConversation",
+   "params": {
+    "id": "@conductor"
+   },
+   "body": {
+    "message": "hi"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "disconnectConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "clearConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "compactConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "interruptConversation",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "body": {
+    "turn": 1
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "sendConversationMessage",
+   "params": {
+    "id": "@conductor",
+    "conversation_id": "@conversation"
+   },
+   "body": {
+    "text": "hi"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "rotateConductorSetupScript",
+   "params": {
+    "id": "@conductor"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "unarchiveConductor",
+   "params": {
+    "id": "@conductor"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "archiveFleetInstructionsGroup",
+   "body": {
+    "name": "fleet-group"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "unarchiveFleetInstructionsGroup",
+   "body": {
+    "name": "fleet-group"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "saveFleetInstructionsVersion",
+   "body": {
+    "name": "f2",
+    "body": "b",
+    "make_default": false
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "archiveFleetInstructionsVersion",
+   "params": {
+    "id": "@fleet"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "unarchiveFleetInstructionsVersion",
+   "params": {
+    "id": "@fleet"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "createIntakeSource",
+   "body": {
+    "name": "s2",
+    "adapter": "native",
+    "trust": "untrusted",
+    "auth": "bearer"
+   }
+  },
+  {
+   "operation": "rotateIntakeSource",
+   "params": {
+    "id": "@intake_source"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "createInvite",
+   "body": {
+    "email": "x@example.invalid"
+   }
+  },
+  {
+   "operation": "acceptInvite",
+   "body": {
+    "token": "nope"
+   },
+   "accept": [
+    400
+   ],
+   "note": "Acts on the caller's own account with an emailed token; a made-up token is refused as invalid before any tenant is consulted."
+  },
+  {
+   "operation": "decideDeviceCode",
+   "body": {
+    "user_code": "ABCD-EFGH",
+    "approve": false
+   }
+  },
+  {
+   "operation": "lookupDeviceCode",
+   "body": {
+    "user_code": "ABCD-EFGH"
+   }
+  },
+  {
+   "operation": "decideAuthRequest",
+   "params": {
+    "id": "@unmade"
+   },
+   "body": {
+    "approve": false
+   }
+  },
+  {
+   "operation": "approveAllProposals",
+   "body": {
+    "kind": "ready",
+    "ids": []
+   }
+  },
+  {
+   "operation": "rejectAllProposals",
+   "body": {
+    "ids": []
+   }
+  },
+  {
+   "operation": "approveProposal",
+   "params": {
+    "id": "@proposal"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "rejectProposal",
+   "params": {
+    "id": "@proposal"
+   },
+   "body": {
+    "reason": "no"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "applyStewardDraft",
+   "params": {
+    "id": "@unmade"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "undoStewardDecision",
+   "params": {
+    "id": "@unmade"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "vetoStewardDecision",
+   "params": {
+    "id": "@unmade"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "addReplayBatch",
+   "body": {
+    "ticket_ids": [
+     "@ticket"
+    ],
+    "version_ids": [
+     "@variant"
+    ],
+    "runs": 1,
+    "confirm_attempts": 1
+   },
+   "foreign": true,
+   "accept": [
+    201
+   ],
+   "note": "A replay batch answers 201 and lists what it refused per ticket; B's batch refuses A's ticket as not found."
+  },
+  {
+   "operation": "importSupervisorSlots",
+   "params": {
+    "id": "@supervisor"
+   },
+   "body": {
+    "revision": 0,
+    "names": [
+     "x"
+    ]
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "createTenant",
+   "body": {
+    "name": "t-new"
+   }
+  },
+  {
+   "operation": "archiveTenant",
+   "params": {
+    "id": "@tenant"
+   },
+   "body": {
+    "confirm_name": "x"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "unarchiveTenant",
+   "params": {
+    "id": "@tenant"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "createTicket",
+   "body": {
+    "title": "new",
+    "status": "open"
+   }
+  },
+  {
+   "operation": "bulkSetTicketPriority",
+   "body": {
+    "ids": [
+     "@ticket"
+    ],
+    "priority": "normal"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "bulkMarkTicketsReady",
+   "body": {
+    "ids": [
+     "@ticket"
+    ]
+   },
+   "foreign": true
+  },
+  {
+   "operation": "bulkSetTicketStatus",
+   "body": {
+    "ids": [
+     "@ticket"
+    ],
+    "status": "open"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "approveTicket",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "addTicketAttempt",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {},
+   "foreign": true
+  },
+  {
+   "operation": "closeTicketAttempt",
+   "params": {
+    "id": "@ticket",
+    "n": 1
+   },
+   "foreign": true
+  },
+  {
+   "operation": "promoteTicketAttempt",
+   "params": {
+    "id": "@ticket",
+    "n": 1
+   },
+   "foreign": true
+  },
+  {
+   "operation": "addTicketBlocker",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "blocker_id": "@ticket2"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "closeTicketAsMerged",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "confirm": true
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "createTicketComment",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "body": "c"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "markTicketPostReviewed",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "comment": "ok"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "markTicketReady",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "requestTicketChanges",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "comment": "no"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "createTicketRevision",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "title": "t2"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "approveDiscussionDraft",
+   "params": {
+    "ticket_id": "@ticket",
+    "attempt": 1,
+    "round": 1
+   },
+   "foreign": true,
+   "owner_only": true,
+   "accept": [
+    409
+   ],
+   "note": "The steward is off for every new tenant, so the route answers 409 before it looks at the ticket."
+  },
+  {
+   "operation": "assessDiscussionNow",
+   "params": {
+    "ticket_id": "@ticket",
+    "attempt": 1,
+    "round": 1
+   },
+   "foreign": true,
+   "owner_only": true,
+   "accept": [
+    409
+   ],
+   "note": "Assessing now is live. Tenant B cannot see A's ticket, so there is no open discussion for it and the route answers 409 stale without reading anything of A's."
+  },
+  {
+   "operation": "editDiscussionDraft",
+   "params": {
+    "ticket_id": "@ticket",
+    "attempt": 1,
+    "round": 1
+   },
+   "body": {
+    "text": "t"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "rejectDiscussionDraft",
+   "params": {
+    "ticket_id": "@ticket",
+    "attempt": 1,
+    "round": 1
+   },
+   "body": {
+    "reason": "r"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "vetoDiscussionApply",
+   "params": {
+    "ticket_id": "@ticket",
+    "attempt": 1,
+    "round": 1
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "archiveVariantGroup",
+   "body": {
+    "name": "vg"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "unarchiveVariantGroup",
+   "body": {
+    "name": "vg"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "saveVariantVersion",
+   "body": {
+    "name": "v2",
+    "harness": "claude",
+    "settings": {},
+    "fleet_instructions_version_id": null
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "archiveVariantVersion",
+   "params": {
+    "id": "@variant"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "unarchiveVariantVersion",
+   "params": {
+    "id": "@variant"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "moveWorkspaceRepo",
+   "body": {
+    "from_path": "a",
+    "to_path": "b",
+    "dry_run": true
+   },
+   "owner_only": true,
+   "accept": [
+    422
+   ],
+   "note": "The tenant has declared no manifest to move within."
+  },
+  {
+   "operation": "syncWorkspaceRepo",
+   "body": {
+    "path": "server"
+   },
+   "owner_only": true,
+   "accept": [
+    422
+   ],
+   "note": "The tenant has declared no manifest to sync."
+  },
+  {
+   "operation": "saveAgentHarnessConfig",
+   "params": {
+    "id": "@agent"
+   },
+   "body": {
+    "settings": {}
+   },
+   "foreign": true
+  },
+  {
+   "operation": "setAgentRoles",
+   "params": {
+    "id": "@agent"
+   },
+   "body": {
+    "role_ids": [
+     "@role"
+    ]
+   },
+   "foreign": true,
+   "accept": [
+    422
+   ],
+   "note": "A role id is looked up in the caller's tenant before the agent is, so tenant A's role is unknown to B."
+  },
+  {
+   "operation": "setAgentVariant",
+   "params": {
+    "id": "@agent"
+   },
+   "body": {
+    "version_id": "@variant"
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "setPassword",
+   "body": {
+    "new_password": "correct horse battery staple"
+   }
+  },
+  {
+   "operation": "connectGitHubAppCredential",
+   "body": {
+    "app_id": 1,
+    "installation_id": 1,
+    "private_key": "x"
+   },
+   "owner_only": true,
+   "accept": [
+    422
+   ],
+   "note": "The private key is parsed before it is stored; a valid one would be a secret in the repo."
+  },
+  {
+   "operation": "setFleetInstructionsDefault",
+   "body": {
+    "version_id": "@fleet"
+   },
+   "owner_only": true,
+   "foreign": true
+  },
+  {
+   "operation": "saveHarnessConfigDefaults",
+   "body": {
+    "settings": {}
+   }
+  },
+  {
+   "operation": "recordUiUsage",
+   "body": {
+    "events": [
+     {
+      "name": "new_ticket",
+      "attrs": {
+       "screen": "board",
+       "action": "open_form"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "operation": "setMySetting",
+   "params": {
+    "name": "some_setting"
+   },
+   "body": {
+    "type": "str",
+    "str_val": "x"
+   }
+  },
+  {
+   "operation": "setMyTenantSetting",
+   "params": {
+    "name": "some_setting"
+   },
+   "body": {
+    "type": "str",
+    "str_val": "x"
+   }
+  },
+  {
+   "operation": "putSupervisorDesiredState",
+   "params": {
+    "id": "@supervisor"
+   },
+   "body": {
+    "revision": 0,
+    "agents": []
+   },
+   "foreign": true,
+   "owner_only": true
+  },
+  {
+   "operation": "setTenantColour",
+   "body": {
+    "colour": "blue"
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "setTicketAttemptVariant",
+   "params": {
+    "id": "@ticket",
+    "n": 1
+   },
+   "body": {
+    "version_id": "@variant"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "setAttemptVerdict",
+   "params": {
+    "id": "@ticket",
+    "n": 1
+   },
+   "body": {
+    "verdict": "would_merge"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "getAttemptVerdict",
+   "params": {
+    "id": "@ticket",
+    "n": 1
+   },
+   "foreign": true
+  },
+  {
+   "operation": "listAttemptReviewRuns",
+   "params": {
+    "id": "@ticket",
+    "n": 1
+   },
+   "foreign": true
+  },
+  {
+   "operation": "ingestReviewRun",
+   "body": {}
+  },
+  {
+   "operation": "labelReviewFinding",
+   "params": {
+    "id": "00000000-0000-4000-8000-000000000001"
+   },
+   "body": {
+    "verdict": "confirmed"
+   }
+  },
+  {
+   "operation": "getReviewProviderConfig"
+  },
+  {
+   "operation": "compareVariants",
+   "body": {
+    "ticket_ids": [
+     "@ticket"
+    ],
+    "baseline": "",
+    "challengers": [
+     "x"
+    ]
+   }
+  },
+  {
+   "operation": "setTicketRoles",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "role_ids": [
+     "@role"
+    ]
+   },
+   "foreign": true,
+   "accept": [
+    422
+   ],
+   "note": "A role id is looked up in the caller's tenant before the ticket is, so tenant A's role is unknown to B."
+  },
+  {
+   "operation": "setTicketVariant",
+   "params": {
+    "id": "@ticket"
+   },
+   "body": {
+    "version_id": "@variant"
+   },
+   "foreign": true
+  },
+  {
+   "operation": "setWorkspaceManifest",
+   "body": {
+    "repos": [
+     {
+      "path": "server",
+      "remote": "github.com/acme/repo"
+     }
+    ]
+   },
+   "owner_only": true
+  },
+  {
+   "operation": "listOwnRemoteControlSupervisors",
+   "note": "a person's own: the supervisors they approved, none of another tenant's"
+  },
+  {
+   "operation": "addOwnRemoteControl",
+   "params": {
+    "id": "@supervisor"
+   },
+   "body": {
+    "name": "authz-rc"
+   },
+   "foreign": true,
+   "note": "only the supervisor's approver, whether or not they own the team (internal/agent/remote_control_own_test.go): here A's member is not it, and A's owner may no longer be once an earlier case ended the supervisor's grant (revokeGrant on @grant), so the owner's 403 is the approver rule, not a role",
+   "owner_only": true,
+   "accept": [
+    403
+   ]
+  },
+  {
+   "operation": "removeOwnRemoteControl",
+   "params": {
+    "id": "@supervisor",
+    "entry_id": "00000000-0000-4000-8000-000000000001"
+   },
+   "foreign": true,
+   "note": "only the supervisor's approver, whether or not they own the team (internal/agent/remote_control_own_test.go): here A's member is not it, and A's owner may no longer be once an earlier case ended the supervisor's grant (revokeGrant on @grant), so the owner's 403 is the approver rule, not a role",
+   "owner_only": true,
+   "accept": [
+    403
+   ]
+  },
+  {
+   "operation": "uploadTicketAttachment",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true,
+   "accept": [
+    422,
+    503
+   ],
+   "note": "the test api is booted without an object store, so attachment routes answer 503; internal/attachment's tests hold the cross-tenant and owner cases against the real service (and the empty JSON body is not multipart)"
+  },
+  {
+   "operation": "listTicketAttachments",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true,
+   "accept": [
+    503
+   ],
+   "note": "the test api is booted without an object store, so attachment routes answer 503; internal/attachment's tests hold the cross-tenant and owner cases against the real service"
+  },
+  {
+   "operation": "uploadConversationAttachment",
+   "params": {
+    "conversation_id": "@conversation"
+   },
+   "foreign": true,
+   "accept": [
+    422,
+    503
+   ],
+   "note": "the test api is booted without an object store, so attachment routes answer 503; internal/attachment's tests hold the cross-tenant and owner cases against the real service (and the empty JSON body is not multipart)"
+  },
+  {
+   "operation": "getAttachmentContent",
+   "params": {
+    "aid": "@unmade"
+   },
+   "foreign": true,
+   "accept": [
+    503
+   ],
+   "note": "the test api is booted without an object store, so attachment routes answer 503; internal/attachment's tests hold the cross-tenant and owner cases against the real service"
+  },
+  {
+   "operation": "deleteAttachment",
+   "params": {
+    "aid": "@unmade"
+   },
+   "foreign": true,
+   "accept": [
+    503
+   ],
+   "note": "the test api is booted without an object store, so attachment routes answer 503; internal/attachment's tests hold the cross-tenant and owner cases against the real service"
+  },
+  {
+   "operation": "agentUploadTicketAttachment",
+   "params": {
+    "id": "@ticket"
+   },
+   "foreign": true,
+   "accept": [
+    422,
+    503
+   ],
+   "note": "the test api is booted without an object store, so attachment routes answer 503; internal/attachment's agent_http_test holds the cross-tenant and worker-held-ticket cases against the real service (and the empty JSON body is not multipart)"
+  },
+  {
+   "operation": "agentGetAttachmentContent",
+   "params": {
+    "aid": "@unmade"
+   },
+   "foreign": true,
+   "accept": [
+    503
+   ],
+   "note": "the test api is booted without an object store, so attachment routes answer 503; internal/attachment's agent_http_test holds the cross-tenant and worker-held-ticket cases against the real service"
+  }
+ ],
+ "allow": [
+  {
+   "operation": "get-consent",
+   "reason": "Cookie-consent state of the visitor, signed in or not; keyed by the visitor, not a tenant."
+  },
+  {
+   "operation": "put-consent",
+   "reason": "Records the visitor's own consent choice, signed in or not; keyed by the visitor, not a tenant.",
+   "body": {
+    "source": "settings",
+    "decisions": [
+     {
+      "purpose": "necessary",
+      "granted": true,
+      "document_version": "x",
+      "based_on": 0
+     }
+    ]
+   }
+  },
+  {
+   "operation": "providerSignInCallback",
+   "reason": "OAuth sign-in callback: it is what creates the session, so it cannot need one. Authenticated by the provider's state and code.",
+   "params": {
+    "provider": "nosuch"
+   }
+  },
+  {
+   "operation": "getAuthConfig",
+   "reason": "Tells the sign-in page which methods are on; no tenant data."
+  },
+  {
+   "operation": "startProviderSignIn",
+   "reason": "Starts a sign-in: no session exists yet.",
+   "params": {
+    "provider": "nosuch"
+   }
+  },
+  {
+   "operation": "get-legal-document",
+   "reason": "Public legal text, the same for everyone.",
+   "params": {
+    "kind": "terms"
+   }
+  },
+  {
+   "operation": "list-legal-document-versions",
+   "reason": "Public legal text, the same for everyone.",
+   "params": {
+    "kind": "terms"
+   }
+  },
+  {
+   "operation": "get-legal-document-version",
+   "reason": "Public legal text, the same for everyone.",
+   "params": {
+    "kind": "terms",
+    "version": "1"
+   }
+  },
+  {
+   "operation": "activate",
+   "reason": "Account activation by emailed token, before any session exists."
+  },
+  {
+   "operation": "acceptInviteAsNewAccount",
+   "reason": "Invite acceptance by emailed token, before any account exists."
+  },
+  {
+   "operation": "startProviderInvite",
+   "reason": "Invite acceptance by emailed token via a provider, before any account exists.",
+   "params": {
+    "provider": "nosuch"
+   }
+  },
+  {
+   "operation": "previewInvite",
+   "reason": "Shows an invite to the holder of its emailed token, before any account exists."
+  },
+  {
+   "operation": "login",
+   "reason": "Signing in."
+  },
+  {
+   "operation": "logout",
+   "reason": "Ends the caller's own session; with none it does nothing."
+  },
+  {
+   "operation": "requestPasswordReset",
+   "reason": "Emailed-link reset request, before any session exists."
+  },
+  {
+   "operation": "resetPassword",
+   "reason": "Emailed-token password reset, before any session exists."
+  },
+  {
+   "operation": "refreshSession",
+   "reason": "Exchanges the refresh cookie for a session.",
+   "expect": [
+    401
+   ]
+  },
+  {
+   "operation": "register",
+   "reason": "Sign-up; it makes a tenant of its own."
+  }
+ ]
+}

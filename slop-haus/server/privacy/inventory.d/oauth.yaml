@@ -1,0 +1,12 @@
+  - name: global_oauth_clients
+    categories: [credentials]
+  - name: global_oauth_grants
+    categories: [credentials]
+  - name: global_oauth_auth_requests
+    categories: [credentials]
+  - name: global_oauth_codes
+    categories: [credentials]
+  - name: global_oauth_device_codes
+    categories: [credentials]
+  - name: global_oauth_tokens
+    categories: [credentials]

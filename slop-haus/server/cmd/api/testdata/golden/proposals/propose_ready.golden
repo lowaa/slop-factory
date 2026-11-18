@@ -1,0 +1,12 @@
+-- error: false --
+-- text --
+Proposed (ready) on #1 as {uuid}. Nothing has changed yet. You cannot approve it: only the person can, with their own session. Tell them to approve it at {board}/approvals?tenant={tenant}
+-- structured --
+{
+  "guidance": "Proposed (ready) on #1 as {uuid}. Nothing has changed yet. You cannot approve it: only the person can, with their own session. Tell them to approve it at {board}/approvals?tenant={tenant}",
+  "id": "{uuid}",
+  "kind": "ready",
+  "state": "pending",
+  "ticket_id": 1,
+  "url": "{board}/approvals?tenant={tenant}"
+}

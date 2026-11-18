@@ -1,0 +1,23 @@
+-- error: false --
+-- text --
+Granted ticket #7: Split the register
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Your branch ticket-7-split-the-register is ready (made at base commit 0123456789abcdef0123456789abcdef01234567): git fetch origin && git switch ticket-7-split-the-register. Open your PR from it. If it already has commits they are an earlier agent's: continue from what is pushed there rather than starting over.
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a -- its PR's description links back here, with "slop-haus #7".
+-- structured --
+{
+  "ticket": {
+    "base_commit": "0123456789abcdef0123456789abcdef01234567",
+    "body": "Move each tool next to its handler.\nNo behaviour change.",
+    "id": 7,
+    "paths": [
+      "server/internal/mcpserver/",
+      "server/internal/ticket/"
+    ],
+    "priority": "normal",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Split the register",
+    "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+  }
+}

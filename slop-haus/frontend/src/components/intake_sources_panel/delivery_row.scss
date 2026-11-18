@@ -1,0 +1,65 @@
+@use "@/styles/surfaces";
+
+.delivery-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3-5);
+
+  @include surfaces.box(var(--radius-sm), var(--color-bg));
+
+  font-size: var(--text-sm);
+  list-style: none;
+
+  &__meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+
+  &__key {
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+
+  &__event {
+    font-family: var(--font-mono);
+    color: var(--color-text-muted);
+  }
+
+  &__outcome {
+    @include surfaces.tag;
+
+    &--applied {
+      background: rgba(46, 230, 168, 0.12);
+      color: var(--color-success);
+    }
+
+    &--ignored {
+      background: var(--color-bg-muted);
+      color: var(--color-text-muted);
+    }
+
+    &--rejected,
+    &--rate_limited,
+    &--error {
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+    }
+
+    &--downgraded,
+    &--processing {
+      background: transparent;
+      border: 1px solid var(--color-warning);
+      color: var(--color-warning);
+    }
+  }
+
+  &__detail {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-text-muted);
+    overflow-wrap: anywhere;
+  }
+}

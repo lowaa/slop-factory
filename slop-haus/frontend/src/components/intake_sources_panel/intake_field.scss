@@ -1,0 +1,54 @@
+@use "@/styles/forms";
+@use "@/styles/layout";
+
+.intake-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+
+  label,
+  &__label {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  // The tooltip wrapper is inline-flex by default; the control must still
+  // fill the field.
+  .tooltip {
+    display: flex;
+  }
+
+  input {
+    @include forms.text-control;
+
+    flex: 1;
+    min-width: 0;
+    // 44px: a finger's minimum target.
+    min-height: 44px;
+    box-sizing: border-box;
+    font-size: var(--text-md);
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+
+  // The tooltip wrapper is a flex row: without this the dropdown shrinks to
+  // its content instead of filling the field like the inputs do.
+  .dropdown {
+    flex: 1;
+    min-width: 0;
+  }
+
+  // Match the text inputs' height, so a row mixes both without a ragged edge.
+  .dropdown__trigger {
+    min-height: layout.$touch-target;
+  }
+
+  &__hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+}

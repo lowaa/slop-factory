@@ -1,0 +1,97 @@
+@use "@/styles/layout";
+
+.tenant-switcher {
+  // Narrower than dropdown.scss's own default width: 100% -- in the header
+  // this sits between the nav and the account block, not filling a form
+  // column, so it should only take as much room as a tenant name needs.
+  width: 200px;
+  position: relative;
+
+  // As tight as the tenant's initials and a few letters of its name, where
+  // the header gives the account its initials too (styles/_layout.scss).
+  @include layout.header-names {
+    width: 136px;
+  }
+
+  .dropdown__label {
+    // The header already has "slop-haus" as its title; repeating "Tenant"
+    // at full size here would read as a second heading rather than a
+    // small control's caption.
+    font-size: var(--text-2xs);
+  }
+
+  &__notice {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-danger);
+  }
+
+  &__archived-toggle {
+    margin-top: var(--space-1);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  // A popover: the switcher is narrow, and the list names tenants and
+  // carries a button each.
+  &__archived {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: var(--z-dropdown);
+    min-width: 280px;
+    margin-top: var(--space-1);
+    padding: var(--space-2);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+
+    ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+  }
+
+  &__archived-name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  // Same look as tenant_badge's initials. Drawn with ::before so the
+  // trigger's text content is the tenant's name alone.
+  &__swatch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
+    background: var(--tenant-bg);
+    color: var(--tenant-fg);
+    font-size: var(--text-2xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1;
+
+    &::before {
+      content: attr(data-initials);
+    }
+  }
+}

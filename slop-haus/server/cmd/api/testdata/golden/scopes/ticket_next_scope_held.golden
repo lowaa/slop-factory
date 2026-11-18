@@ -1,0 +1,7 @@
+-- error: false --
+-- text --
+No ticket available. #2 is next but its scope "srv/a/" is held by ticket #1. Nothing can be taken until it frees: stop here.
+-- structured --
+{
+  "blocked": "No ticket available. #2 is next but its scope \"srv/a/\" is held by ticket #1. Nothing can be taken until it frees: stop here."
+}

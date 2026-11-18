@@ -1,0 +1,1 @@
+cmd/genprices/main.go G306

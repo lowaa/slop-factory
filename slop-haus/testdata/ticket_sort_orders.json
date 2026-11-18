@@ -1,0 +1,149 @@
+{
+ "_about": "A population with ties and NULLs, and each registered sort's order of it. Checked against Postgres by server/internal/ticket/sort_test.go and against the browser's comparators by slop-haus/frontend/src/lib/paged_collection/ticket_order.test.ts, so the two cannot drift apart.",
+ "tickets": [
+  {
+   "id": 1,
+   "priority": "low",
+   "updated_at": "2026-03-01T00:00:00Z",
+   "closed_at": null
+  },
+  {
+   "id": 2,
+   "priority": "normal",
+   "updated_at": "2026-03-02T00:00:00Z",
+   "closed_at": "2026-02-01T00:00:00Z"
+  },
+  {
+   "id": 3,
+   "priority": "high",
+   "updated_at": "2026-03-02T00:00:00Z",
+   "closed_at": "2026-02-01T00:00:00Z"
+  },
+  {
+   "id": 4,
+   "priority": "urgent",
+   "updated_at": "2026-03-01T00:00:00.000001Z",
+   "closed_at": null
+  },
+  {
+   "id": 5,
+   "priority": "low",
+   "updated_at": "2026-03-03T00:00:00.5Z",
+   "closed_at": "2026-02-02T00:00:00Z"
+  },
+  {
+   "id": 6,
+   "priority": "normal",
+   "updated_at": "2026-03-03T00:00:00.45Z",
+   "closed_at": null
+  },
+  {
+   "id": 7,
+   "priority": "urgent",
+   "updated_at": "2026-03-03T00:00:00.5Z",
+   "closed_at": "2026-02-02T00:00:00.000001Z"
+  },
+  {
+   "id": 8,
+   "priority": "high",
+   "updated_at": "2026-03-01T00:00:00Z",
+   "closed_at": "2026-02-02T00:00:00Z"
+  },
+  {
+   "id": 9,
+   "priority": "normal",
+   "updated_at": "2026-03-04T00:00:00.000001Z",
+   "closed_at": null
+  },
+  {
+   "id": 10,
+   "priority": "urgent",
+   "updated_at": "2026-03-04T00:00:00.000002Z",
+   "closed_at": "2026-02-02T00:00:00Z"
+  },
+  {
+   "id": 11,
+   "priority": "low",
+   "updated_at": "2026-03-02T00:00:00Z",
+   "closed_at": null
+  },
+  {
+   "id": 12,
+   "priority": "high",
+   "updated_at": "2026-03-04T00:00:00.000001Z",
+   "closed_at": "2026-02-01T00:00:00Z"
+  }
+ ],
+ "orders": {
+  "newest": [
+   12,
+   11,
+   10,
+   9,
+   8,
+   7,
+   6,
+   5,
+   4,
+   3,
+   2,
+   1
+  ],
+  "oldest": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12
+  ],
+  "recently_updated": [
+   10,
+   12,
+   9,
+   7,
+   5,
+   6,
+   11,
+   3,
+   2,
+   4,
+   8,
+   1
+  ],
+  "recently_closed": [
+   7,
+   10,
+   8,
+   5,
+   12,
+   3,
+   2,
+   11,
+   9,
+   6,
+   4,
+   1
+  ],
+  "priority": [
+   10,
+   7,
+   4,
+   12,
+   8,
+   3,
+   9,
+   6,
+   2,
+   11,
+   5,
+   1
+  ]
+ }
+}

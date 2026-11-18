@@ -1,0 +1,5 @@
+-- error: true --
+-- text --
+the checks have not passed on the change's head: failure on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (ci failure)
+-- structured --
+null

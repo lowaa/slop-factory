@@ -1,0 +1,42 @@
+{
+  "receiver": "slop-haus",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "SlopHausReleaseFailing",
+        "severity": "critical",
+        "project": "slop-haus",
+        "step": "wait-prod",
+        "slophaus_priority": "urgent"
+      },
+      "annotations": {
+        "summary": "slop-haus releases keep failing at wait-prod",
+        "description": "3 consecutive releases failed at wait-prod; the last one said slop-haus is Degraded."
+      },
+      "startsAt": "2026-10-04T11:40:02.456Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=slophaus_release_failures%3E3&g0.tab=1",
+      "fingerprint": "b8d02a6f1c54e7a1"
+    }
+  ],
+  "groupLabels": {
+    "alertname": "SlopHausReleaseFailing"
+  },
+  "commonLabels": {
+    "alertname": "SlopHausReleaseFailing",
+    "severity": "critical",
+    "project": "slop-haus",
+    "step": "wait-prod",
+    "slophaus_priority": "urgent"
+  },
+  "commonAnnotations": {
+    "summary": "slop-haus releases keep failing at wait-prod",
+    "description": "3 consecutive releases failed at wait-prod; the last one said slop-haus is Degraded."
+  },
+  "externalURL": "http://alertmanager.monitoring:9093",
+  "version": "4",
+  "groupKey": "{}:{alertname=\"SlopHausReleaseFailing\"}",
+  "truncatedAlerts": 0
+}

@@ -1,0 +1,12 @@
+  - name: steward_assessments
+    categories: [work_record]
+  - name: steward_discussion_labels
+    categories: [work_record]
+  - name: steward_discussion_decisions
+    categories: [work_record]
+  - name: steward_discussion_applies
+    categories: [work_record]
+  - name: steward_drafts
+    categories: [work_record]
+  - name: steward_leases
+    categories: [agent_activity]

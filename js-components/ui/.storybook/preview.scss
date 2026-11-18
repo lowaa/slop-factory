@@ -1,0 +1,15 @@
+@use "@slop-factory/storybook-kit/preview_tokens";
+
+// Storybook-only baseline for this package. Components here are
+// deliberately unopinionated about the host page -- they never set a font
+// or background themselves -- so the canvas supplies those, with the shared
+// tokens above standing in for a consumer's palette.
+body {
+  margin: 0;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  color: var(--color-text);
+}
+
+* {
+  box-sizing: border-box;
+}

@@ -1,0 +1,20 @@
+-- error: false --
+-- text --
+https://github.com/acme/repo/pull/12: checks on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa are success
+- ci: success
+These are NOT for the commit you named: the change's head is different.
+-- structured --
+{
+  "checks": [
+    {
+      "name": "ci",
+      "state": "success"
+    }
+  ],
+  "for_your_head": false,
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "note": "These are NOT for the commit you named: the change's head is different.",
+  "passed": true,
+  "state": "success",
+  "url": "https://github.com/acme/repo/pull/12"
+}

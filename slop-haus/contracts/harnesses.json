@@ -1,0 +1,34 @@
+{
+  "_doc": "The harnesses agents run in. Names are what run_remote_control.sh, variants and attempts store. Server/internal/harness embeds a copy (harnesses.json beside it) and its test asserts the copy equals this file; supervisor and frontend read this file. `capabilities.steward` is yes, no or conditional (steward-capable only where a host check passes). `settings` lists the typed settings a variant or harness config may hold: kind is model, provider or enum (options in display order). Adding a harness: add it here and copy the file; the API enums and the database lookup table follow.",
+  "harnesses": [
+    {
+      "name": "claude",
+      "displayName": "Claude Code",
+      "capabilities": { "worker": true, "steward": "yes", "remote_control": true },
+      "settings": [
+        { "name": "model", "kind": "model" },
+        { "name": "subagent_model", "kind": "model" },
+        { "name": "effort", "kind": "enum", "options": ["low", "medium", "high", "xhigh", "max", "auto"] }
+      ]
+    },
+    {
+      "name": "pi",
+      "displayName": "pi",
+      "capabilities": { "worker": true, "steward": "no", "remote_control": true },
+      "settings": [
+        { "name": "provider", "kind": "provider" },
+        { "name": "model", "kind": "model" },
+        { "name": "thinking", "kind": "enum", "options": ["off", "minimal", "low", "medium", "high", "xhigh", "max"] }
+      ]
+    },
+    {
+      "name": "codex",
+      "displayName": "Codex",
+      "capabilities": { "worker": true, "steward": "conditional", "remote_control": true },
+      "settings": [
+        { "name": "model", "kind": "model" },
+        { "name": "effort", "kind": "enum", "options": ["low", "medium", "high", "xhigh", "max", "ultra"] }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+// Floats above the message box, ending at its top edge. Only the list scrolls
+// when there are more prompts than room.
+.prompt-history {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 100%;
+  z-index: var(--z-dropdown);
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1);
+  list-style: none;
+  max-height: min(40vh, 20rem);
+  overflow-y: auto;
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+}
+
+.prompt-history__option {
+  padding: var(--space-1-5) var(--space-2);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &[aria-selected="true"] {
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+}

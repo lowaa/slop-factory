@@ -1,0 +1,15 @@
+# One line per newLate cell in cmd/api: "<type> | <assigned to> | <reason>".
+# Each cell hides a runtime dependency cycle from the compiler. Add an entry
+# only after review; delete it when the cycle is removed.
+codehost.Changes | c.hostChanges | GitHub's change operations need the credential service, which is built after the ticket service
+ticket.SettledHook | c.settled | the ticket store reports settled tickets to the change service, which is built from the ticket service
+settings.ProvisionEnabledHook | s.provisionImport | settings is built before the agent module's provisioning import it gates
+ticket.ApprovalHook | s.mergeHook | the server-merge runner needs the ticket service this hook is built into
+ticket.ApprovalHook | s.queueHook | the landing runner (the hook's kicker) needs the ticket service this hook is built into
+ticket.DiscussionHook | s.discussionHook | the steward's discussion queue is built after, and from, the ticket service it hooks into
+ticket.SetupCheck | s.setupCheck | the onboarding service is built after the ticket service that consults it
+user.TenantAgents | tenantAgents | users is built before agents; archiving a tenant switches off its agents via this cell
+user.TenantCreatedHook | tenantCreated | users is built before settings, which seeds a new tenant's settings
+oauthGrants | l.oauth | agent and pending services are built before the OAuth service they use for grants
+ticket.OwnerResolver | l.owners | the ticket service resolves an agent's owner through the agent service, which is built from ticket
+harnessconfig.OverrideGate | l.gate.cell | harness config's override gate is the conductor service, built after harness config

@@ -1,0 +1,65 @@
+.virtual-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+
+  // The viewport takes what the page leaves, with Load more below it. The
+  // floor keeps a short window usable: the page scrolls instead.
+  &--fill {
+    flex: 1;
+
+    .virtual-list__viewport {
+      flex: 1 1 0;
+      height: auto;
+      min-height: 240px;
+    }
+  }
+
+  &__viewport {
+    // Without a height from the caller's layout the list would grow to its
+    // full height, and nothing would be virtual.
+    height: 480px;
+    max-height: 100%;
+    overflow-y: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+
+    &:focus-visible {
+      outline: 2px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+  }
+
+  &__rows {
+    position: relative;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__row {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  &__footer {
+    display: flex;
+    justify-content: center;
+  }
+
+  &__status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

@@ -1,0 +1,29 @@
+.new-session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3-5);
+  // Fills the pane, so the composer sits at the bottom of the page.
+  flex: 1;
+  min-height: 0;
+
+  h1 {
+    margin: 0;
+    font-size: var(--text-xl);
+  }
+
+  &__machine {
+    margin: 0;
+    font-size: var(--text-md);
+  }
+
+  // The slack between the form and the composer.
+  .message-composer {
+    margin-top: auto;
+  }
+
+  &__notice {
+    margin: 0;
+    font-size: var(--text-md);
+    color: var(--color-danger);
+  }
+}

@@ -1,0 +1,30 @@
+-- error: false --
+-- text --
+Granted ticket #1: Scoped work
+Scopes: server/cmd/b.go, server/internal/a/
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+Link: {board}/tickets/1?tenant={tenant} -- its PR's description links back here, with "slop-haus #1".
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-1-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "ticket": {
+    "body": "Build the thing.\n\nOut of scope: the other thing.",
+    "id": 1,
+    "paths": [
+      "server/cmd/b.go",
+      "server/internal/a/"
+    ],
+    "priority": "high",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Scoped work",
+    "url": "{board}/tickets/1?tenant={tenant}"
+  }
+}

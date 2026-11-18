@@ -1,0 +1,5 @@
+-- error: true --
+-- text --
+ticket #1 was cancelled by a human -- stop working on it. You no longer hold it: don't finish, commit or merge anything more for it. Stop now and report this; the supervisor hands you no more work on it.
+-- structured --
+null

@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["../../dev-tools/lint/oxlintrc.base.json"],
+  "overrides": [
+    {
+      "files": [
+        "**/*.stories.tsx",
+        ".storybook/**",
+        "src/test/auth_pages_fixture.tsx",
+        "src/test/fake_sign_in_methods_api.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "vitest",
+                "message": "vitest's vi/expect crash the built Storybook in the browser; use fn()/expect from storybook/test."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

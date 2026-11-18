@@ -1,0 +1,21 @@
+// Small-caps mono, the app's label voice. The three roles below differ only
+// in size, tracking and colour, so they share one definition and a deviation
+// is an argument rather than a copy that drifts.
+@mixin caps-label($size, $tracking, $color) {
+  font-family: var(--font-mono);
+  font-size: $size;
+  font-weight: 600;
+  letter-spacing: $tracking;
+  text-transform: uppercase;
+  color: $color;
+}
+
+// Summaries of collapsible help and the phone menu's group names.
+@mixin section-label {
+  @include caps-label(12px, 0.08em, var(--color-accent));
+}
+
+// The quieter heading over a panel, a column or a form group.
+@mixin heading-label($size: 12px) {
+  @include caps-label($size, 0.1em, var(--color-text-muted));
+}

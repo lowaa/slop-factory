@@ -1,0 +1,104 @@
+.attachment-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-radius: var(--radius-sm);
+
+  &--dragging {
+    outline: 2px dashed var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  &__input {
+    // The button opens it; keeping the input in the DOM keeps it testable
+    // and lets assistive tech reach it.
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  &__hint {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+
+    &--failed {
+      border-color: var(--color-danger);
+    }
+  }
+
+  &__thumb {
+    flex: none;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--color-border);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  &__details {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    progress {
+      width: 100%;
+      accent-color: var(--color-accent);
+    }
+  }
+
+  &__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__status {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  &__item--failed &__status {
+    color: var(--color-danger);
+  }
+}

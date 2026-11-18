@@ -1,0 +1,21 @@
+.attempt-chip {
+  display: inline-flex;
+  gap: var(--space-1-5);
+  align-items: center;
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--attempt-accent);
+  border-radius: 999px;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: normal;
+  vertical-align: middle;
+
+  &::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--attempt-accent);
+  }
+}

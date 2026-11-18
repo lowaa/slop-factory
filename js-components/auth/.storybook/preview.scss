@@ -1,0 +1,22 @@
+@use "@slop-factory/storybook-kit/preview_tokens";
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+// What a host's index.scss supplies: the components here add only layout to
+// their text fields (a host's index.scss does the rest), so without this
+// the canvas would show the browser's default inputs that no real app does.
+// :where() keeps it at zero specificity so a component rule still wins.
+:where(input:not([type="checkbox"], [type="radio"], [type="file"]), textarea) {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-raised);
+  font: inherit;
+}

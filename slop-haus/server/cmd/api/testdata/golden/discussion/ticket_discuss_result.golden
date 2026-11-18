@@ -1,0 +1,8 @@
+-- error: false --
+-- text --
+#1 is in discussion. You no longer hold it; take other work, or stop if there is none. When the human answers it comes back to the queue with you first in line.
+-- structured --
+{
+  "message": "#1 is in discussion. You no longer hold it; take other work, or stop if there is none. When the human answers it comes back to the queue with you first in line.",
+  "ok": true
+}

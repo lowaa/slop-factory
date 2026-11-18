@@ -1,0 +1,15 @@
+.new-source-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3-5);
+
+  // A finger needs 44px.
+  .button {
+    min-height: 44px;
+  }
+
+  &__actions {
+    display: flex;
+    padding-top: var(--space-1);
+  }
+}

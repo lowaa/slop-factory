@@ -1,0 +1,49 @@
+# Dex, the e2e stack's OIDC issuer (see ../docker-compose-dev.e2e.yaml).
+# Everything here is a public test fixture -- the client secret and the
+# users' passwords are also in ../tests/support/dex.ts. Never reuse any of
+# it outside a throwaway stack.
+#
+# One issuer URL, reachable identically by the browser (the e2e-tests-ts
+# container's Chromium) and the api: both sit on the compose network, so
+# http://dex:5556 means the same thing to each -- which is what an OIDC
+# issuer needs, since the api checks the ID token's `iss` against the URL
+# the browser was sent to. Plain http is allowed because the api runs with
+# ALLOW_INSECURE_HTTP in this stack only.
+issuer: http://dex:5556/dex
+
+# In memory: nothing here outlives a run.
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+logger:
+  level: info
+  format: text
+
+oauth2:
+  responseTypes: [code]
+  # No consent screen: one more page every round trip would click through.
+  skipApprovalScreen: true
+
+staticClients:
+  - id: slop-haus
+    name: slop-haus (e2e)
+    secret: e2e-only-secret
+    # PUBLIC_BASE_URL (http://frontend:80) + /api/auth/callback/<name>.
+    redirectURIs:
+      - http://frontend:80/api/auth/callback/dex
+
+enablePasswordDB: true
+staticPasswords:
+  # password: alice-e2e-password
+  - email: alice@example.com
+    username: alice
+    userID: 7d1b3c5e-0000-4000-8000-00000000a11c
+    hash: "$2a$10$pfeV20SQTx4BXlzr44mNHO4mJQx2wg7rdrCq4wsfSGDKCvHPcEWw."
+  # password: bob-e2e-password
+  - email: bob@example.com
+    username: bob
+    userID: 7d1b3c5e-0000-4000-8000-000000000b0b
+    hash: "$2a$10$uuKtdb8nAugvUZ09BQaKrOTPmwQuHUGJHV1RvE/W7N5rVBIAal9em"

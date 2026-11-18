@@ -1,0 +1,198 @@
+@use "@/styles/layout";
+@use "@/styles/typography";
+@use "@/styles/surfaces";
+
+.new-ticket-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3-5);
+  padding: var(--space-4);
+
+  @include surfaces.box(var(--radius));
+
+  h2 {
+    margin: 0;
+
+    @include typography.heading-label(13px);
+  }
+
+  &__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--color-text);
+    }
+  }
+
+  &__chevron {
+    width: 0;
+    height: 0;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 6px solid currentcolor;
+    transition: transform 120ms ease;
+  }
+
+  &__toggle[aria-expanded="true"] &__chevron {
+    transform: rotate(90deg);
+  }
+
+  &__fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+
+    // An author `display` beats the user agent's [hidden] rule, so without
+    // this the collapsed fields would still show.
+    &[hidden] {
+      display: none;
+    }
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-md);
+
+    input,
+    textarea {
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      color: var(--color-text);
+      resize: vertical;
+
+      &:focus {
+        border-color: var(--color-accent);
+      }
+    }
+  }
+
+  &__field--checkbox {
+    gap: var(--space-1-5);
+  }
+
+  &__checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+
+    input[type="checkbox"] {
+      width: auto;
+      accent-color: var(--color-accent);
+    }
+  }
+
+  &__hint {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+
+  &__warning {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+  }
+
+  &__error {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__submit-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  // Named classes rather than a bare `button` selector -- the Priority
+  // picker's trigger is a <button> too, and a bare element selector here
+  // reached inside the widget and painted it solid accent.
+  &__submit {
+    padding: var(--space-2) 18px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background 120ms ease,
+      box-shadow 120ms ease;
+
+    &:hover:not(:disabled) {
+      border-color: var(--color-text-muted);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    // Preparing over Open: the plan's decision 3 makes Preparing the
+    // safer default, so it gets the same treatment the old single "File
+    // ticket" button had -- Open reads as the intentional second choice.
+    &--primary {
+      border-color: var(--color-accent);
+      background: var(--color-accent);
+      color: var(--color-on-accent);
+
+      &:hover:not(:disabled) {
+        background: var(--color-accent-hot);
+        border-color: var(--color-accent-hot);
+        box-shadow: var(--glow-soft);
+      }
+    }
+  }
+
+  // Shown where there's no hover to open the tooltips with.
+  &__submit-hints {
+    display: none;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+
+    p {
+      margin: 0 0 var(--space-1);
+    }
+
+    @media (hover: none) {
+      display: block;
+    }
+
+    @include layout.narrow {
+      display: block;
+    }
+  }
+
+  // The two submit buttons share the row. Each sits in its tooltip's
+  // wrapper, which is the row's flex item.
+  @include layout.narrow {
+    &__submit-row > * {
+      flex: 1;
+    }
+
+    &__submit {
+      width: 100%;
+    }
+  }
+}

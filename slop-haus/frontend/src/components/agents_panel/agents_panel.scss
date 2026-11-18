@@ -1,0 +1,369 @@
+@use "@/styles/forms";
+@use "@/styles/layout";
+@use "@/styles/surfaces";
+@use "@/styles/typography";
+
+// The roster is the screen the human lives on, so it gets the width: a 720px column on a wide monitor left
+// the answer to "which agent has gone quiet" in a narrow strip with two
+// thirds of the screen empty beside it.
+//
+// Full width is not the same as edge to edge. Each column below is given
+// the room its content actually needs and no more, so rows stay scannable
+// rather than stretching a name across a metre of glass.
+.agents-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4-5);
+
+  // Name, state, holds, action. Named here rather than repeated on the
+  // header and the row, which is what makes the two line up.
+  // The name is capped rather than left to absorb every spare pixel: a
+  // 700px-wide column holding "builder-1" is the same waste of width as
+  // the panel not filling the screen, just pointed the other way. The
+  // slack goes to the column whose content varies most.
+  --agent-columns: minmax(220px, 420px) 120px minmax(200px, 1fr) auto;
+
+  &__notice {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__steward-report {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+
+    &--failed {
+      color: var(--color-danger);
+    }
+  }
+
+  &__row-notice {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__section h2 {
+    margin: 0 0 var(--space-3);
+
+    @include typography.heading-label;
+  }
+
+  &__roster {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+  }
+
+  &__filter {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    cursor: pointer;
+
+    input {
+      @include forms.checkbox-control;
+    }
+  }
+
+  &__head,
+  &__row {
+    display: grid;
+    grid-template-columns: var(--agent-columns);
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  &__head {
+    padding: 0 var(--space-3-5) var(--space-0-5);
+
+    @include typography.heading-label(11px);
+  }
+
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+  }
+
+  &__row {
+    padding: var(--space-3) var(--space-3-5);
+
+    @include surfaces.box;
+
+    transition: border-color 120ms ease;
+
+    &:hover {
+      border-color: var(--color-border-strong);
+    }
+  }
+
+  // The name, and under it what the agent's current run says it is.
+  &__who {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+  }
+
+  &__name,
+  &__runs {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__name {
+    font-weight: 500;
+  }
+
+  &__runs {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  &__replacement {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  &__holds {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  &__actions {
+    justify-self: end;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  // The confirmation and its outcome sit under the row they belong to,
+  // spanning every column, so it is never in doubt which agent is about to
+  // be signed out.
+  &__confirm,
+  &__row-note {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: var(--text-sm);
+  }
+
+  &__confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+
+    p {
+      margin: 0;
+    }
+  }
+
+  &__confirm-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  &__row-note {
+    color: var(--color-text-muted);
+
+    &--error {
+      color: var(--color-danger);
+    }
+  }
+
+  &__expiry--expired {
+    color: var(--color-danger);
+    font-weight: 600;
+  }
+
+  &__empty {
+    margin: 0;
+    padding: var(--space-3-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+}
+
+// Narrow screens: the grid collapses to stacked rows rather than four
+// columns squeezed into a phone.
+@include layout.narrow {
+  .agents-panel {
+    --agent-columns: 1fr auto;
+
+    &__head {
+      display: none;
+    }
+
+    &__holds {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
+// A row's role chips, and the checkbox editor "Edit roles" opens under it.
+.agents-panel {
+  &__role-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-top: var(--space-0-5);
+  }
+
+  &__role-chip {
+    font-size: var(--text-2xs);
+    padding: 1px var(--space-1-5);
+    border-radius: 999px;
+    background: var(--color-accent-dim);
+    color: var(--color-accent-hot);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+
+  &__role-editor,
+  &__config-editor {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-3) var(--space-3-5);
+
+    @include surfaces.box;
+
+    font-size: var(--text-sm);
+  }
+
+  &__role-checklist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    label {
+      display: flex;
+      align-items: center;
+      gap: var(--space-1-5);
+      cursor: pointer;
+
+      input {
+        @include forms.checkbox-control;
+      }
+    }
+  }
+
+  &__override-inactive {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: var(--space-2) var(--space-3-5);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+
+    p,
+    ul {
+      margin: 0;
+    }
+
+    ul {
+      font-style: italic;
+    }
+  }
+
+  // A flex column would stretch the dropdown across the editor; the
+  // select it replaced sat at its natural width.
+  &__config-editor > .dropdown {
+    align-self: flex-start;
+    min-width: 220px;
+    max-width: 100%;
+  }
+
+  &__config-editor > .dropdown .dropdown__trigger {
+    min-height: layout.$touch-target;
+  }
+
+  &__role-editor-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  &__section-note {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  &__config-summary {
+    margin: 0 0 var(--space-3);
+    padding-left: 18px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  &__config-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  &__config-badge {
+    font-size: var(--text-2xs);
+    padding: 1px var(--space-1-5);
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+
+    // Saved but not in force: dashed and struck through, with the text
+    // kept so it is not conveyed by colour alone.
+    &--inactive {
+      border-style: dashed;
+      text-decoration: line-through;
+    }
+
+    &--variant {
+      color: var(--color-text);
+    }
+
+    &--stale {
+      border-color: var(--color-warning);
+      color: var(--color-warning);
+    }
+  }
+}
+
+// What the machine running a worker adds to its row, under the row's own
+// columns.
+.agents-panel {
+  &__machine-controls {
+    grid-column: 1 / -1;
+  }
+}

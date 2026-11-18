@@ -1,0 +1,133 @@
+@use "@/styles/layout";
+@use "@/styles/typography";
+@use "@/styles/surfaces";
+
+.board {
+  &__columns {
+    display: flex;
+    gap: var(--space-4);
+    align-items: flex-start;
+    overflow-x: auto;
+    padding-bottom: var(--space-2);
+  }
+
+  &__column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex: 1 0 240px;
+    min-width: 240px;
+
+    @include surfaces.box(var(--radius));
+
+    padding: var(--space-3-5);
+  }
+
+  &__column-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    h2 {
+      margin: 0;
+
+      @include typography.heading-label;
+    }
+  }
+
+  &__column-select {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  &__column-count,
+  &__chip-count {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--color-accent-hot);
+    background: var(--color-accent-dim);
+    border-radius: 10px;
+    padding: 1px var(--space-2);
+  }
+
+  &__column-cards {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  // One card in a virtual list: the gap the live columns get from their
+  // flex layout, which a positioned row does not have.
+  &__virtual-card {
+    padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  }
+
+  &__column-notice {
+    font-size: var(--text-sm);
+    color: var(--color-danger);
+  }
+
+  &__empty {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  // The phone board's column picker. Seven columns side by side are about
+  // 1,800px of board, so a phone shows one, chosen here.
+  &__chips {
+    display: none;
+  }
+
+  &__chip {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: 0 var(--space-3-5);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 999px;
+    background: var(--color-bg-raised);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+    cursor: pointer;
+
+    &--selected {
+      border-color: var(--color-accent);
+      background: var(--color-bg-muted);
+      color: var(--color-accent-hot);
+    }
+  }
+
+  @include layout.narrow {
+    &__chips {
+      display: flex;
+      gap: var(--space-1-5);
+      margin-bottom: var(--space-3-5);
+      // The chips scroll sideways inside their own row; the page never does.
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    &__columns {
+      display: block;
+      overflow-x: visible;
+      padding-bottom: 0;
+    }
+
+    &__column {
+      display: none;
+      min-width: 0;
+
+      &--shown {
+        display: flex;
+      }
+    }
+
+    // The chip above already names the column and counts it.
+    &__column-header {
+      display: none;
+    }
+  }
+}

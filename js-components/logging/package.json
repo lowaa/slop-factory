@@ -1,0 +1,55 @@
+{
+  "name": "@slop-factory/logging",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./tokens": "./src/tokens.ts",
+    ".": "./src/index.ts",
+    "./logger": "./src/logger.ts",
+    "./console_logger": "./src/console_logger.ts",
+    "./otel_logger": "./src/otel_logger.ts",
+    "./attribute_filter": "./src/attribute_filter.ts",
+    "./tracing": "./src/tracing/index.ts",
+    "./error_reporting": "./src/error_reporting/index.ts",
+    "./error_reporting/react": "./src/error_reporting/react.tsx",
+    "./error_reporting/testing": "./src/error_reporting/recording_exporter.ts"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "typecheck": "../../node_modules/typescript-native/bin/tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@slop-factory/storage": "*",
+    "@slop-factory/ui": "*",
+    "@opentelemetry/api-logs": "^0.220.0",
+    "@opentelemetry/core": "^2.9.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/sdk-logs": "^0.220.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0"
+  },
+  "devDependencies": {
+    "@slop-factory/storybook-kit": "*",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@testing-library/react": "^16.3.2",
+    "jsdom": "^29.1.1",
+    "sass": "^1.101.0"
+  },
+  "peerDependencies": {
+    "react": "^19.2.7"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

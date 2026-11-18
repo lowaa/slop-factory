@@ -1,0 +1,34 @@
+-- error: false --
+-- text --
+Granted ticket #7: Split the register
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a -- its PR's description links back here, with "slop-haus #7".
+THIS TICKET IS DONE THROUGH ANOTHER ATTEMPT, and yours is a live shadow of it. That is expected: finish your attempt as normal -- open your PR from your own branch (change_open targets the ticket's base branch for you; it cannot merge to the base branch), then ticket_finish as for any attempt. Don't stop or release because the ticket says done.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-7-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "guidance": {
+    "done_through_other": "THIS TICKET IS DONE THROUGH ANOTHER ATTEMPT, and yours is a live shadow of it. That is expected: finish your attempt as normal -- open your PR from your own branch (change_open targets the ticket's base branch for you; it cannot merge to the base branch), then ticket_finish as for any attempt. Don't stop or release because the ticket says done."
+  },
+  "ticket": {
+    "body": "Move each tool next to its handler.\nNo behaviour change.",
+    "id": 7,
+    "paths": [
+      "server/internal/mcpserver/",
+      "server/internal/ticket/"
+    ],
+    "priority": "normal",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Split the register",
+    "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+  }
+}

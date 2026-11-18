@@ -1,0 +1,23 @@
+// Every Go module in the repo. Their go.mod files don't require each other:
+// siblings resolve through this workspace, at the source in the repo, not
+// through tagged releases. So `go mod tidy` can't resolve them; build and
+// test through the workspace.
+//
+// This lists everything, so it doesn't stop an app importing a module it
+// shouldn't. Each app's Dockerfile does: its `go work init` names only the
+// modules that app may use, and its test.sh and CI build through it.
+go 1.27.4
+
+use (
+	./artifact-store
+	./go-auth
+	./go-clock
+	./go-db
+	./go-llm-usage
+	./go-privacy
+	./go-settings
+	./go-web
+	./slop-review
+	./slop-review/report
+	./slop-haus/server
+)

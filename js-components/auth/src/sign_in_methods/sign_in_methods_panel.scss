@@ -1,0 +1,121 @@
+// Tokens as auth_layout.scss and @slop-factory/ui read them, with the
+// same fallbacks, so the panel sits in either app's account page with no
+// host styling of its own. A host that restyles it does so under its own
+// class, like the auth card (see AuthPagesConfig.layoutClassName).
+.sign-in-methods {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 640px;
+
+  &__title {
+    margin: 0;
+    font-size: var(--text-lg-plus);
+  }
+
+  &__muted {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  &__item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+
+    & + & {
+      border-top: 1px solid var(--color-border);
+    }
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  &__what {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__name {
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  &__detail {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__form,
+  &__confirm,
+  &__resume {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-width: 360px;
+    font-size: var(--text-sm);
+    font-weight: 550;
+    color: var(--color-text);
+
+    input {
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg-raised);
+      color: var(--color-text);
+      font: inherit;
+      font-weight: normal;
+    }
+  }
+
+  &__step-up {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-sunken);
+
+    .provider-buttons {
+      max-width: 360px;
+    }
+  }
+
+  &__step-up-title {
+    margin: 0;
+    font-size: var(--text-md);
+  }
+}

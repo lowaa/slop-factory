@@ -1,0 +1,8 @@
+.pr-link {
+  color: var(--color-accent);
+  overflow-wrap: anywhere;
+
+  &:hover {
+    color: var(--color-accent-hot);
+  }
+}

@@ -1,0 +1,12 @@
+.consent-settings {
+  &__title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-lg);
+  }
+
+  &__list {
+    margin: 0 0 var(--space-3);
+    padding-left: var(--space-5);
+    font-size: var(--text-md);
+  }
+}

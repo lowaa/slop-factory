@@ -1,0 +1,111 @@
+schema_version: 1
+app: notes-demo
+
+purposes:
+  - id: necessary
+    kind: cookie_category
+    description: Keeping you signed in and the site secure
+    legal_basis: TODO-LEGAL
+  - id: analytics
+    kind: cookie_category
+    description: Understanding how the site is used
+    legal_basis: TODO-LEGAL
+  - id: notes_service
+    kind: operational
+    description: Storing and showing your notes
+    legal_basis: TODO-LEGAL
+  - id: spell_check
+    kind: processing
+    description: Checking your notes' spelling with a third party
+    legal_basis: TODO-LEGAL
+
+data_categories:
+  - id: account
+    description: Email address and password hash
+    purposes: [notes_service]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: users
+      - kind: backups
+        name: db-backups
+        note: not configured
+    retention: account_data
+  - id: note_text
+    description: The text of notes
+    special_category: health
+    purposes: [notes_service, spell_check]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: notes
+      - kind: object_store
+        name: attachments
+    retention: note_data
+    processors: [spellco]
+
+tables:
+  - name: users
+    categories: [account]
+  - name: notes
+    categories: [note_text]
+  - name: feature_flags
+    no_personal_data: true
+
+processors:
+  - id: spellco
+    name: SpellCo
+    role: processor
+    purpose: Spell checking
+    data_shared: [note_text]
+    location: unknown
+    transfer_mechanism: TODO-LEGAL
+    sub_processors: [cloudhost]
+    config_keys: [SPELLCO_API_KEY, SPELLCO_BASE_URL]
+  - id: cloudhost
+    name: CloudHost | Inc
+    role: sub_processor
+    purpose: Hosting for SpellCo
+    data_shared: [note_text]
+    location: Examplestan
+    transfer_mechanism: TODO-LEGAL
+    sub_processors: [unknown]
+
+internal_services:
+  - id: app
+    name: This app
+    config_keys: [PUBLIC_BASE_URL, DATABASE_URL]
+
+storage:
+  - key: notes_session
+    type: cookie
+    purpose: necessary
+    first_party: true
+    lifetime: 15m
+    description: Your signed-in session
+    set_by: server
+  - key: notes-demo:draft
+    type: session_storage
+    purpose: necessary
+    first_party: true
+    lifetime: tab
+    description: An unsaved note, kept if the page reloads
+    set_by: frontend
+  - key: notes-demo:visit
+    type: local_storage
+    purpose: analytics
+    first_party: true
+    lifetime: 1y
+    description: A random id for counting visits
+    set_by: frontend
+
+retention_classes:
+  - id: account_data
+    description: Account details
+    period: indefinite
+    mechanism: none
+  - id: note_data
+    description: Notes
+    period: 90d
+    placeholder: true
+    mechanism: nightly purge job

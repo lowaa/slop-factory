@@ -1,0 +1,51 @@
+version: 2
+# Each ecosystem gets one grouped pull request a week. The cooldown leaves a
+# new release two weeks to be pulled if it turns out to be bad or
+# compromised.
+updates:
+  # The workflows pin every action to a commit SHA, so nothing else moves them.
+  - package-ecosystem: github-actions
+    directories: ["/", "/.github/actions/*"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Every Go module, the lint tools' (dev-tools/lint/go.mod) among them. A
+  # lint tool bump can change what it reports: regenerate the baselines it
+  # moves in the same pull request (dev-tools/lint/README.md).
+  - package-ecosystem: gomod
+    directories:
+      - /artifact-store
+      - /dev-tools/lint
+      - /go-auth
+      - /go-clock
+      - /go-db
+      - /go-llm-usage
+      - /go-privacy
+      - /go-settings
+      - /go-web
+      - /slop-haus/server
+      - /slop-review
+      - /slop-review/report
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      go:
+        patterns: ["*"]
+
+  # The root lockfile resolves every npm workspace.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      npm:
+        patterns: ["*"]

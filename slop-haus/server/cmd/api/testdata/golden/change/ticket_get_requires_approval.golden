@@ -1,0 +1,32 @@
+-- error: false --
+-- text --
+#1 Change flow [in_progress, revision 0]
+
+Scopes: server/flow/
+Link: {board}/tickets/1?tenant={tenant}
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+REQUIRES HUMAN APPROVAL: once the work is finished, take your PR out of draft and call ticket_finish with its URL and a handoff. Don't merge it -- a human approves it first.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-1-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "guidance": {
+    "review": "REQUIRES HUMAN APPROVAL: once the work is finished, take your PR out of draft and call ticket_finish with its URL and a handoff. Don't merge it -- a human approves it first."
+  },
+  "id": 1,
+  "paths": [
+    "server/flow/"
+  ],
+  "priority": "normal",
+  "requires_approval": true,
+  "revision": 0,
+  "status": "in_progress",
+  "title": "Change flow",
+  "url": "{board}/tickets/1?tenant={tenant}"
+}

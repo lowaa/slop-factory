@@ -1,0 +1,37 @@
+[project]
+name = "slop-haus-supervisor"
+version = "0.1.0"
+description = "Client-side supervisor that runs one headless harness session per slop-haus ticket"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+slop-haus-supervisor = "slop_haus_supervisor.cli:main"
+slop-haus-remote-control = "slop_haus_supervisor.remote_control.host.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3,<10",
+    "pyright>=1.1.390",
+    "jsonschema>=4.23,<5",
+    "pytest-xdist>=3.6,<4",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.13"]
+build-backend = "uv_build"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+enableTypeIgnoreComments = false
+reportUnnecessaryTypeIgnoreComment = true
+include = ["src", "tests"]
+extraPaths = ["src", "tests/fleet", "tests/slophaus", "tests/remote_control/wire", "tests/remote_control/host", "tests/harness", "tests/contract"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests", "tests/fleet", "tests/slophaus", "tests/remote_control/wire", "tests/remote_control/host", "tests/harness", "tests/contract"]
+# -n 4 (~40s against ~135s on one worker), not auto: CI runs this beside the
+# Go suite on a shared agent, where a worker per core would compete with it.
+addopts = "-m 'not smoke' -n 4"
+markers = ["smoke: runs the real `claude` binary; skipped by default (see README.md)"]

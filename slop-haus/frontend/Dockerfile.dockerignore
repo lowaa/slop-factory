@@ -1,0 +1,77 @@
+**
+
+!package.json
+!package-lock.json
+
+!js-components/ui/package.json
+!js-components/ui/src
+!js-components/ui/src/**
+
+!js-components/auth/package.json
+!js-components/auth/src
+!js-components/auth/src/**
+
+!js-components/logging/package.json
+!js-components/logging/src
+!js-components/logging/src/**
+
+!js-components/privacy/package.json
+!js-components/privacy/src
+!js-components/privacy/src/**
+
+!js-components/storage/package.json
+!js-components/storage/src
+!js-components/storage/src/**
+
+!js-components/storybook-kit/package.json
+!js-components/storybook-kit/src
+!js-components/storybook-kit/src/**
+
+!js-components/router/package.json
+!js-components/router/src
+!js-components/router/src/**
+
+!slop-haus/frontend/package.json
+!slop-haus/frontend/index.html
+!slop-haus/frontend/tsconfig.json
+!slop-haus/frontend/tsconfig.app.json
+!slop-haus/frontend/tsconfig.node.json
+!slop-haus/frontend/vite.config.ts
+!slop-haus/frontend/vite.admin.config.ts
+!slop-haus/frontend/vitest.storybook.config.ts
+!slop-haus/frontend/native_test.sh
+!slop-haus/frontend/tools/bundle_budget.mjs
+!slop-haus/frontend/.storybook
+!slop-haus/frontend/.storybook/**
+!slop-haus/frontend/nginx.conf.template
+!slop-haus/frontend/security_headers.conf
+!slop-haus/frontend/src
+!slop-haus/frontend/src/**
+
+# The oxlint ratchet: the configs, the baseline and the scripts. The
+# type-aware rules read the js-components packages through their tsconfigs.
+!.gitignore
+!slop-haus/frontend/.gitignore
+!slop-haus/frontend/.oxlintrc.json
+!slop-haus/frontend/lint_baseline
+!slop-haus/frontend/lint_baseline/**
+# Linted with the rest; bundle_budget.mjs is allowed above for its own use.
+!slop-haus/frontend/tools/import_boundaries.mjs
+!js-components/*/tsconfig.json
+!dev-tools/lint/oxlint.sh
+!dev-tools/lint/ratchet.sh
+!dev-tools/lint/findings.mjs
+!dev-tools/lint/oxlintrc.base.json
+
+# The user guide the help area bundles.
+!slop-haus/docs/guide
+!slop-haus/docs/guide/*.md
+
+# Fixtures the server tests share with the frontend tests.
+!slop-haus/testdata
+
+# The privacy inventory browser_storage.test.ts checks the adapter's keys against.
+!slop-haus/server/privacy/inventory.yaml
+
+# The server's usage allowlist src/usage/allowlist_parity.test.ts checks the catalog against.
+!slop-haus/server/internal/usagemetrics/ui_allowlist.json

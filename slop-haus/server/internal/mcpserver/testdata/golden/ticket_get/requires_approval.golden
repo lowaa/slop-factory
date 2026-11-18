@@ -1,0 +1,26 @@
+-- error: false --
+-- text --
+#7 Split the register [open, revision 0]
+Move each tool next to its handler.
+No behaviour change.
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a
+REQUIRES HUMAN APPROVAL: once the work is finished, take your PR out of draft and call ticket_finish with its URL and a handoff. Don't merge it -- a human approves it first.
+-- structured --
+{
+  "body": "Move each tool next to its handler.\nNo behaviour change.",
+  "guidance": {
+    "review": "REQUIRES HUMAN APPROVAL: once the work is finished, take your PR out of draft and call ticket_finish with its URL and a handoff. Don't merge it -- a human approves it first."
+  },
+  "id": 7,
+  "paths": [
+    "server/internal/mcpserver/",
+    "server/internal/ticket/"
+  ],
+  "priority": "normal",
+  "requires_approval": true,
+  "revision": 0,
+  "status": "open",
+  "title": "Split the register",
+  "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+}

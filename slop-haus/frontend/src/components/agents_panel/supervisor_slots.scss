@@ -1,0 +1,54 @@
+.supervisor-slots {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-md);
+
+  &__slot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+
+    &--stalled {
+      border-color: var(--color-warning);
+      background: var(--color-warning-bg);
+    }
+  }
+
+  &__slot--paused {
+    border-color: var(--color-danger);
+    background: var(--color-danger-bg);
+  }
+
+  &__paused {
+    flex-basis: 100%;
+    color: var(--color-danger);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  &__agent {
+    font-weight: 600;
+  }
+
+  &__reason {
+    color: var(--color-text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  &__stale {
+    color: var(--color-warning);
+    overflow-wrap: anywhere;
+  }
+
+  &__stalled {
+    color: var(--color-warning);
+    font-weight: 600;
+  }
+}

@@ -1,0 +1,50 @@
+@use "typography";
+
+// A bordered box. The default is a raised card; pass --color-bg for a well
+// that sits inside one.
+@mixin box($radius: var(--radius-sm), $background: var(--color-bg-raised)) {
+  border: 1px solid var(--color-border);
+  border-radius: $radius;
+  background: $background;
+}
+
+// A small uppercase pill: a status, a priority, a count. A state that
+// recolours it overrides background and color after the include.
+@mixin tag(
+  $padding: var(--space-0-5) var(--space-1-5),
+  $background: var(--color-bg-muted),
+  $color: var(--color-text-muted),
+  $size: 11px
+) {
+  padding: $padding;
+  border-radius: 4px;
+  background: $background;
+  color: $color;
+
+  /* stylelint-disable-next-line declaration-property-value-allowed-list -- the caller passes a value from the size scale */
+  font-size: $size;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+// A <details> that starts closed: a raised box whose summary is the
+// section label, ruled off from the body once open. The body is the
+// component's own.
+@mixin accordion {
+  @include box(var(--radius));
+
+  > summary {
+    padding: var(--space-3-5) var(--space-4);
+    cursor: pointer;
+
+    @include typography.section-label;
+
+    &:hover {
+      color: var(--color-accent-hot);
+    }
+  }
+
+  &[open] > summary {
+    border-bottom: 1px solid var(--color-border);
+  }
+}

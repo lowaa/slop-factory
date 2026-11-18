@@ -1,0 +1,76 @@
+// Sticky to the bottom of what scrolls, so the actions stay in reach
+// however far down a long column the selection goes -- on a phone above
+// all, where the board is one tall column.
+.bulk-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-base);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3-5);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  background: var(--color-bg-raised);
+  box-shadow: var(--shadow-lg);
+
+  &__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3-5);
+  }
+
+  &__count {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--color-accent-hot);
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  &__exit {
+    margin-left: auto;
+  }
+
+  &__confirm,
+  &__outcome {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    font-size: var(--text-sm);
+
+    p {
+      margin: 0;
+    }
+
+    button {
+      align-self: flex-start;
+    }
+  }
+
+  &__confirm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  // A long refusal list scrolls inside the bar rather than pushing the bar
+  // up over the board it is sticky above.
+  &__refusals {
+    max-height: 30vh;
+    margin: 0;
+    padding-left: 18px;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+  }
+}

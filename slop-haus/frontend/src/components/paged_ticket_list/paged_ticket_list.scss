@@ -1,0 +1,71 @@
+@use "@/styles/layout";
+@use "@/styles/surfaces";
+
+.paged-ticket-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  // Part of the chain from .app__main down to the list's viewport: every
+  // level a flex column with flex: 1 and min-height: 0, or the viewport
+  // stretches the page instead of scrolling its own rows.
+  flex: 1;
+  min-height: 0;
+
+  &__empty {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+  }
+
+  &__notice {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__slot {
+    // Spacing inside the row's own box: the list measures the box, and a
+    // margin would not be counted in its height.
+    padding: var(--space-1) var(--space-2);
+  }
+
+  &__row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+    padding: var(--space-3) 14px;
+
+    @include surfaces.box(var(--radius));
+  }
+
+  &__ticket {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-text);
+    text-decoration: none;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--color-accent-hot);
+    }
+  }
+
+  &__control {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+@include layout.rows {
+  .paged-ticket-list__row {
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3-5);
+  }
+
+  .paged-ticket-list__ticket {
+    flex-basis: 100%;
+  }
+}

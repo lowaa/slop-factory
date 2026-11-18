@@ -1,0 +1,31 @@
+{
+  "receiver": "slop-haus",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {"alertname": "KubePodCrashLooping", "namespace": "slop-haus", "pod": "api-6d9f7c8b5-x2x4k", "severity": "warning"},
+      "annotations": {"summary": "Pod is crash looping.", "description": "Pod slop-haus/api-6d9f7c8b5-x2x4k (api) is in waiting state (reason: \"CrashLoopBackOff\")."},
+      "startsAt": "2026-10-04T10:00:00.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=crashloop",
+      "fingerprint": "1111111111111111"
+    },
+    {
+      "status": "firing",
+      "labels": {"alertname": "KubePodCrashLooping", "namespace": "slop-haus", "pod": "api-6d9f7c8b5-q8m2z", "severity": "warning"},
+      "annotations": {"summary": "Pod is crash looping.", "description": "Pod slop-haus/api-6d9f7c8b5-q8m2z (api) is in waiting state (reason: \"CrashLoopBackOff\")."},
+      "startsAt": "2026-10-04T10:01:10.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=crashloop",
+      "fingerprint": "2222222222222222"
+    }
+  ],
+  "groupLabels": {"alertname": "KubePodCrashLooping", "namespace": "slop-haus"},
+  "commonLabels": {"alertname": "KubePodCrashLooping", "namespace": "slop-haus", "severity": "warning"},
+  "commonAnnotations": {"summary": "Pod is crash looping."},
+  "externalURL": "http://alertmanager.monitoring:9093",
+  "version": "4",
+  "groupKey": "{}:{alertname=\"KubePodCrashLooping\", namespace=\"slop-haus\"}",
+  "truncatedAlerts": 0
+}

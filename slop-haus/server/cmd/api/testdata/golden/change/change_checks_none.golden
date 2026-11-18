@@ -1,0 +1,11 @@
+-- error: false --
+-- text --
+https://github.com/acme/repo/pull/12: checks on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa are none (nothing has reported on this commit: not a pass)
+-- structured --
+{
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "note": "nothing has reported on this commit: not a pass",
+  "passed": false,
+  "state": "none",
+  "url": "https://github.com/acme/repo/pull/12"
+}

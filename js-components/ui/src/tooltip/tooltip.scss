@@ -1,0 +1,32 @@
+.tooltip {
+  position: relative;
+  display: inline-flex;
+
+  &__bubble {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    // tooltip.tsx overrides --tooltip-shift inline to keep the bubble
+    // on-screen. Declared here too, so a host that checks every var() has a
+    // definition (an app's theme token test, say) sees it as defined.
+    --tooltip-shift: 0px;
+    transform: translateX(calc(-50% + var(--tooltip-shift)));
+    z-index: var(--z-dropdown);
+    width: max-content;
+    // Never wider than the screen less tooltip.tsx's edge margin, or no
+    // shift could fit it.
+    max-width: min(240px, calc(100vw - 16px));
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-raised);
+    color: var(--color-text-muted);
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: normal;
+    box-shadow: var(--glow-soft);
+    // Purely informational -- it must never be what the pointer that
+    // opened it then has to move through to reach something else.
+    pointer-events: none;
+  }
+}

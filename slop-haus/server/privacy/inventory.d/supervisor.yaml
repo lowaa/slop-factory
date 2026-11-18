@@ -1,0 +1,14 @@
+  - name: agent_workspace_layouts
+    categories: [agents]
+  - name: supervisor_desired_state
+    categories: [agents]
+  - name: supervisor_desired_agents
+    categories: [agents]
+  - name: workspace_manifests
+    categories: [team_settings]
+  - name: workspace_manifest_revisions
+    categories: [team_settings]
+  - name: remote_control_host_leases
+    categories: [agent_activity]
+  - name: supervisor_slot_states
+    categories: [agent_activity]

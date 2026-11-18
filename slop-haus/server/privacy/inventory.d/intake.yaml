@@ -1,0 +1,6 @@
+  - name: intake_sources
+    categories: [intake_deliveries]
+  - name: intake_deliveries
+    categories: [intake_deliveries]
+  - name: intake_events
+    categories: [work_record]

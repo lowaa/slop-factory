@@ -1,0 +1,86 @@
+@use "@/styles/forms";
+@use "@/styles/surfaces";
+
+.agent-roles {
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+  }
+
+  &__row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-3-5);
+
+    @include surfaces.box;
+  }
+
+  &__name,
+  &__description,
+  &__actions {
+    display: flex;
+    align-items: center;
+  }
+
+  &__name {
+    font-weight: 500;
+  }
+
+  &__description {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  &__actions {
+    gap: var(--space-2);
+    align-self: flex-end;
+  }
+
+  &__edit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-3);
+  }
+
+  &__edit,
+  &__create {
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-1);
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+    }
+
+    input {
+      @include forms.text-control;
+    }
+  }
+
+  &__row-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  &__conflict-tickets {
+    margin: 0;
+    padding-left: 18px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  &__create {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-3-5);
+  }
+}

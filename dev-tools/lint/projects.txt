@@ -1,0 +1,24 @@
+# What lint.sh runs for each project: "<runner> <directory>", a runner being
+# go (go.sh), oxlint (oxlint.sh) or ruff (ruff.sh). Each project's own test.sh
+# runs the same runner on the same directory, and CI runs every test.sh, so
+# CI lints whatever `lint.sh --changed` did and more (lint.bats checks both
+# halves: that every Go module and Python file is here, and that each line's
+# test.sh calls its runner).
+go artifact-store
+go go-auth
+go go-clock
+go go-db
+go go-llm-usage
+go go-privacy
+go go-settings
+go go-web
+go slop-haus/server
+go slop-review
+go slop-review/report
+oxlint js-components
+oxlint slop-haus/frontend
+ruff go-db/e2e_test
+ruff slop-haus/harness_e2e
+ruff slop-haus/server
+ruff slop-haus/supervisor
+ruff slop-haus/token

@@ -1,0 +1,16 @@
+-- error: false --
+-- text --
+#42 A ticket [open, revision 0]
+
+Scopes: (none declared)
+Link: https://board.slop-haus.test/tickets/42?tenant=00000000-0000-0000-0000-00000000000a
+-- structured --
+{
+  "id": 42,
+  "paths": [],
+  "priority": "",
+  "revision": 0,
+  "status": "open",
+  "title": "A ticket",
+  "url": "https://board.slop-haus.test/tickets/42?tenant=00000000-0000-0000-0000-00000000000a"
+}

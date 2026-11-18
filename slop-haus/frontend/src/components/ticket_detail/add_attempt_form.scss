@@ -1,0 +1,52 @@
+.add-attempt-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+  }
+
+  ul {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: flex-end;
+
+    .dropdown {
+      min-width: 280px;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    p {
+      margin: 0;
+    }
+  }
+
+  &__replay-warning {
+    border-left: 3px solid currentcolor;
+    padding-left: var(--space-2);
+  }
+}

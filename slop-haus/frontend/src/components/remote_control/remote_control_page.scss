@@ -1,0 +1,74 @@
+@use "@/styles/layout";
+
+// Fills the app's main area, so the open chat can take the height left under
+// the setup panels and scroll its transcript inside it. The floor on __main is
+// for when those panels are open and tall: the page scrolls then, rather than
+// squeezing the chat to nothing.
+.remote-control {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-4);
+
+  &__body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: var(--space-4-5);
+  }
+
+  // Its own scroll, so a long list of sessions doesn't push the chat down.
+  .sessions-panel {
+    overflow-y: auto;
+  }
+
+  &__main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 240px;
+  }
+
+  &__empty {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+
+  &__link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  @include layout.narrow {
+    &__body {
+      flex-direction: column;
+    }
+
+    .sessions-panel {
+      flex: none;
+      overflow-y: visible;
+    }
+
+    // The list screen is as long as it is and the page scrolls; the chat
+    // screen is exactly the height there is (the visual viewport, via
+    // #root's 100dvh), so the keyboard shrinks the transcript and the page
+    // itself never scrolls. __main's floor is for the desktop panels.
+    &--chat &__main {
+      min-height: 0;
+    }
+
+    &--chat {
+      gap: 0;
+    }
+
+    &--chat &__body {
+      min-height: 0;
+    }
+  }
+}

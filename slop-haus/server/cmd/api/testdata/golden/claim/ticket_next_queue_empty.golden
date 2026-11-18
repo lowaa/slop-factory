@@ -1,0 +1,7 @@
+-- error: false --
+-- text --
+The queue is empty.
+-- structured --
+{
+  "message": "The queue is empty."
+}

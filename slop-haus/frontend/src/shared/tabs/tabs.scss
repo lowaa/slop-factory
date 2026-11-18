@@ -1,0 +1,32 @@
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3-5);
+
+  // A quiet underline rather than a filled pill: these choose what to read,
+  // they are not the action.
+  &__list {
+    display: flex;
+    gap: var(--space-1);
+    border-bottom: 1px solid var(--color-border);
+
+    button {
+      padding: var(--space-2) var(--space-3-5);
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: var(--text-sm);
+
+      &:hover {
+        color: var(--color-text);
+      }
+
+      &.is-selected {
+        color: var(--color-accent-hot);
+        border-bottom-color: var(--color-accent-hot);
+      }
+    }
+  }
+}

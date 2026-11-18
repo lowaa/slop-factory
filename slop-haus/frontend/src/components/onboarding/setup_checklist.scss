@@ -1,0 +1,25 @@
+.setup-checklist {
+  padding: var(--space-2) var(--space-3-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+
+  &__heading {
+    margin: 0 0 var(--space-1);
+    font-size: var(--text-md);
+  }
+
+  &__text {
+    margin: 0 0 var(--space-1);
+  }
+
+  &__steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__step--done {
+    opacity: 0.6;
+  }
+}

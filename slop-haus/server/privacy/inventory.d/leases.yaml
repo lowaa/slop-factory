@@ -1,0 +1,18 @@
+  - name: leases
+    categories: [agent_activity]
+  - name: lease_configs
+    categories: [agent_activity]
+  - name: scope_blocks
+    categories: [agent_activity]
+  - name: scope_extension_denials
+    categories: [agent_activity]
+  - name: scope_narrowings
+    categories: [agent_activity]
+  - name: locks
+    categories: [agent_activity]
+  - name: lock_waiters
+    categories: [agent_activity]
+  - name: lock_holds
+    categories: [agent_activity]
+  - name: worker_polls
+    categories: [agents]

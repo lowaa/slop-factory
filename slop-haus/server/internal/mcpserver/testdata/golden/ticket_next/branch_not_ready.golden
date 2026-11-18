@@ -1,0 +1,23 @@
+-- error: false --
+-- text --
+Granted ticket #7: Split the register
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Branch: ticket-7-a2-split-the-register is NOT READY -- slop-haus could not make it on the code host just now. Don't make a branch of your own: call ticket_get to have it made again, and release the ticket with a comment if that keeps failing.
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a -- its PR's description links back here, with "slop-haus #7".
+-- structured --
+{
+  "ticket": {
+    "base_commit": "0123456789abcdef0123456789abcdef01234567",
+    "body": "Move each tool next to its handler.\nNo behaviour change.",
+    "id": 7,
+    "paths": [
+      "server/internal/mcpserver/",
+      "server/internal/ticket/"
+    ],
+    "priority": "normal",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Split the register",
+    "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+  }
+}

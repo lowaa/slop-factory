@@ -1,0 +1,9 @@
+-- error: false --
+-- text --
+Opened https://github.com/acme/repo/pull/12 (a draft) and recorded it on your ticket.
+-- structured --
+{
+  "draft": true,
+  "number": 12,
+  "url": "https://github.com/acme/repo/pull/12"
+}

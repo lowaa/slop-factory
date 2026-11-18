@@ -1,0 +1,31 @@
+-- error: false --
+-- text --
+#7 Split the register [open, revision 0]
+Move each tool next to its handler.
+No behaviour change.
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a
+Your branch ticket-7-a2 is ready (made at base commit 0123456789abcdef0123456789abcdef01234567): git fetch origin && git switch ticket-7-a2. Open your PR from it; change_open refuses any other. If it already has commits they are an earlier agent's: continue from what is pushed there rather than starting over.
+-- structured --
+{
+  "attempt": {
+    "base_commit": "0123456789abcdef0123456789abcdef01234567",
+    "branch": "ticket-7-a2",
+    "guidance": "Your branch ticket-7-a2 is ready (made at base commit 0123456789abcdef0123456789abcdef01234567): git fetch origin \u0026\u0026 git switch ticket-7-a2. Open your PR from it; change_open refuses any other. If it already has commits they are an earlier agent's: continue from what is pushed there rather than starting over.",
+    "managed": true,
+    "number": 2,
+    "ready": true
+  },
+  "base_commit": "0123456789abcdef0123456789abcdef01234567",
+  "body": "Move each tool next to its handler.\nNo behaviour change.",
+  "id": 7,
+  "paths": [
+    "server/internal/mcpserver/",
+    "server/internal/ticket/"
+  ],
+  "priority": "normal",
+  "revision": 0,
+  "status": "open",
+  "title": "Split the register",
+  "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+}

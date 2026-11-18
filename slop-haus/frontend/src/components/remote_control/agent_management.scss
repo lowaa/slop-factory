@@ -1,0 +1,67 @@
+@use "@/styles/layout";
+@use "@/styles/surfaces";
+
+.agent-menu {
+  position: relative;
+  flex: none;
+
+  &__button {
+    min-width: 28px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--color-text);
+    line-height: 1;
+    cursor: pointer;
+
+    &[aria-expanded="true"] {
+      border-color: var(--color-accent);
+      color: var(--color-accent-hot);
+    }
+
+    @include layout.narrow {
+      min-width: layout.$touch-target;
+      min-height: layout.$touch-target;
+    }
+  }
+
+  &__panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: var(--z-menu);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+    padding: var(--space-2);
+
+    @include surfaces.box;
+
+    box-shadow: var(--shadow-lg);
+    white-space: nowrap;
+  }
+}
+
+.agent-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+
+  p {
+    margin: 0;
+  }
+
+  &__confirm,
+  &__config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__error {
+    color: var(--color-danger);
+  }
+}

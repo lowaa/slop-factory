@@ -1,0 +1,5 @@
+-- error: true --
+-- text --
+you do not hold the integration lock: take it with integration_lock first
+-- structured --
+null

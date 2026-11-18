@@ -1,0 +1,50 @@
+.attempt-tabs {
+  border-bottom: 1px solid var(--color-border);
+
+  ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  a {
+    display: flex;
+    gap: var(--space-1-5);
+    align-items: baseline;
+    padding: var(--space-2) var(--space-3-5);
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    text-decoration: none;
+
+    &:hover {
+      color: var(--color-text);
+    }
+
+    &.is-closed {
+      text-decoration: line-through;
+      opacity: 0.7;
+    }
+
+    &.is-selected {
+      color: var(--color-accent-hot);
+      border-bottom-color: var(--attempt-accent);
+    }
+  }
+
+  &__dot {
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--attempt-accent);
+  }
+
+  &__status {
+    font-size: var(--text-2xs);
+    text-transform: capitalize;
+  }
+}

@@ -1,0 +1,36 @@
+-- error: false --
+-- text --
+Granted ticket #7: Split the register
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a -- its PR's description links back here, with "slop-haus #7".
+APPROVED: a human approved its PR. Call ticket_finish: where the server lands tickets it says the ticket is in the landing queue and you are done. Otherwise you merge it: merge main into the branch, re-run the tests and push, once, and get the checks green; then take integration_lock even if main has moved since, and re-check under it (if main has moved and merging it is clean, merge it, re-test and push; never merge main again before the lock, nor to avoid waiting in the lock's queue: if the lock is held, queue for it), merge the PR and release the lock; then ticket_finish with the PR's URL as pr_url. If the PR is already merged -- a human may have merged it -- just call ticket_finish. If bringing main in needs conflict resolution in this ticket's own code, don't merge: push the resolution and call ticket_finish again.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-7-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "guidance": {
+    "review": "APPROVED: a human approved its PR. Call ticket_finish: where the server lands tickets it says the ticket is in the landing queue and you are done. Otherwise you merge it: merge main into the branch, re-run the tests and push, once, and get the checks green; then take integration_lock even if main has moved since, and re-check under it (if main has moved and merging it is clean, merge it, re-test and push; never merge main again before the lock, nor to avoid waiting in the lock's queue: if the lock is held, queue for it), merge the PR and release the lock; then ticket_finish with the PR's URL as pr_url. If the PR is already merged -- a human may have merged it -- just call ticket_finish. If bringing main in needs conflict resolution in this ticket's own code, don't merge: push the resolution and call ticket_finish again."
+  },
+  "ticket": {
+    "body": "Move each tool next to its handler.\nNo behaviour change.",
+    "id": 7,
+    "paths": [
+      "server/internal/mcpserver/",
+      "server/internal/ticket/"
+    ],
+    "priority": "normal",
+    "requires_approval": true,
+    "review": "approved",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Split the register",
+    "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+  }
+}

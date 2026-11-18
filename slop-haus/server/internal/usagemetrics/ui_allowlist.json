@@ -1,0 +1,377 @@
+{
+  "events": {
+    "screen_view": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      }
+    },
+    "screen_time": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "visible_ms": {
+        "type": "int",
+        "max": 1800000,
+        "step": 5000
+      }
+    },
+    "steward_answer": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "action": {
+        "type": "enum",
+        "values": [
+          "open",
+          "assess",
+          "approve",
+          "edit",
+          "reject",
+          "veto"
+        ]
+      }
+    },
+    "proposal_decision": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "action": {
+        "type": "enum",
+        "values": [
+          "approve",
+          "reject",
+          "apply_steward_draft"
+        ]
+      }
+    },
+    "remote_control": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "action": {
+        "type": "enum",
+        "values": [
+          "start_session",
+          "send_message"
+        ]
+      }
+    },
+    "filter_used": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "filter": {
+        "type": "enum",
+        "values": [
+          "ticket_text",
+          "ticket_field",
+          "ticket_clear",
+          "reports_period",
+          "reports_priority",
+          "reports_parked"
+        ]
+      },
+      "has_text": {
+        "type": "bool",
+        "optional": true
+      }
+    },
+    "bulk_action": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "action": {
+        "type": "enum",
+        "values": [
+          "move",
+          "mark_ready",
+          "priority"
+        ]
+      },
+      "outcome": {
+        "type": "enum",
+        "values": [
+          "done",
+          "refused",
+          "error"
+        ]
+      },
+      "count_bucket": {
+        "type": "enum",
+        "values": [
+          "0",
+          "1",
+          "2-5",
+          "6-20",
+          "21+"
+        ]
+      }
+    },
+    "new_ticket": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "action": {
+        "type": "enum",
+        "values": [
+          "open_form",
+          "create_open",
+          "create_preparing"
+        ]
+      }
+    },
+    "lock_action": {
+      "screen": {
+        "type": "enum",
+        "values": [
+          "board",
+          "remote_control",
+          "blocked",
+          "approvals",
+          "steward",
+          "unreviewed",
+          "reports",
+          "compare",
+          "workspace",
+          "github_app_setup",
+          "workers",
+          "add_machine",
+          "members",
+          "tenant_settings",
+          "git",
+          "intake",
+          "eval_sets",
+          "ticket",
+          "ticket_attempt",
+          "account",
+          "new_tenant",
+          "help",
+          "help_page",
+          "legal"
+        ]
+      },
+      "action": {
+        "type": "enum",
+        "values": [
+          "force_unlock",
+          "drop_waiter"
+        ]
+      },
+      "outcome": {
+        "type": "enum",
+        "values": [
+          "done",
+          "error"
+        ]
+      }
+    }
+  }
+}

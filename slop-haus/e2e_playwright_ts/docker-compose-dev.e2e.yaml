@@ -1,0 +1,231 @@
+# Overlay for ../docker-compose-dev.yaml, adding the dockerized TypeScript
+# Playwright e2e suite -- see this directory's test.sh for why this file
+# exists (a separate step from the base stack's own `up`, via the "e2e-ts"
+# profile below). It is slop-haus's lean dev stack (no traefik/temporal)
+# plus MailHog, since auth/tenancy landed: password-reset needs somewhere for
+# the email to go.
+#
+# Compose merges multiple -f files into one project, so this only needs to
+# add the new service -- the slophaus-network it joins, and the api/
+# postgres/frontend/mailhog/seed services it talks to, come from the base
+# file already.
+#
+# It also *unpublishes* the base file's host ports. The tests reach every
+# service by its compose DNS name over slophaus-network, so publishing to
+# the host buys an e2e run nothing and costs it a collision with anything
+# else already bound there -- another project's dev stack, or a second
+# workspace of this one. That is not hypothetical: this suite first failed
+# with "Bind for 0.0.0.0:8090 failed: port is already allocated" because a
+# sibling project's e2e run held it. Host ports stay in the base file,
+# where interactive dev (../dev_env.sh) actually wants them.
+#
+# `!override` replaces the inherited sequence; a plain `ports: []` would be
+# merged with the base file's list and change nothing.
+# The e2e image, shared by the test runner and fake-github (which runs node
+# from it). Compose resolves relative build paths against the primary compose
+# file's directory (docker-compose-dev.yaml, in slop-haus/), not against this
+# overlay file's own directory -- so the context must be "e2e_playwright_ts",
+# even though the Dockerfile it points at lives right next to this file. What
+# lives outside it comes in as named contexts, relative to slop-haus/ too.
+x-e2e-build: &e2e_build
+  context: e2e_playwright_ts
+  dockerfile: Dockerfile
+  additional_contexts:
+    privacy: server/privacy
+    storybook_kit: ../js-components/storybook-kit/src
+    e2e_support: ../js-components/e2e-support/src
+    hook_payloads: server/internal/hookserver/testdata/claude
+
+services:
+  postgres:
+    ports: !override []
+    # In memory rather than on the base file's named volume: a run's data
+    # goes with its stack anyway, and the suite TRUNCATEs before every test.
+    # On a CI agent whose Docker root is btrfs (copy-on-write, compressed),
+    # concurrent stacks' fsyncs stalled the api for 5-16s at a time, which
+    # the suite saw as socket hang ups and 502s.
+    volumes: !override []
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  otel-collector:
+    ports: !override []
+
+  victoria-logs:
+    ports: !override []
+
+  api:
+    ports: !override []
+    # A name of this run's own (test.sh sets E2E_API_IMAGE) in place of the
+    # base file's slop-haus-api-dev: concurrent runs on one daemon would
+    # otherwise retag each other's build, and a run could test another's api.
+    image: ${E2E_API_IMAGE:?set by test.sh}
+    environment:
+      # Overrides the base file's PUBLIC_BASE_URL (http://localhost:5273,
+      # the address a human's browser reaches the frontend on -- see
+      # docker-compose-dev.yaml). That is oauth.go's Issuer, which is where
+      # it sends a browser after /oauth/authorize and what the well-known
+      # documents advertise -- and "localhost:5273" means something
+      # different inside this container network than it does on the host,
+      # so a redirect built from it is unreachable from the dockerized
+      # e2e-tests-ts browser (mailhog.ts's own doc comment describes the
+      # identical mismatch for emailed activation/reset links, worked
+      # around there by never following the link's origin at all -- an
+      # OAuth redirect is a real 302 the browser must follow, so that
+      # workaround doesn't apply here). e2e-tests-ts's own FRONTEND_BASE_URL
+      # below is the address that *is* reachable from here, so the api is
+      # told to issue against that instead, for this stack only.
+      - PUBLIC_BASE_URL=http://frontend:80
+      # internal/config.go refuses plain http on anything but a loopback
+      # hostname (a real deploy sending session cookies over http would
+      # lose the Secure flag) -- "frontend" isn't loopback, so this
+      # confirms what ports: !override [] above already says: this whole
+      # stack is thrown away at the end of every run.
+      - ALLOW_INSECURE_HTTP=true
+      # A login provider for the provider tests (see dex/config.yaml): Dex,
+      # at an issuer URL the browser and the api both reach as-is on this
+      # network, so a full round trip runs here. The interactive dev stack
+      # has no such URL -- a host browser and the api container see
+      # different "localhost"es -- so it runs without one.
+      - OIDC_ISSUER_URL=http://dex:5556/dex
+      - OIDC_CLIENT_ID=slop-haus
+      - OIDC_CLIENT_SECRET=e2e-only-secret
+      - OIDC_PROVIDER_NAME=dex
+      - OIDC_DISPLAY_NAME=Dex
+      # The GitHub App webhook door, for the webhook tests: its own listener,
+      # reached by the suite directly on this network, as GitHub reaches it
+      # through the funnel door in production.
+      - WEBHOOK_LISTEN_ADDR=:8081
+      - WEBHOOK_PUBLIC_BASE_URL=http://api:8081
+      # The intake door, for the intake tests: its own listener, reached by
+      # the suite directly on this network. Not a real secret.
+      - INTAKE_LISTEN_ADDR=:8082
+      - INTAKE_PUBLIC_BASE_URL=http://api:8082
+      - INTAKE_KEY=e2e-only-intake-key-not-a-real-secret-0123456789
+      # Stored code host credentials, for the GitHub App tests: a throwaway
+      # key, and GitHub's API as the fake-github service below. Not a real
+      # secret.
+      # The suite claims in a tenant with no repo declared; the gate that
+      # refuses that is covered by the api's own boot test.
+      - SETUP_CLAIM_GATE=false
+      - CREDENTIAL_ENCRYPTION_KEY=ZTJlLW9ubHktY3JlZGVudGlhbC1rZXktbm90LXJlYWw=
+      - GITHUB_API_BASE_URL=http://fake-github:8083
+      # GitHub's website is the same fake: the browser posts the App manifest
+      # to it and it redirects back, as github.com does.
+      - GITHUB_WEB_BASE_URL=http://fake-github:8083
+      # The suite's browser signs in as dozens of accounts from one
+      # address, which the per-client limits exist to stop.
+      - LOGIN_CLIENT_LIMIT=100000
+      - MAIL_CLIENT_LIMIT=100000
+
+  seed:
+    # The api image this run built (see api above).
+    image: ${E2E_API_IMAGE:?set by test.sh}
+
+  frontend:
+    ports: !override []
+    environment:
+      # The CSP's form-action must allow the fake GitHub the board posts the
+      # manifest to (see ../frontend/nginx.conf.template).
+      - GITHUB_WEB_ORIGIN=http://fake-github:8083
+
+  mailhog:
+    ports: !override []
+
+  dex:
+    # Config baked in (dex/Dockerfile) rather than mounted, so this stack
+    # mounts nothing from the checkout; docker-compose-dev.e2e.attach.yaml
+    # mounts it for ATTACH=1 runs. Build paths are relative to
+    # docker-compose-dev.yaml's directory.
+    build:
+      context: e2e_playwright_ts/dex
+      dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5556/dex/.well-known/openid-configuration"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - slophaus-network
+
+  # What the api calls as GitHub (see tests/support/fake_github_server.mjs).
+  # Built from the same image as the test runner, which has node.
+  fake-github:
+    build: *e2e_build
+    command: ["node", "tests/support/fake_github_server.mjs"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8083/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - slophaus-network
+
+  # Fills the dev account's tenant with 5,000 tickets for the lists-at-scale
+  # guard (tests/lists_at_scale.spec.ts). Only in the e2e-scale profile, which
+  # test.sh's SCALE=1 mode runs once the stack is up and before the tests.
+  seed-scale:
+    profiles:
+      - e2e-scale
+    image: ${E2E_API_IMAGE:?set by test.sh}
+    command:
+      - /srv/bin/seed_scale
+      - --email=${DEV_USER_EMAIL:-dev@slop-haus.local}
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-slophaus}:${POSTGRES_PASSWORD:?required env var missing}@postgres:5432/${POSTGRES_DB:-slophaus}?sslmode=disable
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    networks:
+      - slophaus-network
+
+  e2e-tests-ts:
+    # Excluded from a plain `up`/`up -d` (with no --profile) -- see
+    # ./test.sh, which runs this one explicitly via `compose run` once the
+    # rest of the stack is up, rather than as part of the same `up` that
+    # brings up everything else.
+    profiles:
+      - e2e-ts
+    build: *e2e_build
+    volumes:
+      # Playwright's traces and screenshots of a failed test. A volume, so
+      # test.sh can copy them out after the (--rm) runner is gone; `down -v`
+      # removes it with the rest of the stack.
+      - e2e-results:/srv/test-results
+    environment:
+      - API_BASE_URL=http://api:8080
+      - WEBHOOK_BASE_URL=http://api:8081
+      - INTAKE_BASE_URL=http://api:8082
+      - FAKE_GITHUB_URL=http://fake-github:8083
+      - FRONTEND_BASE_URL=http://frontend:80
+      - DATABASE_URL=postgres://${POSTGRES_USER:-slophaus}:${POSTGRES_PASSWORD:?required env var missing}@postgres:5432/${POSTGRES_DB:-slophaus}?sslmode=disable
+      # MailHog's HTTP API, for reading activation/password-reset links the
+      # suite triggers -- same address the base file's mailhog service
+      # answers on, reached by compose DNS name since its port is
+      # unpublished above.
+      - MAILHOG_URL=http://mailhog:8025
+      # The base file's seed service creates this account once the api is
+      # healthy (see docker-compose-dev.yaml); e2e-tests-ts depends on that
+      # completing below, so these credentials are guaranteed to work by
+      # the time a test signs in with them. Must match seed's own
+      # DEV_USER_EMAIL/DEV_USER_PASSWORD (both default the same way).
+      - DEV_USER_EMAIL=${DEV_USER_EMAIL:-dev@slop-haus.local}
+      - DEV_USER_PASSWORD=${DEV_USER_PASSWORD:-slop-haus-dev-password}
+    depends_on:
+      postgres:
+        condition: service_started
+      api:
+        condition: service_started
+      frontend:
+        condition: service_started
+      dex:
+        condition: service_healthy
+      fake-github:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    networks:
+      - slophaus-network
+
+volumes:
+  e2e-results:

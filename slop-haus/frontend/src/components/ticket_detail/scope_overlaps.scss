@@ -1,0 +1,6 @@
+.ticket-detail {
+  &__scope-overlaps {
+    border-left: 3px solid var(--color-warning);
+    padding-left: var(--space-3-5);
+  }
+}

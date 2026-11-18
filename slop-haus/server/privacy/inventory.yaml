@@ -1,0 +1,499 @@
+# slop-haus's data inventory: what personal data it holds, where, for how long,
+# who else receives it, and what it sets in the browser. Checked in CI against
+# the migrated database and the config (privacy_test.go), and the source of
+# the generated sections of the legal documents.
+#
+# Read as of the code when it was written; facts about a deployment (hosting,
+# log rotation, metrics retention) are the operator's to fill in.
+# Two values are never filled in from the code:
+#   TODO-LEGAL  a legal basis, transfer mechanism or retention period a
+#               qualified person decides
+#   unknown     a fact that couldn't be confirmed from the repo
+# Nothing here is a legal conclusion.
+#
+# Not listed, for a human to decide: whatever network sits in front of the
+# deployment (a VPN or tunnel may be a processor; the code cannot show it), and
+# alert emails a monitoring stack sends (their recipients and contents are its
+# configuration, not this app's).
+schema_version: 1
+app: slop-haus
+
+purposes:
+  - id: necessary
+    kind: cookie_category
+    description: Signing you in and keeping the service secure
+    legal_basis: TODO-LEGAL
+  - id: analytics
+    kind: cookie_category
+    description: Measuring how the service is used. Nothing is set or sent for it today; it is declared so a choice can be recorded before the first use
+    legal_basis: TODO-LEGAL
+  - id: marketing
+    kind: cookie_category
+    description: Advertising and marketing storage. Nothing is set or sent for it today, and a Global Privacy Control signal always refuses it
+    legal_basis: TODO-LEGAL
+  - id: consent_record
+    kind: operational
+    description: Keeping the cookie choices people make, with the document version they were shown, so they can be honoured and shown back
+    legal_basis: TODO-LEGAL
+  - id: account_service
+    kind: operational
+    description: Creating accounts, signing people in, and separating each team's data
+    legal_basis: TODO-LEGAL
+  - id: work_tracking
+    kind: operational
+    description: Keeping the tickets, comments and agent activity the team uses to coordinate work
+    legal_basis: TODO-LEGAL
+  - id: usage_accounting
+    kind: operational
+    description: Recording what each ticket's agent sessions cost in model usage
+    legal_basis: TODO-LEGAL
+  - id: service_communication
+    kind: operational
+    description: Sending activation, password-reset and invitation emails
+    legal_basis: TODO-LEGAL
+  - id: abuse_prevention
+    kind: operational
+    description: Limiting how often one address can try to sign in or trigger email
+    legal_basis: TODO-LEGAL
+  - id: operations_monitoring
+    kind: operational
+    description: Keeping the service running, finding faults and measuring its health
+    legal_basis: TODO-LEGAL
+  - id: backup_and_recovery
+    kind: operational
+    description: Restoring the service's data after a failure
+    legal_basis: TODO-LEGAL
+
+data_categories:
+  - id: account_identity
+    description: Email address, display name, password hash, linked sign-in identities (provider, subject, login, email), invitations, team (tenant) membership
+    purposes: [account_service, service_communication]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: global_users, global_user_identities, global_tenant_memberships
+      - kind: table
+        name: global_tenants
+        note: a team's name and colour, and when it was archived and by whom (set to null and flagged if that person's account is removed)
+      - kind: table
+        name: global_invites
+        note: holds the invitee's email and a token hash
+      - kind: table
+        name: global_former_memberships
+        note: who left which team and when, kept so they are still named as a former member; removed with the account or the team
+    retention: account_data
+    processors: [aws_ses, github, oidc_provider]
+
+  - id: user_preferences
+    description: Your per-account preferences (today, whether Enter sends a message in Remote Control), and your preferences within a single team. Every change appends a row with its time, and the newest row for each preference applies, so the earlier choices are kept as history. Account-wide preferences follow you into every team you belong to; team preferences apply only in that team, and if you leave and rejoin you start again from the defaults while the earlier changes stay in the history
+    purposes: [account_service]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: global_user_settings
+        note: append-only history, kept as an audit trail of each change; never pruned, removed with the account's row in global_users
+      - kind: table
+        name: user_tenant_settings
+        note: append-only history, kept as an audit trail of each change and after you leave the team; never pruned, removed with the account's row in global_users
+    retention: account_data
+    processors: []
+
+  - id: consent_records
+    description: Your cookie choices. Signed in, one row per decision (the purpose, granted or refused, the version of the cookie policy shown, when, where it was made, the session) and a hash of each merged cookie's token; not the address or browser. Signed out, the choice is kept only in the consent cookie
+    purposes: [consent_record]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: global_consent_events
+        note: append-only; the database refuses updates and deletes
+      - kind: table
+        name: global_consent_merge_tokens
+      - kind: browser
+        name: slop_haus_consent
+    retention: consent_records
+
+  - id: credentials
+    description: Hashes of one-time sign-in tokens, and the OAuth clients, grants, codes, device codes and tokens agents use to connect
+    purposes: [account_service]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: global_auth_tokens
+      - kind: table
+        name: global_oauth_clients, global_oauth_grants, global_oauth_auth_requests, global_oauth_codes, global_oauth_device_codes, global_oauth_tokens
+    retention: expired_credentials
+
+  - id: session_credentials
+    description: Signed access and refresh tokens, and the sign-in round-trip state, held in the browser's cookies
+    purposes: [necessary, account_service]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: browser
+        name: slop_haus_session, slop_haus_refresh and slop_haus_login_state cookies
+        note: sessions are stateless signed tokens; sessions_valid_after on the user row is how all of them are cut off at once
+    retention: session_credentials
+
+  - id: agents
+    description: The names of AI agents a team runs, their role membership, per-agent harness settings and the layout each agent's workspace last reported (git remotes of its top-level repos, without credentials), and when its supervisor last polled for work and which version of itself it ran (one row per agent, overwritten by each poll, removed with the agent). A conductor, an agent kind that proposes for one person, also records which team member registered it (the owner, set once and never changed); when that person leaves the team it is disabled and kept, with its history; slop-haus has no account deletion, so the owner reference is never removed
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: agents, agent_roles, agent_role_members, harness_config, harness_config_revisions, agent_workspace_layouts, worker_polls, supervisor_desired_state, supervisor_desired_agents
+    retention: work_record
+
+  # Account deletion (none today) clears, rather than deletes, what a person
+  # acted on: every column naming the person who acted (author, creator,
+  # approver, editor, conductor owner, who a status change was by) goes NULL
+  # when their account is deleted and a companion <column>_deleted flag says
+  # why, so no id of theirs remains and the row still reads as a person's
+  # (the mark_deleted_actors trigger). The text they wrote stays. Not edited into the
+  # description below because the legal documents render it.
+  # TODO: a backup restored after a deletion would bring the ids
+  # back. Deletion needs a durable erasure record that is replayed after a
+  # restore before it ships. The agents category's
+  # sentence that the conductor owner reference is never removed also needs
+  # rewording then, in a new legal document version.
+  - id: work_record
+    description: Tickets (title, body, priority, status, scope paths, dependencies, required roles), comments, revisions of ticket edits, the history of each ticket's status changes (who moved it, when and why), handoff context, the harness and session id of the run on each attempt, and the board's revision counter. Free text written by people and agents; what it contains is up to them. Also what intake sources (external systems such as a support desk or Alertmanager) sent about the tickets they filed -- text a third party wrote, which may mention that third party's own customers. Also each person's verdict on a finished attempt (would merge, with changes, would not) with the short note they wrote, who gave it and when. Also the GitHub login and numeric id of whoever merged a ticket's change when slop-haus did not act on it, kept so the ticket can say why it is still open. Also the automated code reviews (slop-review runs) supervisors report for their agents, or agents for themselves -- who posted each, on which branch and commit, with which provider and model, its verdict and summary, the findings it raised (file, line and the reviewer's text, which may quote the code), each agent's label of a finding (its verdict, a reason and the commit that fixed it), and the run's whole report, which for a review of uncommitted work includes the reviewed diff after the reviewer's redaction of secret-shaped files. The head commit's author the reviewer reports, a person's name and email, is never stored, and a run that showed secret-shaped files to the model unredacted is refused
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: tickets, ticket_sequences, ticket_paths, ticket_deps, ticket_comments, ticket_revisions, ticket_snapshots, ticket_required_roles, agent_contexts, board_revisions, board_changes, ticket_status_changes, attempts, attempt_status_changes, pending_actions, steward_assessments, steward_discussion_labels, steward_discussion_decisions, steward_discussion_applies, steward_drafts, agent_messages, intake_events, ticket_changes, merge_drift_decisions, server_merge_outcomes, attempt_signals, attempt_verdicts, landings, batches, github_event_keys, ignored_merges
+      - kind: table
+        name: review_runs, review_findings, review_finding_labels, review_requests
+        note: a run is linked to a ticket's attempt only when the agent that posted it, or an agent run by the supervisor that posted it, held the attempt; who posted it (a supervisor or an agent) is kept; head_author is dropped from the stored report (the table refuses a report that has it); removed with the agent or supervisor that posted it, or the ticket it is linked to; a review request (the commit an agent asked its supervisor to review, and the change's description it gave) is one per attempt, replaced by the next, and removed with the agent or the attempt
+    retention: work_record
+
+  - id: agent_activity
+    description: Agent sessions (the Claude session id and working directory), the leases an agent held on tickets and the configuration each was served, the times a ticket was held back by another's scope, the scope extensions refused to an agent and the times it narrowed its scope, the locks it took and its place in the queue for them, and each ticket_wait call an idle agent made (when, on which MCP session and server, and how it ended)
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: sessions
+      - kind: table
+        name: leases, lease_configs, locks, lock_waiters, lock_holds, scope_blocks, scope_extension_denials, scope_narrowings, steward_leases, remote_control_host_leases
+      - kind: table
+        name: supervisor_slot_states
+        note: one row per supervisor slot, overwritten by each report (its phase, how long it has been in it, its ticket, the class of the error it keeps hitting and, while paused, the reason in the supervisor's words, cut to 512 characters; and why it is not running a ticket, a code from a fixed set with a note of up to 160 characters naming at most the ticket it holds); it does not grow, so nothing prunes it, and it is removed with the agent
+    retention: agent_activity
+
+  - id: llm_usage
+    description: Per transcript and model, the number of requests and tokens, estimated cost, and the commands and tools an agent ran, linked to its ticket and agent
+    purposes: [usage_accounting]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: llm_usage, llm_tool_usage, llm_usage_marks, llm_guidance_usage, llm_usage_daily, usage_declarations
+        note: llm_usage_daily holds the same counts and cost summed per agent, model and day, with no ticket or command. llm_tool_usage keeps command text an agent ran. usage_declarations, llm_usage_marks and llm_guidance_usage record which ticket a console or conductor said it was working on, and the share of its usage charged to that ticket
+    retention: llm_usage
+
+  - id: conductor_conversations
+    description: A conductor owner's conversations with the model run on their own machine -- who started each and about which ticket (or drafting a new one), the branch and commit it was checked out at, its state, and the transcript (what the owner typed and what the model answered), which may quote the repository's files and so whatever they hold. Also each conductor's queue of work for its host (references into the transcript, not copies of it) and which host process is polling it. Free text written by a person and a model; what it contains is up to them. Usage for a conversation is kept with the other LLM usage (llm_usage)
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: conductor_conversations, conductor_conversation_events, conductor_queues, conductor_work
+        note: the transcript's text is kept in the database; the owner's host keeps its own copy of the session on their machine, outside slop-haus
+    retention: conversation_transcripts
+
+  - id: attachments
+    description: Images and videos attached to tickets, and ones a person staged in a Remote Control conversation before attaching them -- screenshots and screen recordings, which can show whatever was on the screen, personal data included. Kept as files in the attachment object store (rustfs, in the cluster), with a row per file naming who uploaded it (a person or an agent), the name the uploader gave it, its type, size and a hash of its content. The type and size are worked out from the bytes. Free content; what it shows is up to the uploader
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: attachments
+        note: the file itself is in the object store under the team's own folder, deleted by the sweeper after its row goes; a staged file whose conversation is pruned is removed too
+      - kind: table
+        name: attachment_reservations, attachment_delete_queue, attachment_usage
+        note: the keys of files being stored or waiting to be deleted, and the bytes a team holds. A deletion is kept as the record of the erasure for 90 days after it is swept, then pruned
+    retention: deleted_with_ticket
+
+  - id: github_deliveries
+    description: A record of each GitHub webhook delivery (event, action, outcome, the ticket it touched)
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: github_deliveries
+        note: the delivery's payload is not stored
+    retention: github_deliveries
+
+  - id: intake_deliveries
+    description: The intake sources a team registered (name, adapter, trust and ticket policy, and a bearer token's SHA-256 -- never the token), and a record of each authenticated delivery (event, the sender's key, outcome, the ticket it touched). The delivery's payload is not stored here; what a sender said is kept with the ticket (work_record)
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: global_intake_credentials, intake_sources, intake_deliveries
+    retention: github_deliveries
+
+  - id: team_settings
+    description: A team's settings (each change kept, with who made it and when), and the workspace manifest an owner declared (which repo is checked out where, and who last changed it), and the fleet instructions an owner wrote for the team's agents (named, versioned texts, which one agents are given, and who saved and chose each), and the variants an owner defined (named, versioned harness settings and a pinned fleet instructions version, and who saved each), and the eval sets (named groups of benchmark tickets, by saved filter or pinned list, and the replay batches run across each, with who made each)
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: tenant_settings
+        note: append-only history of each change and who made it (set to null if that person's account is removed); a change from before history was kept has no one recorded; never pruned
+      - kind: table
+        name: workspace_manifests, workspace_manifest_revisions, fleet_instruction_versions, fleet_instruction_defaults, fleet_instruction_archives, variant_versions, variant_archives, eval_sets, eval_set_batches
+    retention: work_record
+
+  - id: code_host_credential
+    description: The GitHub App a team's owners connected for slop-haus to act on its repositories with -- the App and installation ids, the private key (stored encrypted, never shown again), a fingerprint of it, and who connected it and when; the hashed, short-lived tokens that carry its setup through GitHub and back
+    purposes: [work_tracking]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: table
+        name: codehost_credentials
+      - kind: table
+        name: codehost_setup_states
+      - kind: table
+        name: global_github_app_installations
+        note: the lookup from an installation id to its tenant, with a copy of the sealed webhook secret, kept in step with the credential by a trigger
+    retention: work_record
+
+  - id: client_addresses
+    description: The network address a request came from, used by sign-in and email rate limiters and recorded with the security events (refused cross-origin, CSRF and read-only writes) in the logs
+    purposes: [abuse_prevention, operations_monitoring]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: memory
+        name: api process memory
+      - kind: logs
+        name: VictoriaLogs (victoria-logs)
+        note: the audit log lines carry the client address truncated to /24 (IPv4) or /48 (IPv6) by go-privacy/logpolicy; the full address is held in memory only, by the rate limiters
+    retention: client_addresses
+
+  - id: service_logs
+    description: The api's logs (requests, errors and security audit events), exported to VictoriaLogs as well as to stderr, a record for each request the api answers with a 5xx (method, route template, status), and the frontend's error reports, which the browser's logging package sends through the api's log proxy (/api/otel/v1/logs). The browser sends a traceparent header on same-origin API requests, with a trace id made fresh and at random for that one request (never per user, session or page); the api puts it on the request's log records and the error report for that request carries it, so the two can be found together. tracestate and baggage are never read. An error report holds the route template, the error type, message and stack, the build tag, the user agent, the signed-in user's id and a random session id the browser keeps in sessionStorage for the life of the tab (it survives a reload, not a new tab). A log policy (go-privacy/logpolicy, applied in go-privacy/otellog) hashes emails, truncates addresses, drops request and response bodies and credentials, and removes quoted input from error text before any record is written. The one exception is the local-development mail sink (EMAIL_BACKEND=log), which writes whole emails, links included, to stderr (not exported to the log store; pod logs collect stderr, so it is for a developer machine only) and warns at startup; prod and test use smtp
+    purposes: [operations_monitoring]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: logs
+        name: VictoriaLogs (victoria-logs)
+        note: the api's own logs and the browser's error reports, in one stream; retention is set per env
+    retention: service_logs
+
+  - id: container_logs
+    description: Whatever the api prints to stderr, which the kubelet keeps in container log files on the node, outside the log store.
+    purposes: [operations_monitoring]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: logs
+        name: kubelet container log files on the node
+        note: rotated by the container runtime's log settings, which are the operator's node configuration and not set in this repo; nothing ships them to the log store
+    retention: container_logs
+
+  - id: feature_usage_counts
+    description: Counts of how often each feature is used, for operations and product improvement and never sold. They are kept for every visitor and signed-in user without asking for consent. From the server, API requests per operation, outcome class and client type, and agent tool calls per tool, outcome and kind of agent. From a signed-in person's browser, which board screens were shown and for how long they were on show (visible and focused only, rounded to 5 seconds), and which features were used (such as answering a discussion with the steward, deciding a proposal, starting or sending in a Remote Control session, filtering and searching tickets, bulk actions, creating a ticket, the integration lock panel and the reports filters), each a named event with a few fixed options (such as approve or reject, or how many tickets in a range). A browser event never carries what was typed or chosen, or any ticket, session, name or id, and the browser holds nothing on the device for it (no cookie, local or session storage). The server checks each event against a fixed list and only adds one to a count; the event is not logged, the person is used only to limit how often they may send, and no user, tenant, session, agent, address or request id is attached, so a count cannot be traced to a person and an account deletion has nothing to find. The labels are only the operation, tool or event name, the screen, the event's fixed options, the outcome class, the client type and the agent kind, plus what the scrape adds (namespace and pod)
+    purposes: [operations_monitoring]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: metrics
+        name: the operator's metrics store, which scrapes the api's /metrics listener
+        note: scraped from the api's /metrics listener as slophaus_operation_requests_total, slophaus_mcp_tool_calls_total (and a tool call duration histogram), slophaus_ui_events_total and slophaus_ui_screen_seconds; internal/usagemetrics enforces the label allowlist, and the browser events' allowlist is generated from the frontend's src/usage/catalog.ts
+    retention: metrics_store
+
+  - id: database_backups
+    description: Copies of the database taken for recovery
+    purposes: [backup_and_recovery]
+    legal_basis: TODO-LEGAL
+    stores:
+      - kind: backups
+        name: postgres backups
+        note: unknown -- how the operator backs up the database, where the copies are kept, how they are encrypted and for how long is theirs to describe for their deployment
+    retention: backups
+
+processors:
+  - id: aws_ses
+    name: Amazon Simple Email Service
+    role: processor
+    purpose: Delivers activation, password-reset and invitation emails
+    data_shared: [account_identity]
+    location: AWS us-east-1 (the SES endpoint in the env values)
+    transfer_mechanism: TODO-LEGAL
+    sub_processors: [unknown]
+    config_keys:
+      - EMAIL_BACKEND
+      - EMAIL_FROM
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USER
+      - SMTP_PASS
+      - SMTP_REQUIRE_TLS
+    notes: Receives the recipient's address and the link in the message.
+  - id: github
+    name: GitHub (sign-in)
+    role: unknown
+    purpose: Signs a user in with their GitHub account where GITHUB_CLIENT_ID is configured
+    data_shared: [account_identity]
+    location: unknown
+    transfer_mechanism: TODO-LEGAL
+    config_keys:
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      - GITHUB_API_BASE_URL
+      - GITHUB_WEB_BASE_URL
+    notes: The server calls GitHub's OAuth and API endpoints; what comes back is the user's GitHub id, login and email. Where a team's owners connect a GitHub App, the server also calls GitHub's API as that App (GITHUB_API_BASE_URL) to list the repositories it can see, and exchange the code from creating the App for its key; only the App's id and a signed token are sent. GitHub also sends webhooks to the server, which keep only the delivery's metadata. Whether GitHub counts as a processor of anything here, or acts for itself, is not decided.
+  - id: oidc_provider
+    name: OpenID Connect identity provider (as configured)
+    role: unknown
+    purpose: Signs a user in through OpenID Connect where an OIDC client is configured
+    data_shared: [account_identity]
+    location: unknown
+    transfer_mechanism: TODO-LEGAL
+    config_keys:
+      - OIDC_ISSUER_URL
+      - OIDC_CLIENT_ID
+      - OIDC_CLIENT_SECRET
+      - OIDC_PROVIDER_NAME
+      - OIDC_DISPLAY_NAME
+    notes: Which provider is configured is the operator's choice per env and isn't visible in the repo; it is off unless its client is set.
+
+internal_services:
+  - id: app
+    name: slop-haus's own api, webhook door and intake door, as people, GitHub and intake senders reach them
+    config_keys: [PUBLIC_BASE_URL, WEBHOOK_PUBLIC_BASE_URL, INTAKE_PUBLIC_BASE_URL]
+  - id: postgres
+    name: Postgres (CloudNativePG cluster in the same namespace)
+    config_keys: [DATABASE_URL]
+  - id: victoria_logs
+    name: VictoriaLogs (same namespace), where the api exports its logs
+    config_keys: [LOGS_OTLP_ENDPOINT]
+  - id: object_store
+    name: The attachment object store (rustfs, in the same namespace), where ticket attachments' files are kept
+    config_keys: [S3_ENDPOINT]
+  - id: woodpecker
+    name: Woodpecker CI, which the landing runner asks for a change's pipelines and to run a failed one again
+    config_keys: [WOODPECKER_URL]
+  - id: home_cluster
+    name: The infrastructure the operator runs it on
+    notes: unknown -- the operator's to describe for their deployment (who hosts the servers, volumes and images, and whether any third party holds the app's data besides the processors listed above).
+
+storage:
+  - key: slop_haus_session
+    type: cookie
+    purpose: necessary
+    first_party: true
+    lifetime: 15m
+    description: The signed-in session's access token (HttpOnly, SameSite=Lax)
+    set_by: slop-haus/server/internal/authn.SessionCookie
+  - key: slop_haus_refresh
+    type: cookie
+    purpose: necessary
+    first_party: true
+    lifetime: 7d
+    description: The refresh token that renews the session; sent only to /api/auth/refresh (HttpOnly, SameSite=Strict)
+    set_by: slop-haus/server/internal/user.RefreshCookie
+  - key: slop_haus_login_state
+    type: cookie
+    purpose: necessary
+    first_party: true
+    lifetime: 10m
+    description: Ties a sign-in with an external provider to the browser that started it; sent only to the provider's callback path (HttpOnly, SameSite=Lax)
+    set_by: slop-haus/server/internal/user.LoginStateCookie
+  - key: slop_haus_consent
+    type: cookie
+    purpose: necessary
+    first_party: true
+    lifetime: 180d
+    description: Your cookie choices while you are signed out, sealed so the server can trust them; set only once you choose (HttpOnly, SameSite=Lax)
+    set_by: go-privacy/consent (privacy.CookieName)
+  - key: slop-factory-logging:session-id
+    type: session_storage
+    purpose: analytics
+    first_party: true
+    lifetime: session
+    description: A random id grouping one browser session's analytics records, with no link to a person. Written only once analytics is granted (without it the id lives in memory); the browser drops it when the tab closes
+    set_by: "@slop-factory/logging (session_id.ts)"
+  - key: slop-factory-auth:pending-step-up
+    type: session_storage
+    purpose: necessary
+    first_party: true
+    lifetime: tab
+    description: The action a user was about to take when asked to confirm their identity again, so it can resume; secrets are stripped before it is stored
+    set_by: "@slop-factory/auth (pending_step_up.ts)"
+  - key: remote_control.sessions_panel
+    type: local_storage
+    purpose: necessary
+    first_party: true
+    lifetime: until cleared
+    description: Whether the person opened or closed the sessions panel on the remote control page, so the layout they chose is kept on this browser. A layout preference they set themselves; it holds no account data, is never sent to the server and is not an identifier
+    set_by: slop-haus/frontend/src/components/remote_control/use_panel_open.ts
+  - key: remote_control.enter_sends
+    type: local_storage
+    purpose: necessary
+    first_party: true
+    lifetime: until cleared
+    description: Whether a plain Enter sends the message on the remote control page, so the choice is kept on this browser (touch devices start with it off). A preference they set themselves; it holds no account data, is never sent to the server and is not an identifier
+    set_by: slop-haus/frontend/src/components/remote_control/use_enter_sends.ts
+
+retention_classes:
+  - id: consent_records
+    description: Proof of consent. Never deleted while the account exists; slop-haus has no account deletion, and the table refuses it (go-privacy/README.md, section 3), so removing a user will need an explicit decision about this record
+    period: indefinite
+    mechanism: none
+  - id: account_data
+    description: Account and sign-in identity details. Accepted invitations stay as the record of who invited whom
+    period: indefinite
+    mechanism: none
+  - id: expired_credentials
+    description: One-time and OAuth credentials. Deleted a day after they expire (or are revoked); a client that was never authorized goes after an hour
+    period: 1d
+    mechanism: The prune service (internal/prune) deletes dead credentials in batches, hourly
+  - id: session_credentials
+    description: Session cookies
+    period: 7d
+    mechanism: Cookie Max-Age and the token's own expiry (access 15 minutes, refresh 7 days by default, ACCESS_TOKEN_TTL and REFRESH_TOKEN_TTL; sign-in state 10 minutes)
+  - id: work_record
+    description: Tickets, comments and the rest of the work record. Deliberately never pruned; kept until a human removes it
+    period: indefinite
+    mechanism: none
+  - id: agent_activity
+    description: Agent sessions, leases and ticket_wait calls
+    period: 30d
+    mechanism: The prune service, SESSION_RETENTION, LEASE_RETENTION and TICKET_WAIT_RETENTION (30 days by default)
+  - id: llm_usage
+    description: Model usage records, after a transcript's last report
+    period: 365d
+    mechanism: The prune service, LLM_USAGE_RETENTION (365 days by default)
+  - id: conversation_transcripts
+    description: An ended conductor conversation, with its transcript, after its last activity. A live one is kept while it is live
+    period: 90d
+    mechanism: The prune service, CONVERSATION_RETENTION (90 days by default)
+  - id: deleted_with_ticket
+    description: Ticket attachments and their files. Kept until the ticket they belong to is deleted (a staged one, until it is attached or its conversation is pruned), or the team is archived, when the attachment sweeper deletes them and their files
+    period: indefinite
+    mechanism: The attachment sweeper (internal/attachment), ATTACHMENT_SWEEP_INTERVAL (15 minutes by default); a deleted row's file goes within a sweep
+  - id: github_deliveries
+    description: Webhook and intake delivery records
+    period: 30d
+    mechanism: The prune service, GITHUB_DELIVERY_RETENTION (30 days by default)
+  - id: client_addresses
+    description: Request addresses held by rate limiters. In memory they are swept when idle (go-auth/ratelimit after its window); in the logs they follow service_logs
+    period: 90d
+    mechanism: In the logs, the service_logs period; in memory, the idle sweeps
+  - id: service_logs
+    description: The api's logs and the frontend's error reports
+    period: 90d
+    mechanism: The log store's retention setting, which the operator sets for their deployment
+  - id: container_logs
+    description: What the api prints to stdout and stderr, kept in the kubelet's container log files on the node that ran the pod. How long a line survives depends on the operator's node log rotation, which is not set in this repo
+    period: unknown
+    mechanism: The kubelet's container log rotation (node configuration outside this repo, e.g. a kubelet's containerLogMaxSize and containerLogMaxFiles). A pod's logs are also removed with the pod
+  - id: metrics_store
+    description: Feature usage counts and the other metrics, in the shared metrics store. They hold no user, tenant or account id, so this period is the only erasure they have, and an account deletion does not need to find them
+    period: 365d
+    placeholder: true
+    mechanism: VictoriaMetrics -retentionPeriod (a placeholder until the operator sets it)
+  - id: backups
+    description: Backups of the database. A row can stay in a backup for up to about 61 days after it is deleted
+    period: 61d
+    placeholder: true
+    mechanism: The operator's backup retention (a placeholder until the operator sets it)

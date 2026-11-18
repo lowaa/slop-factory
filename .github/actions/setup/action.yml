@@ -1,0 +1,38 @@
+name: setup
+description: Toolchains the test.sh entrypoints expect on the host. Docker is already on the runner.
+inputs:
+  go:
+    description: Install Go (the version slop-haus/server/go.mod names)
+    default: "false"
+  node:
+    description: Install Node.js 22
+    default: "false"
+  uv:
+    description: Install uv (the supervisor and token suites manage their own Python through it)
+    default: "false"
+  npm-ci:
+    description: "none, root (every workspace) or tools (the root's own devDependencies only, e.g. bats)"
+    default: "none"
+runs:
+  using: composite
+  steps:
+    - if: inputs.go == 'true'
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      with:
+        go-version-file: slop-haus/server/go.mod
+        cache-dependency-path: "**/go.sum"
+    - if: inputs.node == 'true' || inputs.npm-ci != 'none'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 22
+    - if: inputs.uv == 'true'
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        version: "0.8.22"
+    # --ignore-scripts: nothing in the lockfile gets to run install hooks in CI.
+    - if: inputs.npm-ci == 'root'
+      shell: bash
+      run: npm ci --ignore-scripts --no-audit --no-fund
+    - if: inputs.npm-ci == 'tools'
+      shell: bash
+      run: npm ci --workspaces=false --ignore-scripts --no-audit --no-fund

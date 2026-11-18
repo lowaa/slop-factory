@@ -1,0 +1,48 @@
+// The one stacking scale. Emitted once, on :root, when an app @use's it.
+// Components write `z-index: var(--z-menu)`; stylelint rejects a number.
+// Order, lowest to highest, and why:
+//   base     1     lifts a sticky bar or a row holding a popover over its
+//                  siblings. Local: only meaningful inside one stacking
+//                  context, so it is also what a local 2/3 maps to (below).
+//   sticky   10    bars pinned while their page scrolls (mission control's
+//                  top bar).
+//   dropdown 10    small anchored floats: tooltips, search offers, the
+//                  prompt history. Equal to sticky on purpose: they never
+//                  overlap, and the values are today's.
+//   menu     20    panels that open over the page: dropdown panels, the
+//                  header menu, the session bar panel.
+//   scrim    20    the dim layer behind a drawer.
+//   drawer   30    a side panel over its scrim.
+//   overlay  100   full-viewport backdrops for page-level panels (the
+//                  GitHub app panel, the artifact viewer).
+//   toast    900    notices that stay while the page is used (the consent
+//                  banner). Below modal: the preferences dialog opens from
+//                  the banner and has to cover it.
+//   modal    1000  blocking dialogs; nothing covers them.
+// Values are the ones in use when the scale was written, so adopting a
+// token never reorders two layers that can overlap.
+// Audit of every z-index at the time (file -> token):
+//   slop-haus
+//     bulk_action_bar        1    -> base
+//     ticket_detail/blockers 1    -> base
+//     ticket_jump            10   -> dropdown
+//     prompt_history_list    10   -> dropdown
+//     header_menu panel      20   -> menu
+//     session_bar panel      20   -> menu
+//     github_app_panel       100  -> overlay
+//   js-components
+//     tooltip                10   -> dropdown
+//     dropdown panel         20   -> menu
+//     consent_banner         900  -> toast
+//     preferences_dialog     1000 -> modal
+:root {
+  --z-base: 1;
+  --z-sticky: 10;
+  --z-dropdown: 10;
+  --z-menu: 20;
+  --z-scrim: 20;
+  --z-drawer: 30;
+  --z-overlay: 100;
+  --z-toast: 900;
+  --z-modal: 1000;
+}

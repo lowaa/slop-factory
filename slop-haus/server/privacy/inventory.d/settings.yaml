@@ -1,0 +1,20 @@
+  - name: harness_config
+    categories: [agents]
+  - name: harness_config_revisions
+    categories: [agents]
+  - name: tenant_settings
+    categories: [team_settings]
+  - name: fleet_instruction_versions
+    categories: [team_settings]
+  - name: fleet_instruction_defaults
+    categories: [team_settings]
+  - name: fleet_instruction_archives
+    categories: [team_settings]
+  - name: variant_versions
+    categories: [team_settings]
+  - name: variant_archives
+    categories: [team_settings]
+  - name: eval_sets
+    categories: [team_settings]
+  - name: eval_set_batches
+    categories: [team_settings]

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd agent for one tenant. Copy to ~/Library/LaunchAgents/com.slop-haus.supervisor.<tenant>.plist,
+     replace TENANT and USER (launchd expands neither ~ nor variables), then
+     `launchctl bootstrap gui/$(id -u) <that file>`. See README.md in this directory. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.slop-haus.supervisor.TENANT</string>
+  <key>ProgramArguments</key>
+  <array>
+    <!-- uv is found before run.env is read, so its path is absolute: edit it to where `command -v uv` says. -->
+    <string>/opt/homebrew/bin/uv</string>
+    <string>run</string>
+    <string>--frozen</string>
+    <string>--no-dev</string>
+    <string>--project</string>
+    <string>/Users/USER/slop-haus/TENANT/app</string>
+    <string>slop-haus-supervisor</string>
+    <string>run</string>
+    <string>--tenant</string>
+    <string>TENANT</string>
+    <string>--log-file</string>
+    <string>/Users/USER/Library/Logs/slop-haus-supervisor-TENANT.log</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin; run.env adds the tools workers use (go, node, gh). -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- Restart after a failure, not after exit 0 (stopped on request). launchd cannot tell exit codes
+       apart, so a configuration error (78) or a second instance (75) is retried every ThrottleInterval;
+       the log says why each time. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <!-- Seconds after SIGTERM before launchd kills it: the default drain (120s) plus the supervisor's own grace. -->
+  <key>ExitTimeOut</key>
+  <integer>150</integer>
+  <!-- The log file is the supervisor's own, rotated; these two only catch what happens before it starts. -->
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USER/Library/Logs/slop-haus-supervisor-TENANT.stderr.log</string>
+</dict>
+</plist>

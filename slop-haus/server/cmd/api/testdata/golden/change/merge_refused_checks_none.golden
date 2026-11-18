@@ -1,0 +1,5 @@
+-- error: true --
+-- text --
+the checks have not passed on the change's head: no checks have reported on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, and no checks is not a pass (CI may not have started: wait, then read them again)
+-- structured --
+null

@@ -1,0 +1,5 @@
+-- error: true --
+-- text --
+the change's head moved after its checks were read, so nothing was merged: read the checks again with change_checks (the change's head has moved)
+-- structured --
+null

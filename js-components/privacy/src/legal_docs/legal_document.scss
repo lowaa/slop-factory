@@ -1,0 +1,17 @@
+.legal-document {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--space-4);
+
+  &__meta {
+    margin-top: var(--space-6);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+  }
+
+  &__history-title {
+    font-size: 1rem;
+  }
+}

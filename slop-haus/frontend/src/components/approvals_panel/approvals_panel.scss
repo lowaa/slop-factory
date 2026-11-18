@@ -1,0 +1,178 @@
+@use "@/styles/layout";
+@use "@/styles/forms";
+@use "@/styles/surfaces";
+
+.approvals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  // Part of the chain from .app__main down to the list's viewport: every
+  // level a flex column with flex: 1 and min-height: 0, or the viewport
+  // stretches the page instead of scrolling its own rows.
+  flex: 1;
+  min-height: 0;
+
+  &__intro,
+  &__scope,
+  &__empty {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+  }
+
+  &__error,
+  &__notice,
+  &__stale {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-md);
+  }
+
+  &__error {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+  }
+
+  &__notice {
+    background: var(--color-bg-muted);
+    color: var(--color-text);
+  }
+
+  &__stale {
+    border: 1px solid var(--color-warning);
+    color: var(--color-warning);
+  }
+
+  &__views {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  &__toolbar,
+  &__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__slot {
+    // Spacing inside the row's own box: the list measures the box, and a
+    // margin would not be counted in its height.
+    padding: var(--space-1-5) var(--space-2);
+  }
+
+  // Cards are tall (CARD_HEIGHT), so the fill option's 240px floor would show
+  // a sliver of one. In a window too short for this, the page scrolls.
+  .virtual-list--fill .virtual-list__viewport {
+    min-height: 480px;
+  }
+
+  &__card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3-5) 14px;
+
+    @include surfaces.box(var(--radius));
+  }
+
+  &__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-1) var(--space-4);
+  }
+
+  &__ticket {
+    min-width: 0;
+    color: var(--color-text);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--color-accent-hot);
+    }
+  }
+
+  &__id {
+    font-family: var(--font-mono);
+    color: var(--color-text-muted);
+  }
+
+  &__meta {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__action {
+    margin: 0;
+    font-weight: 600;
+  }
+
+  &__text {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px dashed var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-muted);
+
+    figcaption {
+      margin-bottom: var(--space-1);
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+  }
+
+  // Plain text exactly as it will be posted: line breaks kept, long lines
+  // wrapped rather than scrolled sideways.
+  &__text-body {
+    margin: 0;
+    font-family: inherit;
+    font-size: var(--text-md);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+
+    &--folded {
+      max-height: 9em;
+      overflow: hidden;
+    }
+  }
+
+  &__reject {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-1);
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+    }
+
+    textarea {
+      @include forms.text-control;
+
+      font: inherit;
+    }
+  }
+
+  // The shared Button sets its own min-height, which beats the global
+  // phone rule for bare buttons, so the touch size is restated here.
+  // Thumb-sized and full width on a phone, where this is mostly used.
+  @include layout.narrow {
+    &__views button,
+    &__toolbar button,
+    &__buttons button,
+    &__more {
+      flex: 1 1 100%;
+      min-height: layout.$touch-target;
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "slop-factory",
+  "private": true,
+  "workspaces": [
+    "slop-haus/frontend",
+    "js-components/logging",
+    "js-components/ui",
+    "js-components/auth",
+    "js-components/router",
+    "js-components/privacy",
+    "js-components/storage",
+    "js-components/storybook-kit"
+  ],
+  "scripts": {
+    "storybook:ui": "npm run storybook -w js-components/ui",
+    "storybook:auth": "npm run storybook -w js-components/auth",
+    "storybook:privacy": "npm run storybook -w js-components/privacy",
+    "storybook:slop-haus": "npm run storybook -w slop-haus/frontend"
+  },
+  "devDependencies": {
+    "bats": "^1.13.0",
+    "bats-assert": "^2.2.4",
+    "bats-support": "^0.3.0",
+    "jscpd": "5.4.2",
+    "jsdom": "^29.1.1",
+    "knip": "6.44.1",
+    "oxlint": "1.74.0",
+    "oxlint-tsgolint": "7.0.2005",
+    "postcss-scss": "^4.0.9",
+    "stylelint": "^17.16.0",
+    "stylelint-config-standard-scss": "^17.0.0",
+    "typescript": "~6.0.2",
+    "typescript-native": "npm:typescript@~7.0.2"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
+  }
+}

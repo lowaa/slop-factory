@@ -1,0 +1,164 @@
+@use "@/styles/layout";
+
+.ticket-detail {
+  // Same warning treatment as the discussion banner -- a ticket in review
+  // is also stopped and waiting on the human, just for an approval rather
+  // than an answer.
+  &__review-banner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font-size: var(--text-sm);
+
+    strong {
+      color: var(--color-warning);
+    }
+  }
+
+  &__review-banner-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3-5);
+
+    p {
+      margin: 0;
+      flex: 1;
+    }
+
+    button {
+      padding: var(--space-1-5) 14px;
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-sm);
+      background: var(--color-accent);
+      color: var(--color-on-accent);
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+
+      &:hover:not(:disabled) {
+        background: var(--color-accent-hot);
+        border-color: var(--color-accent-hot);
+        box-shadow: var(--glow-soft);
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  &__request-changes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-1);
+    }
+
+    textarea {
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font: inherit;
+      resize: vertical;
+    }
+
+    button {
+      align-self: flex-start;
+      padding: var(--space-1-5) 14px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      color: var(--color-text);
+      cursor: pointer;
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  // Muted rather than the review banner's warning colour: nothing is
+  // waiting on this, the change has already merged.
+  &__post-review {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+
+    p {
+      margin: 0;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-1);
+    }
+
+    textarea {
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      color: var(--color-text);
+      font: inherit;
+      resize: vertical;
+    }
+
+    button {
+      align-self: flex-start;
+      padding: var(--space-1-5) 14px;
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-sm);
+      background: var(--color-accent);
+      color: var(--color-on-accent);
+      font-weight: 600;
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        background: var(--color-accent-hot);
+        border-color: var(--color-accent-hot);
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  &__follow-up-filed {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-sm);
+  }
+
+  @include layout.narrow {
+    // The banner's text above, its button below at full width, rather
+    // than the button squeezing the text into a column a word wide.
+    &__review-banner-row {
+      flex-direction: column;
+      align-items: stretch;
+
+      button {
+        white-space: normal;
+      }
+    }
+  }
+}

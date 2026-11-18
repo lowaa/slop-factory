@@ -1,0 +1,26 @@
+# Overlay for ../docker-compose-dev.yaml, adding the dockerized Playwright
+# e2e suite. Run from the go-db/ directory:
+#
+#   POSTGRES_PASSWORD=devpassword docker compose \
+#     -f docker-compose-dev.yaml -f e2e_test/docker-compose-dev.e2e.yaml \
+#     up --build --abort-on-container-exit --exit-code-from e2e-tests
+#
+# Compose merges multiple -f files into one project, so this only needs to
+# add the new service -- the go-db-network it joins, and demo-api's own
+# config, come from the base file already.
+services:
+  e2e-tests:
+    build:
+      # Compose resolves relative build paths against the primary compose
+      # file's directory (docker-compose-dev.yaml, in go-db/), not against
+      # this overlay file's own directory -- so this must be "e2e_test", not
+      # ".", even though the Dockerfile it points at lives right next to
+      # this file.
+      context: e2e_test
+      dockerfile: Dockerfile
+    environment:
+      - DEMO_API_BASE_URL=http://demo-api:8080
+    depends_on:
+      - demo-api
+    networks:
+      - go-db-network

@@ -1,0 +1,5 @@
+# `go build ./cmd/<name>` run from here drops the binary alongside go.mod.
+/add_user
+/api
+/generate_openapi_spec
+/slop-agent

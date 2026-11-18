@@ -1,0 +1,19 @@
+.unreviewed-panel {
+  &__intro {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+  }
+
+  &__id {
+    font-family: var(--font-mono);
+    color: var(--color-text-muted);
+  }
+
+  &__closed,
+  &__no-pr {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+}

@@ -1,0 +1,66 @@
+@use "@/styles/forms";
+@use "@/styles/layout";
+
+.harness-config-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+
+  &__harness {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-3) var(--space-4);
+    margin: 0;
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+
+    legend {
+      padding: 0 var(--space-1);
+      font-weight: 500;
+    }
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    input {
+      @include forms.text-control;
+
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+    }
+
+    .dropdown__trigger {
+      min-height: layout.$touch-target;
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+    }
+
+    input[aria-invalid="true"] {
+      border-color: var(--color-danger);
+    }
+
+    input[aria-invalid="true"] + .harness-config-form__help {
+      color: var(--color-danger);
+    }
+  }
+
+  &__help {
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+  }
+
+  &__error {
+    margin: 0;
+    color: var(--color-danger);
+  }
+
+  &__actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+}

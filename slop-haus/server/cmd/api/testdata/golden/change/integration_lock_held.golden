@@ -1,0 +1,8 @@
+-- error: false --
+-- text --
+Integration lock held. Your lease will not expire while you hold it.
+-- structured --
+{
+  "message": "Integration lock held. Your lease will not expire while you hold it.",
+  "ok": true
+}

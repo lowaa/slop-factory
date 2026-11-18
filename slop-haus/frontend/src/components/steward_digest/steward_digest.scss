@@ -1,0 +1,86 @@
+.steward-digest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  &__intro,
+  &__note {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__windows {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  &__table {
+    border-collapse: collapse;
+
+    th,
+    td {
+      padding: var(--space-1) var(--space-2);
+      text-align: right;
+    }
+
+    th:first-child,
+    td:first-child {
+      text-align: left;
+    }
+  }
+
+  &__decisions {
+    margin: 0;
+    padding-left: 1rem;
+  }
+
+  &__discussions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+
+    h2 {
+      margin: 0;
+    }
+  }
+
+  &__row--warn {
+    color: var(--color-danger);
+  }
+
+  &__quote {
+    margin: var(--space-1) 0 0;
+    padding-left: var(--space-2);
+    border-left: 2px solid var(--color-text-muted);
+    white-space: pre-wrap;
+  }
+}
+
+.steward-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+
+  &__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  &__cap {
+    color: var(--color-danger);
+  }
+
+  &__error {
+    color: var(--color-danger);
+  }
+}

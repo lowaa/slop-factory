@@ -1,0 +1,25 @@
+[project]
+name = "slop-haus-token"
+version = "0.1.0"
+description = "Stdlib-only workspace credential module (source of truth; unwired)"
+requires-python = ">=3.9"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3,<10; python_version >= '3.10'",
+    "pyright>=1.1.390",
+]
+
+[tool.uv]
+package = false
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.9"
+include = ["slop_haus_token.py", "tests"]
+extraPaths = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,12 @@
+-- error: false --
+-- text --
+Withdrew {uuid}.
+-- structured --
+{
+  "id": "{uuid}",
+  "kind": "ready",
+  "outcome": "withdrawn by its proposer",
+  "state": "withdrawn",
+  "ticket_id": 3,
+  "url": "{board}/approvals?tenant={tenant}"
+}

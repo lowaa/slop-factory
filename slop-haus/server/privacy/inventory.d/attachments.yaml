@@ -1,0 +1,8 @@
+  - name: attachments
+    categories: [attachments]
+  - name: attachment_reservations
+    categories: [attachments]
+  - name: attachment_delete_queue
+    categories: [attachments]
+  - name: attachment_usage
+    categories: [attachments]

@@ -1,0 +1,10 @@
+.legal-page-back {
+  display: inline-block;
+  margin-bottom: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: 13px;
+
+  &:hover {
+    color: var(--color-accent-hot);
+  }
+}

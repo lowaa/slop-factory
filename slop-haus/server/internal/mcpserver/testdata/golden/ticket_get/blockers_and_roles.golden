@@ -1,0 +1,40 @@
+-- error: false --
+-- text --
+#7 Split the register [blocked, revision 3]
+Move each tool next to its handler.
+No behaviour change.
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a
+Claimable only by an agent with all of the roles deployer, reviewer
+Blocked by: #3 Reorganise the store (done), #5 Held-lease helper (in_progress)
+-- structured --
+{
+  "blocked_by": [
+    {
+      "id": 3,
+      "status": "done",
+      "title": "Reorganise the store"
+    },
+    {
+      "id": 5,
+      "status": "in_progress",
+      "title": "Held-lease helper"
+    }
+  ],
+  "body": "Move each tool next to its handler.\nNo behaviour change.",
+  "id": 7,
+  "paths": [
+    "server/internal/mcpserver/",
+    "server/internal/ticket/"
+  ],
+  "priority": "high",
+  "revision": 3,
+  "role_match": "all",
+  "roles": [
+    "deployer",
+    "reviewer"
+  ],
+  "status": "blocked",
+  "title": "Split the register",
+  "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+}

@@ -1,0 +1,122 @@
+# The collector between the api and slop-haus's log store in the dev stack;
+# a deployment's collector should route the same way.
+#
+# It routes each log record by its privacy.tier (go-privacy/README.md,
+# "Telemetry tiers"). slop-haus sends operational records only -- the api's
+# own logs, including the security audit events, and the frontend's error
+# reports, which the api proxies after its own checks -- so there is one
+# store, and nothing else to route to. A tier slop-haus has no store for is
+# therefore handled as an unknown one: stored as operational, marked, counted.
+# The analytics and interaction stores are added by the change that first
+# sends such a record.
+#
+# There is no debug exporter: it would print every record to the collector's
+# own stdout, a second copy outside the store's retention.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+connectors:
+  # The tier is the sender's to say, as a record attribute, and is matched
+  # exactly: anything else, a missing attribute included, is the default
+  # route. error_mode ignore sends a record whose statement fails to the
+  # default route too, so nothing is dropped for being odd.
+  routing/tier:
+    default_pipelines: [logs/untiered]
+    error_mode: ignore
+    table:
+      - context: log
+        statement: route() where attributes["privacy.tier"] == "operational"
+        pipelines: [logs/operational]
+  # What the default route sees, as a metric: a record with no tier or an
+  # unknown one is somebody's bug, and the alert on this counter is how it
+  # gets noticed.
+  # Carries the default route's records to the counting pipeline below.
+  forward/untiered:
+  count/untiered:
+    logs:
+      privacy.untiered_log_records:
+        description: Log records that arrived with no privacy.tier, or one that is not a known tier, and were stored as operational.
+        attributes:
+          - key: service.name
+            default_value: unknown
+          - key: privacy.tier_fault
+            default_value: unknown
+
+processors:
+  # The count connector emits per-batch (delta) counts, and the prometheus
+  # exporter keeps whatever it is last given as the series' value: without
+  # this the counter reads the size of the last batch, and never grows.
+  deltatocumulative:
+  # The default route's records are stored as operational, marked so they can
+  # be found: the fault, and whatever tier they claimed.
+  transform/untiered:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["privacy.tier_received"], attributes["privacy.tier"]) where attributes["privacy.tier"] != nil
+          - set(attributes["privacy.tier_fault"], "unknown") where attributes["privacy.tier"] != nil
+          - set(attributes["privacy.tier_fault"], "missing") where attributes["privacy.tier_fault"] == nil
+          - set(attributes["privacy.tier"], "operational")
+  # The count connector stamps its points with the records' own times, and
+  # deltatocumulative drops a point that is not newer than the last it saw
+  # for a series: a browser's clock running behind would lose counts. So what
+  # is counted is a copy stamped on arrival.
+  transform/arrival:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(time, Now())
+
+exporters:
+  # service.name groups a log stream; severity varies line to line within
+  # one stream, so it makes a poor stream field.
+  otlphttp/operational:
+    logs_endpoint: http://victoria-logs:9428/insert/opentelemetry/v1/logs
+    headers:
+      VL-Stream-Fields: "service.name"
+    tls:
+      insecure: true
+  # The count/untiered counter, scraped on :8889.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  # The collector's own counters (throughput, queue, failed sends), scraped
+  # rather than pushed. The flat form of these options is deprecated.
+  # without_type_suffix/without_units keep the names the alerts query.
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+                without_type_suffix: true
+                without_units: true
+  pipelines:
+    logs/in:
+      receivers: [otlp]
+      exporters: [routing/tier]
+    logs/operational:
+      receivers: [routing/tier]
+      exporters: [otlphttp/operational]
+    logs/untiered:
+      receivers: [routing/tier]
+      processors: [transform/untiered]
+      exporters: [otlphttp/operational, forward/untiered]
+    logs/untiered_count:
+      receivers: [forward/untiered]
+      processors: [transform/arrival]
+      exporters: [count/untiered]
+    metrics/health:
+      receivers: [count/untiered]
+      processors: [deltatocumulative]
+      exporters: [prometheus]

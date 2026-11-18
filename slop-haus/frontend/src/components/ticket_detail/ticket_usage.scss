@@ -1,0 +1,24 @@
+.ticket-usage {
+  &__kind h3 {
+    margin: 0.5rem 0 0.25rem;
+    font-size: 0.9em;
+  }
+
+  &__kind ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    padding: 0.2rem 0;
+  }
+
+  &__mode {
+    min-width: 6.5rem;
+    font-weight: 600;
+  }
+}

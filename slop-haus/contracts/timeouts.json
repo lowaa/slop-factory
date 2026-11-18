@@ -1,0 +1,13 @@
+{
+  "_doc": "Timeouts more than one component must agree on.",
+  "tool_call_ms": {
+    "value": 120000,
+    "meaning": "Longest a slop-haus MCP tool call may run: the MCP client timeout in .mcp.json and the pi extension's request limit.",
+    "used_by": ["go: workspace.ToolCallTimeout", "python: harness/mcp_config.py TOOL_CALL_TIMEOUT_MS", "ts: pi-extension.ts TOOL_CALL_TIMEOUT_MS"]
+  },
+  "token_and_stop_script_s": {
+    "value": 90,
+    "meaning": "token.sh's lock wait plus hook-stop.sh riding out a server restart, with room to spare.",
+    "used_by": ["go: workspace stopHookTimeout", "python: slophaus/token.py RUN_TIMEOUT", "python: workspace/provisioned.py REFRESH_TIMEOUT", "ts: pi-extension.ts SCRIPT_TIMEOUT_MS (ms)"]
+  }
+}

@@ -1,0 +1,121 @@
+.markdown-view {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+
+  &--plain {
+    white-space: pre-wrap;
+  }
+
+  > :first-child {
+    margin-top: 0;
+  }
+
+  > :last-child {
+    margin-bottom: 0;
+  }
+
+  p,
+  ul,
+  ol,
+  blockquote {
+    margin: var(--space-2) 0;
+  }
+
+  ul,
+  ol {
+    padding-left: var(--space-4);
+  }
+
+  // The text sits inside cards: a "#" must not read as a page title.
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: var(--space-3) 0 var(--space-1);
+    font-size: var(--text-md);
+    line-height: 1.3;
+  }
+
+  h1 {
+    font-weight: 700;
+  }
+
+  h2,
+  h3 {
+    font-weight: 650;
+  }
+
+  h4,
+  h5,
+  h6 {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  a {
+    color: var(--color-accent-text);
+  }
+
+  blockquote {
+    padding-left: var(--space-3);
+    border-left: 3px solid var(--color-border-strong);
+    color: var(--color-text-muted);
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  code {
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-sunken);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--text-sm);
+  }
+
+  pre {
+    margin: 0;
+    padding: var(--space-3);
+    overflow-x: auto;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-sunken);
+
+    code {
+      padding: 0;
+      background: none;
+      white-space: pre;
+    }
+  }
+
+  &__code {
+    position: relative;
+    margin: var(--space-2) 0;
+  }
+
+  &__copy {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+  }
+
+  &__scroll {
+    margin: var(--space-2) 0;
+    overflow-x: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--color-border);
+    text-align: left;
+  }
+}

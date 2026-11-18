@@ -1,0 +1,24 @@
+@use "@/styles/surfaces";
+
+.command {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3-5);
+
+  @include surfaces.box(var(--radius-sm), var(--color-bg));
+
+  pre {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+    color: var(--color-text);
+    // Commands wrap rather than scroll sideways: a horizontal scrollbar
+    // hides the end of the line, which is where the arguments are.
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}

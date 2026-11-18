@@ -1,0 +1,29 @@
+.ticket-detail {
+  &__signals-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    font-size: var(--text-sm);
+  }
+
+  &__signal {
+    dt {
+      color: var(--color-text-muted);
+    }
+
+    dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    &--flagged {
+      font-weight: 600;
+      color: var(--color-danger);
+
+      dt {
+        color: inherit;
+      }
+    }
+  }
+}

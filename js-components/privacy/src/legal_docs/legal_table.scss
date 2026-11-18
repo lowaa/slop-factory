@@ -1,0 +1,128 @@
+// A scrolling table in a wide container; cards in a narrow one. The
+// container query looks at the wrapper's own width, since the same document
+// is shown full-page and inside the narrower consent screens.
+.legal-table {
+  container-type: inline-size;
+  margin: var(--space-3) 0;
+}
+
+// A container query cannot restyle its own container, so the scroller is
+// inside it.
+.legal-table-scroll {
+  overflow-x: auto;
+
+  // Scroll shadows: the opaque covers scroll with the content and hide the
+  // shadows, which stay on the edges, until there is more to scroll to.
+  background:
+    linear-gradient(to right, var(--color-bg-raised) 30%, transparent) left center / 2rem 100% no-repeat local,
+    linear-gradient(to left, var(--color-bg-raised) 30%, transparent) right center / 2rem 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--color-text) 30%, transparent), transparent) left center / 0.75rem 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--color-text) 30%, transparent), transparent) right center / 0.75rem 100% no-repeat scroll;
+
+  .legal-table-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+
+    // Words wrap at spaces only: "anywhere" would shrink the columns'
+    // minimum widths to a letter, and the table would never scroll.
+    overflow-wrap: normal;
+  }
+
+  th,
+  td {
+    min-width: 8rem;
+    padding: var(--space-1) var(--space-2);
+    border-right: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  tr > :first-child {
+    border-left: 1px solid var(--color-border);
+  }
+
+  thead tr:first-child > * {
+    border-top: 1px solid var(--color-border);
+  }
+
+  th {
+    background: var(--color-bg-raised);
+  }
+
+  // The first column names the row, so it stays in view while scrolling.
+  tr > :first-child {
+    position: sticky;
+    left: 0;
+    background: var(--color-bg-raised);
+    font-weight: 600;
+  }
+
+  .legal-table-label {
+    display: none;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+}
+
+@container (max-width: 40rem) {
+  .legal-table-scroll-stackable {
+    background: none;
+    overflow-x: visible;
+
+    .legal-table-table,
+    tbody,
+    thead,
+    tr,
+    th,
+    td {
+      display: block;
+      min-width: 0;
+      width: auto;
+    }
+
+    // Hidden from sight, not from assistive technology.
+    thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+
+    tbody tr {
+      margin-bottom: var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-raised);
+    }
+
+    td,
+    tbody tr > :first-child {
+      position: static;
+      border: 0;
+      border-bottom: 1px solid var(--color-border);
+      overflow-wrap: anywhere;
+    }
+
+    tbody tr > :first-child {
+      font-size: var(--text-md);
+      background: var(--color-bg-sunken);
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+    }
+
+    td:last-child {
+      border-bottom: 0;
+    }
+
+    .legal-table-label {
+      display: inline;
+    }
+
+    // The heading of the card is not labelled with its own column.
+    tbody tr > :first-child .legal-table-label {
+      display: none;
+    }
+  }
+}

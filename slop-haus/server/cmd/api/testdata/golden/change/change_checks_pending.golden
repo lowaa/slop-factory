@@ -1,0 +1,22 @@
+-- error: false --
+-- text --
+https://github.com/acme/repo/pull/12: checks on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa are pending
+- lint: success
+- test: pending
+-- structured --
+{
+  "checks": [
+    {
+      "name": "lint",
+      "state": "success"
+    },
+    {
+      "name": "test",
+      "state": "pending"
+    }
+  ],
+  "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "passed": false,
+  "state": "pending",
+  "url": "https://github.com/acme/repo/pull/12"
+}

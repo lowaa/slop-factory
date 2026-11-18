@@ -1,0 +1,207 @@
+@use "@/styles/surfaces";
+@use "@/styles/typography";
+
+// Same BEM-ish shape as members_panel.scss: a form-like block up top, a
+// couple of scannable lists below.
+.github-webhooks-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4-5);
+  margin-top: var(--space-4-5);
+
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+    padding: var(--space-4);
+
+    @include surfaces.box(var(--radius));
+
+    h2,
+    h3 {
+      margin: 0;
+
+      @include typography.heading-label;
+    }
+  }
+
+  &__instructions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-size: var(--text-md);
+    color: var(--color-text);
+
+    p {
+      margin: 0;
+    }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      background: var(--color-bg-muted);
+      padding: 1px var(--space-1);
+      border-radius: 4px;
+    }
+  }
+
+  &__notice {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  // A notice that says the feature is off rather than that something
+  // failed -- neutral, not danger-coloured, same reasoning as
+  // ticket_card.scss's "preparing" badge.
+  [role="status"].github-webhooks-panel__notice {
+    border-color: var(--color-text-muted);
+    background: transparent;
+    color: var(--color-text-muted);
+  }
+
+  &__mono {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+
+  &__deliveries {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+  }
+
+  &__delivery {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3-5);
+
+    @include surfaces.box(var(--radius-sm), var(--color-bg));
+
+    font-size: var(--text-sm);
+  }
+
+  &__event {
+    font-family: var(--font-mono);
+    color: var(--color-text-muted);
+  }
+
+  &__outcome {
+    @include surfaces.tag;
+
+    &--applied {
+      background: rgba(46, 230, 168, 0.12);
+      color: var(--color-success);
+    }
+
+    &--ignored {
+      background: var(--color-bg-muted);
+      color: var(--color-text-muted);
+    }
+
+    &--error {
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+    }
+
+    &--processing {
+      background: transparent;
+      border: 1px solid var(--color-warning);
+      color: var(--color-warning);
+    }
+  }
+
+  &__detail {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  &__app-state {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-text-muted);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-md);
+
+    &--ok {
+      border-color: var(--color-success);
+      color: var(--color-success);
+    }
+
+    &--todo {
+      border-color: var(--color-warning);
+      color: var(--color-warning);
+    }
+
+    &--off {
+      color: var(--color-text-muted);
+    }
+  }
+
+  &__app-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1-5) var(--space-4);
+    margin: 0;
+    font-size: var(--text-sm);
+
+    dt {
+      color: var(--color-text-muted);
+    }
+
+    dd {
+      margin: 0;
+      min-width: 0;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__empty {
+    margin: 0;
+    padding: var(--space-3-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  button {
+    align-self: flex-start;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 120ms ease;
+
+    &:hover:not(:disabled) {
+      background: var(--color-accent-hot);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+}

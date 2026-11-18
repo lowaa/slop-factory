@@ -1,0 +1,58 @@
+@use "sass:map";
+
+// The mechanism only: each app supplies its own named widths, once, where it
+// first @use's this module:
+//   @use "@slop-factory/ui/styles/layout" with ($breakpoints: (narrow: 720px));
+// Modules are configured at their first load and shared after, so every
+// other file that @use's it gets the app's values. The same map is in the
+// app's TS (createBreakpoints); readScssBreakpoints (scss_breakpoints.ts) compiles this
+// file for the app's test to compare the two.
+$breakpoints: () !default;
+
+@function width($name) {
+  @if not map.has-key($breakpoints, $name) {
+    @error "Unknown breakpoint `#{$name}`; known: #{map.keys($breakpoints)}.";
+  }
+
+  @return map.get($breakpoints, $name);
+}
+
+// Range syntax, not min-/max-width: it is what the apps already emit, and
+// `(width <= 720px)` reads as the sentence it is.
+
+// At or below the breakpoint.
+@mixin down($name) {
+  @media (width <= #{width($name)}) {
+    @content;
+  }
+}
+
+// At or above the breakpoint. The optional height is for the one layout
+// that also needs a tall enough window.
+@mixin up($name, $min-height: null) {
+  @if $min-height {
+    @media (width >= #{width($name)}) and (height >= #{$min-height}) {
+      @content;
+    }
+  } @else {
+    @media (width >= #{width($name)}) {
+      @content;
+    }
+  }
+}
+
+// From one breakpoint up to and including another.
+@mixin between($from, $to) {
+  @media (width >= #{width($from)}) and (width <= #{width($to)}) {
+    @content;
+  }
+}
+
+// Emits the map as a rule, for the drift test to read back.
+@mixin export-breakpoints {
+  .breakpoints {
+    @each $name, $value in $breakpoints {
+      --#{$name}: #{$value};
+    }
+  }
+}

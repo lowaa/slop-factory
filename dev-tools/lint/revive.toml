@@ -1,0 +1,27 @@
+# revive runs only the rules nothing else here covers: staticcheck already
+# has golint's naming and doc checks, errcheck unhandled errors, gocognit
+# complexity and gosec the security rules. Severity is moot: every finding
+# goes through the ratchet. Files with a "Code generated ... DO NOT EDIT."
+# header are skipped, revive's default.
+severity = "error"
+confidence = 0.8
+
+# Long functions hide the steps a reader needs named: 60 statements or 100
+# lines. Not in tests, where a table of cases is long and still reads fine.
+[rule.function-length]
+arguments = [60, 100]
+exclude = ["TEST"]
+
+# Deep nesting is where gocognit's score comes from, but a single
+# deeply-nested block in an otherwise simple function still reads badly.
+[rule.max-control-nesting]
+arguments = [4]
+
+# context.Context first, so cancellation is visible at every call. Tests may
+# take *testing.T or *testing.B before it.
+[rule.context-as-argument]
+arguments = [{ allowTypesBefore = "*testing.T,*testing.B,testing.TB" }]
+
+# The repo's rule: group long argument lists into a struct.
+[rule.argument-limit]
+arguments = [6]

@@ -1,0 +1,134 @@
+@use "@/styles/forms";
+@use "@/styles/surfaces";
+
+.fleet-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3-5) 14px;
+
+  @include surfaces.box(var(--radius));
+
+  p,
+  ul {
+    margin: 0;
+  }
+
+  &__heading {
+    margin: 0;
+    font-size: var(--text-md);
+  }
+
+  &__hint {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__error {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__version {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  &__group-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  &__history,
+  &__history-panel,
+  &__entry {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__badge {
+    margin-left: var(--space-2);
+    padding: 1px var(--space-1-5);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    font-size: var(--text-xs);
+  }
+
+  &__text {
+    max-height: 160px;
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  &__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+
+    input,
+    textarea {
+      @include forms.text-control;
+    }
+
+    textarea {
+      min-height: 140px;
+      font-family: var(--font-mono);
+    }
+  }
+
+  &__checkbox {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+
+    input[type="checkbox"] {
+      @include forms.checkbox-control;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__tabs {
+    display: flex;
+    gap: var(--space-1);
+
+    [aria-current="page"] {
+      font-weight: 600;
+      text-decoration: underline;
+    }
+  }
+}

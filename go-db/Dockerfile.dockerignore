@@ -1,0 +1,9 @@
+**
+
+!cmd
+!engine
+!tenancy
+!migrations
+!internal
+!go.mod
+!go.sum

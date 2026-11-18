@@ -1,0 +1,10 @@
+  - name: pending_actions
+    categories: [work_record]
+  - name: conductor_conversations
+    categories: [conductor_conversations]
+  - name: conductor_conversation_events
+    categories: [conductor_conversations]
+  - name: conductor_queues
+    categories: [conductor_conversations]
+  - name: conductor_work
+    categories: [conductor_conversations]

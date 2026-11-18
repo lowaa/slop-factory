@@ -1,0 +1,30 @@
+.tenant-archived {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3-5);
+  max-width: 640px;
+  margin: var(--space-6, 2rem) auto;
+  padding: 0 var(--space-3-5);
+
+  h1 {
+    margin: 0;
+    font-size: var(--text-xl);
+  }
+
+  p {
+    margin: 0;
+  }
+
+  &__tenants {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__error {
+    color: var(--color-danger);
+  }
+}

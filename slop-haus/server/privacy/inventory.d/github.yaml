@@ -1,0 +1,6 @@
+  - name: global_github_app_installations
+    categories: [code_host_credential]
+  - name: github_event_keys
+    categories: [work_record]
+  - name: github_deliveries
+    categories: [github_deliveries]

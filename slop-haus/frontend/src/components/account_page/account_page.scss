@@ -1,0 +1,22 @@
+// The panel itself reads the shared token names index.scss aliases onto
+// this app's palette; this is only the page around it.
+.account-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 720px;
+
+  &__title {
+    margin: 0;
+  }
+
+  &__who {
+    margin: 0;
+  }
+
+  &__email {
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+  }
+}

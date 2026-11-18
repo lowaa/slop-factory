@@ -1,0 +1,7 @@
+-- error: false --
+-- text --
+No proposals.
+-- structured --
+{
+  "proposals": []
+}

@@ -1,0 +1,142 @@
+@use "@/styles/forms";
+@use "@/styles/surfaces";
+
+.manifest-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3-5) 14px;
+
+  @include surfaces.box(var(--radius));
+
+  p,
+  ul {
+    margin: 0;
+  }
+
+  &__heading {
+    margin: 0;
+    font-size: var(--text-md);
+  }
+
+  &__hint {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+
+    input[type="checkbox"] {
+      @include forms.checkbox-control;
+    }
+  }
+
+  &__warning {
+    color: var(--color-warning);
+    font-size: var(--text-sm);
+  }
+
+  &__error {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__table {
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+
+    th,
+    td {
+      padding: var(--space-1) var(--space-4) var(--space-1) 0;
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  &__proposal,
+  &__disagreements,
+  &__confirm,
+  &__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__disagreements ul {
+    padding-left: var(--space-4-5);
+    font-size: var(--text-sm);
+  }
+
+  &__edit-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+
+    input {
+      @include forms.text-control;
+
+      flex: 1 1 180px;
+      font-family: var(--font-mono);
+    }
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    label {
+      font-size: var(--text-sm);
+    }
+
+    input {
+      @include forms.text-control;
+
+      min-width: 0;
+      font-family: var(--font-mono);
+    }
+
+    span {
+      overflow-wrap: anywhere;
+    }
+  }
+
+  &__rules {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__edit-repo {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+  }
+
+  &__rules-edit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    margin: 0 0 0 var(--space-4);
+    padding: 0;
+    border: 0;
+
+    legend {
+      padding: 0;
+      color: var(--color-text-muted);
+      font-size: var(--text-sm);
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+}

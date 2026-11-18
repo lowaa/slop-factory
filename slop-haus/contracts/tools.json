@@ -1,0 +1,30 @@
+{
+  "_doc": "MCP tools by role. Names are the server's own (no mcp__slop-haus__ prefix); clients add `prefix`. Checked by server/internal/mcpserver (against what the server registers), server/internal/workspace, supervisor/tests/contracts and the pi extension test.",
+  "prefix": "mcp__slop-haus__",
+  "roles": {
+    "console": [
+      "checkin", "ticket_get", "ticket_attachment_get", "ticket_attach", "ticket_search", "ticket_comment", "ticket_edit", "ticket_create",
+      "ticket_discuss", "ticket_prepare", "ticket_release", "ticket_finish",
+      "ticket_scope_extend", "ticket_scope_narrow", "ticket_blocker_add", "ticket_blocker_remove",
+      "integration_lock", "integration_unlock", "change_open", "change_checks", "change_merge", "review_request", "review_findings", "review_label",
+      "list_proposals", "propose_discussion_answer", "propose_ready", "propose_status", "propose_review_decision",
+      "propose_ticket_edit", "propose_manifest_edit", "propose_close_merged", "withdraw_proposal", "working_on", "workspace_get", "landing_batches"
+    ],
+    "steward": [
+      "ticket_get", "ticket_attachment_get", "ticket_search", "steward_assess", "steward_draft", "steward_label_discussion",
+      "propose_discussion_answer", "propose_ready", "propose_status", "propose_review_decision",
+      "propose_ticket_edit", "propose_manifest_edit"
+    ],
+    "denied_to_headless": ["ticket_next"],
+    "denied_to_steward": [
+      "integration_lock", "integration_unlock", "ticket_attach", "ticket_finish", "ticket_release", "ticket_prepare",
+      "ticket_discuss", "ticket_scope_extend", "ticket_scope_narrow", "change_open", "change_merge"
+    ]
+  },
+  "denied_builtin_tools": ["Monitor"],
+  "role_notes": {
+    "console": "What a Remote Control (pi) session is allowed: the whole server less the supervisor's claim tool and the steward-only assessment and draft tools.",
+    "denied_to_headless": "Claiming and waiting belong to the supervisor.",
+    "denied_builtin_tools": "A background watcher either exits or lingers looking alive while holding the integration lock."
+  }
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "file": "auth/src/auth_layout/auth_layout.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "privacy/src/consent/preferences_dialog.scss",
+    "rule": "function-disallowed-list",
+    "count": 1
+  },
+  {
+    "file": "privacy/src/legal_docs/legal_document.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 2
+  },
+  {
+    "file": "privacy/src/legal_docs/legal_page.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "ui/src/dropdown/dropdown.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 3
+  },
+  {
+    "file": "ui/src/dropdown/dropdown.scss",
+    "rule": "scss/comment-no-empty",
+    "count": 3
+  },
+  {
+    "file": "ui/src/dropdown/dropdown.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 6
+  },
+  {
+    "file": "ui/src/dropdown/dropdown.scss",
+    "rule": "selector-class-pattern",
+    "count": 2
+  },
+  {
+    "file": "ui/src/modeless_dialog/modeless_dialog.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "ui/src/tooltip/tooltip.scss",
+    "rule": "declaration-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "ui/src/tooltip/tooltip.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "ui/src/tooltip/tooltip.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 3
+  }
+]

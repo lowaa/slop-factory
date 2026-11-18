@@ -1,0 +1,32 @@
+{
+  "_doc": "File names under a workspace root that more than one component spells. Go: workspace/workspace.go constants. Python: the supervisor's literals.",
+  "workspace_paths": {
+    "env_file": ".slop-haus.env",
+    "gitignore": ".slop-haus/.gitignore",
+    "stop_hook": ".slop-haus/hook-stop.sh",
+    "session_start_hook": ".slop-haus/hook-session-start.sh",
+    "usage_hook": ".slop-haus/hook-usage.sh",
+    "user_prompt_hook": ".slop-haus/hook-user-prompt.sh",
+    "usage_reporter": ".slop-haus/usage-report.py",
+    "session_describer": ".slop-haus/describe-session.py",
+    "pi_extension": ".slop-haus/pi/slop-haus.ts",
+    "headless_briefing": ".slop-haus/headless-briefing.md",
+    "token_module": ".slop-haus/slop_haus_token.py",
+    "token_script": ".slop-haus/token.sh",
+    "updater": ".slop-haus/update.sh",
+    "repo_syncer": ".slop-haus/sync-repos.sh",
+    "app_installer": ".slop-haus/install-app.sh",
+    "remote_control_launcher": ".slop-haus/run_remote_control.sh",
+    "launcher_env": ".slop-haus/run.env",
+    "server_url": ".slop-haus/server-url",
+    "bundle_hash": ".slop-haus/bundle-hash"
+  },
+  "python_only_paths": {
+    "credentials": ".slop-haus/credentials.json",
+    "no_clone_marker": ".slop-haus/no-clone",
+    "clones_pending_marker": ".slop-haus/clones-pending",
+    "conductor_state": ".slop-haus/conductor",
+    "host_lock": ".slop-haus/host.lock",
+    "host_idle_marker": ".slop-haus/conductor/idle"
+  }
+}

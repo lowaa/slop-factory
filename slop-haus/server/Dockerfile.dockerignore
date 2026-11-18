@@ -1,0 +1,36 @@
+**
+
+!artifact-store
+!go-db
+!go-auth
+!go-privacy
+!go-llm-usage
+!go-settings
+!go-clock
+!go-web
+!slop-review/report
+!slop-haus/server
+!slop-haus/testdata
+!slop-haus/contracts
+# The credential module's source, which the byte-identity test compares the shipped copies to.
+!slop-haus/token/slop_haus_token.py
+# The supervisor package the server ships (the build stage copies only what
+# `uv run --frozen` needs of it), and its tests and the service samples they
+# lint, for the supervisor-test stage: not its virtualenv or caches.
+!slop-haus/supervisor/pyproject.toml
+!slop-haus/supervisor/uv.lock
+!slop-haus/supervisor/src
+!slop-haus/supervisor/tests
+!slop-haus/supervisor/tools
+!slop-haus/supervisor/service
+# The server's OpenAPI spec, which the supervisor's contract tests read.
+!slop-haus/frontend/src/api_generated/openapi.json
+**/__pycache__
+**/*.pyc
+
+# The workspace-test stage: the pinned bats and its helpers.
+!package.json
+!package-lock.json
+!bats
+# test.sh sources it; test_sh.bats runs test.sh in the workspace-test stage.
+!dev-tools/reap/reap_lib.sh

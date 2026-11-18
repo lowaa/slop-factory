@@ -1,0 +1,391 @@
+@use "@/styles/layout";
+@use "@/styles/surfaces";
+
+.conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-4);
+
+  // Everything but the transcript keeps its size, so the transcript is what
+  // gives when the composer grows or the window is short.
+  // Same specificity as the transcript rule below, which comes later and wins.
+  > :where(*) {
+    flex: none;
+  }
+
+  // The chat as a screen of its own: a one-line bar on top, so less to space.
+  &--screen {
+    gap: var(--space-2);
+  }
+
+  &__header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    h1 {
+      margin: 0;
+      font-size: var(--text-xl);
+    }
+  }
+
+  // Whatever the session reports above the chat (facts, repo state, notices)
+  // is unbounded, so it scrolls within a share of the window rather than
+  // squeezing the transcript to nothing.
+  &__chrome {
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
+  &__notices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    &:empty {
+      display: none;
+    }
+  }
+
+  &__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4-5);
+    margin: 0;
+    font-size: var(--text-md);
+
+    div {
+      display: flex;
+      gap: var(--space-1-5);
+    }
+
+    dt {
+      color: var(--color-text-muted);
+    }
+
+    dd {
+      margin: 0;
+    }
+  }
+
+  &__online {
+    color: var(--color-success, var(--color-text));
+  }
+
+  &__offline {
+    color: var(--color-warning);
+  }
+
+  &__notice {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-muted);
+    font-size: var(--text-md);
+  }
+
+  // Holds the transcript and, over its foot, the jump to latest.
+  &__area {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  // The one scrolling region of the chat: the composer is a sibling below it,
+  // not a layer over it.
+  &__transcript {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__jump {
+    position: absolute;
+    bottom: var(--space-3);
+    left: 50%;
+    transform: translateX(-50%);
+    box-shadow: var(--shadow-lg);
+  }
+
+  // The top of what is loaded: the spinner while older turns are read, an
+  // error with its retry, or the marker that nothing is older. When empty it
+  // still has to be rendered, as an observer sees nothing in display: none,
+  // so it takes back the gap above the first item instead.
+  &__start {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    text-align: center;
+
+    &:empty {
+      height: 0;
+      margin-bottom: calc(-1 * var(--space-3));
+    }
+  }
+
+  // Turns read as the person scrolls back: off-screen ones are skipped by
+  // the browser until they are near the view, so a long transcript is not
+  // laid out whole. Unlike a virtual list they stay in the DOM, for
+  // find-in-page, selection and screen readers.
+  &__deferred {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 5rem;
+  }
+
+  &__message {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 80ch;
+    padding: var(--space-2) var(--space-3-5);
+
+    @include surfaces.box(var(--radius));
+
+    &--user {
+      align-self: flex-end;
+      background: var(--color-bg-muted);
+    }
+  }
+
+  &__who {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+
+  // Plain text, as written: pre-wrap keeps the author's line breaks and
+  // overflow-wrap keeps a long line from widening the page.
+  &__text {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  // Each model message of a reply is a paragraph of its own.
+  &__block + &__block,
+  &__activity + &__block,
+  &__block + &__activity {
+    margin-top: var(--space-2);
+  }
+
+  &__activity {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+
+    summary {
+      cursor: pointer;
+    }
+
+    ul {
+      list-style: none;
+      margin: var(--space-1) 0 0;
+      padding: 0;
+    }
+  }
+
+  &__call {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    overflow-wrap: anywhere;
+
+    &--failed &-status {
+      color: var(--color-danger, currentColor);
+    }
+  }
+
+  &__call-tool {
+    font-weight: 600;
+  }
+
+  &__call-status {
+    margin-left: auto;
+  }
+
+  &__note,
+  &__empty {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+
+  &__note--context_cleared,
+  &__note--context_compacted {
+    align-items: center;
+    display: flex;
+    gap: var(--space-2);
+
+    &::before,
+    &::after {
+      border-top: 1px solid var(--color-border-strong);
+      content: "";
+      flex: 1;
+    }
+  }
+
+  &__replying {
+    align-items: center;
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  // Still motion is enough to say "in progress" for users who ask for less
+  // motion; the text beside it carries the meaning either way.
+  &__spinner {
+    animation: conversation-spin 0.8s linear infinite;
+    border: 2px solid var(--color-text-muted);
+    border-right-color: transparent;
+    border-radius: 50%;
+    flex: none;
+    height: 12px;
+    width: 12px;
+
+    @media (prefers-reduced-motion: reduce) {
+      animation: none;
+    }
+  }
+
+  &__proposals {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    // Its own scroller, so the log keeps room however many proposals wait.
+    flex: 0 1 auto;
+    max-height: 30vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  &__proposal {
+    flex: none;
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--color-accent-dim);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-md);
+  }
+
+  &__proposal-action {
+    margin: 0 0 var(--space-1-5);
+  }
+
+  &__proposal-text {
+    margin: 0 0 var(--space-1-5);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+
+  }
+
+  &__proposal-card {
+    margin: 0 0 var(--space-1-5);
+  }
+
+  &__proposal-notice {
+    margin: 0 0 var(--space-1-5);
+    font-size: var(--text-md);
+  }
+
+  &__proposal-toggle {
+    margin: 0 var(--space-3) var(--space-1-5) 0;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-raised);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  // At the top right, out of the way of Send.
+  &__disconnect {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    align-self: flex-end;
+  }
+
+  &__confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-raised);
+    font-size: var(--text-md);
+  }
+
+  @include layout.narrow {
+    &__proposal-link,
+    &__proposal-toggle {
+      min-height: layout.$touch-target;
+    }
+
+    &__proposals {
+      max-height: 25vh;
+    }
+
+    &__proposal-link {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    &__message {
+      max-width: 100%;
+    }
+  }
+}
+
+.repo-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  font-size: var(--text-md);
+
+  &__line {
+    margin: 0;
+  }
+
+  &__full {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  &__changed ul,
+  &__overlaps ul {
+    margin: var(--space-1) 0 0;
+    padding-left: var(--space-4-5);
+  }
+
+  &__overlaps {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius-sm);
+
+    p {
+      margin: 0;
+    }
+  }
+}
+
+@keyframes conversation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

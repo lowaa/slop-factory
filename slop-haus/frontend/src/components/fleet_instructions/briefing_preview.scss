@@ -1,0 +1,74 @@
+@use "@/styles/layout";
+@use "@/styles/surfaces";
+
+.briefing-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  p {
+    margin: 0;
+  }
+
+  &__panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__hint {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__error {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+
+    @include layout.narrow {
+      .dropdown__trigger {
+        min-height: layout.$touch-target;
+      }
+    }
+  }
+
+  &__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__text {
+    max-height: 420px;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    overflow: auto;
+
+    @include surfaces.box(var(--radius-sm), var(--color-bg));
+
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+
+  &__fleet {
+    display: block;
+    border-top: 2px dashed var(--color-border);
+  }
+
+  &__owner {
+    background: var(--color-accent-dim);
+    color: inherit;
+  }
+}

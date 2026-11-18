@@ -1,0 +1,357 @@
+[
+  {
+    "file": "src/app.scss",
+    "rule": "function-disallowed-list",
+    "count": 3
+  },
+  {
+    "file": "src/app.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 5
+  },
+  {
+    "file": "src/app.scss",
+    "rule": "selector-class-pattern",
+    "count": 14
+  },
+  {
+    "file": "src/auth_pages_config.scss",
+    "rule": "scss/comment-no-empty",
+    "count": 1
+  },
+  {
+    "file": "src/auth_pages_config.scss",
+    "rule": "selector-class-pattern",
+    "count": 8
+  },
+  {
+    "file": "src/components/agent_picker/agent_picker.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/agents_panel/agents_panel.scss",
+    "rule": "scss/comment-no-empty",
+    "count": 1
+  },
+  {
+    "file": "src/components/agents_panel/agents_panel.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/approvals_panel/approvals_panel.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/approvals_panel/approvals_panel.scss",
+    "rule": "selector-class-pattern",
+    "count": 2
+  },
+  {
+    "file": "src/components/blocking_graph/blocking_graph.scss",
+    "rule": "selector-class-pattern",
+    "count": 3
+  },
+  {
+    "file": "src/components/board/board.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/external_content/external_content.scss",
+    "rule": "color-no-hex",
+    "count": 1
+  },
+  {
+    "file": "src/components/fleet_instructions/briefing_preview.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/github_app_panel/github_app_panel.scss",
+    "rule": "function-disallowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/github_webhooks_panel/github_webhooks_panel.scss",
+    "rule": "alpha-value-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/github_webhooks_panel/github_webhooks_panel.scss",
+    "rule": "color-function-alias-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/github_webhooks_panel/github_webhooks_panel.scss",
+    "rule": "color-function-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/github_webhooks_panel/github_webhooks_panel.scss",
+    "rule": "function-disallowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/github_webhooks_panel/github_webhooks_panel.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/header_menu/header_menu.scss",
+    "rule": "function-disallowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/header_menu/header_menu.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/header_menu/header_menu.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/delivery_row.scss",
+    "rule": "alpha-value-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/delivery_row.scss",
+    "rule": "color-function-alias-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/delivery_row.scss",
+    "rule": "color-function-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/delivery_row.scss",
+    "rule": "function-disallowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/intake_field.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/intake_field.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/source_card.scss",
+    "rule": "alpha-value-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/source_card.scss",
+    "rule": "color-function-alias-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/source_card.scss",
+    "rule": "color-function-notation",
+    "count": 1
+  },
+  {
+    "file": "src/components/intake_sources_panel/source_card.scss",
+    "rule": "function-disallowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/paged_ticket_list/paged_ticket_list.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/paged_ticket_list/paged_ticket_list.scss",
+    "rule": "selector-class-pattern",
+    "count": 2
+  },
+  {
+    "file": "src/components/processing_toggle/processing_toggle.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 2
+  },
+  {
+    "file": "src/components/remote_control/message_composer.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/remote_control/message_composer.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 2
+  },
+  {
+    "file": "src/components/remote_control/message_composer.scss",
+    "rule": "selector-class-pattern",
+    "count": 2
+  },
+  {
+    "file": "src/components/remote_control/new_session.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/remote_control/prompt_history_list.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/remote_control/session_bar.scss",
+    "rule": "function-disallowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/reports_panel/llm_usage.scss",
+    "rule": "declaration-no-important",
+    "count": 1
+  },
+  {
+    "file": "src/components/reports_panel/llm_usage.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/reports_panel/reports_panel.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/reports_panel/reports_panel.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/supervisors_page/add_slot_manually.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/supervisors_page/add_slot_manually.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/supervisors_page/add_slot_manually.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/tenant_switcher/tenant_switcher.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/ticket_card/ticket_card.scss",
+    "rule": "selector-class-pattern",
+    "count": 4
+  },
+  {
+    "file": "src/components/ticket_detail/agent_context_history.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/ticket_detail/ticket_detail.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/ticket_detail/ticket_detail.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/components/ticket_detail/ticket_usage.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/ticket_filter/ticket_filter.scss",
+    "rule": "selector-class-pattern",
+    "count": 6
+  },
+  {
+    "file": "src/components/workspace_panel/workspace_help.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/components/workspace_panel/workspace_help.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/components/workspace_panel/workspace_panel.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/index.scss",
+    "rule": "custom-property-empty-line-before",
+    "count": 5
+  },
+  {
+    "file": "src/index.scss",
+    "rule": "declaration-no-important",
+    "count": 1
+  },
+  {
+    "file": "src/index.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  },
+  {
+    "file": "src/index.scss",
+    "rule": "scss/comment-no-empty",
+    "count": 3
+  },
+  {
+    "file": "src/index.scss",
+    "rule": "selector-class-pattern",
+    "count": 3
+  },
+  {
+    "file": "src/index.scss",
+    "rule": "value-keyword-case",
+    "count": 2
+  },
+  {
+    "file": "src/privacy/app_footer.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/shared/command/command.scss",
+    "rule": "declaration-property-value-keyword-no-deprecated",
+    "count": 1
+  },
+  {
+    "file": "src/shared/command/command.scss",
+    "rule": "scss/double-slash-comment-empty-line-before",
+    "count": 1
+  },
+  {
+    "file": "src/shared/harness_config_form/harness_config_form.scss",
+    "rule": "selector-class-pattern",
+    "count": 2
+  },
+  {
+    "file": "src/shared/virtual_list/virtual_list.scss",
+    "rule": "selector-class-pattern",
+    "count": 1
+  },
+  {
+    "file": "src/styles/_typography.scss",
+    "rule": "declaration-property-value-allowed-list",
+    "count": 1
+  }
+]

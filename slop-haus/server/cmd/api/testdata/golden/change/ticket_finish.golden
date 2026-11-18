@@ -1,0 +1,8 @@
+-- error: false --
+-- text --
+#1 is in review. You no longer hold it, nor the integration lock; take other work, or stop if there is none. Don't merge the PR. When a human approves it or asks for changes it comes back to the queue with you first in line, unless the server merges the approved change itself and closes the ticket as done, when there is nothing left to do.
+-- structured --
+{
+  "message": "#1 is in review. You no longer hold it, nor the integration lock; take other work, or stop if there is none. Don't merge the PR. When a human approves it or asks for changes it comes back to the queue with you first in line, unless the server merges the approved change itself and closes the ticket as done, when there is nothing left to do.",
+  "next": "review"
+}

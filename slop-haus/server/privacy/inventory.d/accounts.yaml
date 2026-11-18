@@ -1,0 +1,33 @@
+  - name: global_users
+    categories: [account_identity]
+  - name: global_user_settings
+    categories: [user_preferences]
+  - name: user_tenant_settings
+    categories: [user_preferences]
+  - name: global_user_identities
+    categories: [account_identity]
+  - name: global_tenant_memberships
+    categories: [account_identity]
+  - name: global_tenants
+    categories: [account_identity]
+  - name: global_former_memberships
+    categories: [account_identity]
+  - name: global_invites
+    categories: [account_identity]
+  - name: global_auth_tokens
+    categories: [credentials]
+  - name: global_intake_credentials
+    categories: [intake_deliveries]
+  - name: global_consent_events
+    categories: [consent_records]
+  - name: global_consent_merge_tokens
+    categories: [consent_records]
+  # The published text of the legal documents, the same for everyone.
+  - name: global_legal_document_versions
+    no_personal_data: true
+  # Registries and names of providers: nothing in these rows is about a
+  # person.
+  - name: global_auth_providers
+    no_personal_data: true
+  - name: global_harnesses
+    no_personal_data: true

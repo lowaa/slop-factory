@@ -1,0 +1,64 @@
+.ticket-detail {
+  &__comments {
+    ul {
+      list-style: none;
+      margin: 0 0 var(--space-3-5);
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+
+    li {
+      padding: var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        font-size: var(--text-md);
+      }
+
+      // Written in the font it will be read in, so indentation lines up.
+      textarea {
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        background: var(--color-bg);
+        color: var(--color-text);
+        font-family: var(--font-mono);
+        resize: vertical;
+      }
+
+      // Not the attachment field's buttons, which are the ui Button.
+      button:not(.button) {
+        align-self: flex-start;
+        padding: var(--space-2) var(--space-4);
+        border: none;
+        border-radius: 6px;
+        background: var(--color-accent);
+        color: var(--color-on-accent);
+        cursor: pointer;
+
+        &:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+      }
+    }
+  }
+
+  &__comment-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+}

@@ -1,0 +1,29 @@
+-- error: false --
+-- text --
+Granted ticket #1: Pin me
+Scopes: server/pin/
+Your branch ticket-1-a1 is ready (made at base commit dddddddddddddddddddddddddddddddddddddddd): git fetch origin && git switch ticket-1-a1. Open your PR from it; change_open refuses any other. If it already has commits they are an earlier agent's: continue from what is pushed there rather than starting over.
+Link: {board}/tickets/1?tenant={tenant} -- its PR's description links back here, with "slop-haus #1".
+-- structured --
+{
+  "attempt": {
+    "base_commit": "dddddddddddddddddddddddddddddddddddddddd",
+    "branch": "ticket-1-a1",
+    "guidance": "Your branch ticket-1-a1 is ready (made at base commit dddddddddddddddddddddddddddddddddddddddd): git fetch origin \u0026\u0026 git switch ticket-1-a1. Open your PR from it; change_open refuses any other. If it already has commits they are an earlier agent's: continue from what is pushed there rather than starting over.",
+    "managed": true,
+    "number": 1,
+    "ready": true
+  },
+  "ticket": {
+    "base_commit": "dddddddddddddddddddddddddddddddddddddddd",
+    "id": 1,
+    "paths": [
+      "server/pin/"
+    ],
+    "priority": "normal",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Pin me",
+    "url": "{board}/tickets/1?tenant={tenant}"
+  }
+}

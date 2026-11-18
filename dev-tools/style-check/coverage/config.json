@@ -1,0 +1,47 @@
+{
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800
+    },
+    "phone": {
+      "width": 390,
+      "height": 844
+    }
+  },
+  "sites": {
+    "slop-haus/frontend": {
+      "schemes": [
+        "dark"
+      ],
+      "watch": [
+        "slop-haus/frontend/",
+        "js-components/",
+        "package.json",
+        "package-lock.json"
+      ]
+    },
+    "js-components/ui": {
+      "schemes": [
+        "light",
+        "dark"
+      ],
+      "watch": [
+        "js-components/",
+        "package.json",
+        "package-lock.json"
+      ]
+    },
+    "js-components/privacy": {
+      "schemes": [
+        "light",
+        "dark"
+      ],
+      "watch": [
+        "js-components/",
+        "package.json",
+        "package-lock.json"
+      ]
+    }
+  }
+}

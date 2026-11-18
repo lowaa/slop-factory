@@ -1,0 +1,14 @@
+.steward-label {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+
+  &__evidence {
+    margin: 0.25rem 0 0;
+    padding-left: 1rem;
+    list-style: none;
+  }
+
+  &__failed {
+    color: var(--color-danger);
+  }
+}

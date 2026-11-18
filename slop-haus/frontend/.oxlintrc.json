@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["../../dev-tools/lint/oxlintrc.base.json"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["@tanstack/react-query"],
+            "message": "Server state goes through lib/resource (docs/decisions/0004)."
+          }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/lib/resource/**"],
+      "rules": { "no-restricted-imports": "off" }
+    }
+  ]
+}

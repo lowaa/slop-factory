@@ -1,0 +1,302 @@
+# Templated by the official nginx image's docker-entrypoint (envsubst over
+# any *.template file in /etc/nginx/templates/, see Dockerfile) so
+# API_UPSTREAM can be set per-environment via docker-compose instead of
+# being baked into the image.
+#
+# /api/ is proxied to the Go backend same-origin -- the browser only ever
+# talks to this nginx origin, so the Go API needs no CORS headers at all.
+# The scheme the client actually used. When deployed, TLS ends at the
+# proxy in front of this nginx, so
+# nginx itself only ever sees plain http and $scheme is always "http". The
+# api builds the address it hands agents from X-Forwarded-Proto, so passing
+# $scheme on would give them an http:// URL for an https-only front door,
+# which `slop setup-workspace` then rightly refuses. Taken from the proxy's
+# own header when it sent one, and $scheme otherwise (compose, where the
+# browser reaches this nginx directly).
+#
+# Trusting the incoming header is safe because nothing outside the cluster
+# reaches this nginx except through that proxy, which sets it itself: it
+# says https. All a forged value could change is the scheme in a setup
+# script the forger asked for.
+map $http_x_forwarded_proto $forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
+# The CSP's form-action: this origin, and GitHub's website, where the board
+# posts the App manifest to create a GitHub App. A map because
+# security_headers.conf is an include nginx does not run envsubst over.
+map $host $csp_form_action {
+    default "'self' ${GITHUB_WEB_ORIGIN}";
+}
+
+# The access log is shipped to VictoriaLogs (monitoring/vector.yaml), so it
+# carries only what is needed to see a failed request: $uri, not $request or
+# $request_uri, because those include the query string, which can hold tokens
+# (an OAuth code, say). No headers either: no cookie, authorization, referrer
+# or user agent, and no client address. escape=json so a crafted path cannot
+# break out of its field.
+log_format access_json escape=json
+    '{"time":"$time_iso8601","method":"$request_method","path":"$uri",'
+    '"status":$status,"bytes":$body_bytes_sent,"duration":$request_time,'
+    '"request_id":"$request_id"}';
+
+server {
+    listen 80;
+    access_log /var/log/nginx/access.log access_json;
+
+    server_name _;
+
+    # The Server header otherwise names the nginx version (ZAP 10036).
+    server_tokens off;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Resolving the upstream via $upstream (a variable) rather than a bare
+    # proxy_pass target defers DNS lookup to request time instead of nginx
+    # startup time, so this container doesn't crash-loop if `api` isn't up
+    # yet when nginx starts: compose's depends_on only orders container
+    # start, not the target's readiness. A variable target needs an explicit
+    # resolver, and which one is right depends on where this runs -- Docker's
+    # embedded DNS (the image default, see Dockerfile) under compose --
+    # so it is set per-environment.
+    resolver ${DNS_RESOLVER} valid=10s;
+
+    # security_headers.conf's own comment says why it is repeated in every
+    # location below that sets add_header.
+    include security_headers.conf;
+
+    # The agent-facing surface is not all under /api: MCP lives at /mcp and
+    # the hooks at /hooks/*. Proxying them here makes this origin a
+    # complete slop-haus endpoint -- one URL for the human's browser and
+    # for every agent -- which is what lets the setup instructions stop
+    # asking someone to supply a second one. Without these two blocks they
+    # fall through to the SPA and an agent gets index.html.
+    location /mcp {
+        set $upstream http://${API_UPSTREAM};
+        proxy_pass $upstream;
+        # $http_host, not $host: nginx's $host drops the port, so the api
+        # would reconstruct its own address as "http://localhost" and hand
+        # agents a URL that connects to nothing. The original header is
+        # what the browser actually reached us on, which is the whole point
+        # of asking.
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+
+        # MCP's streamable HTTP transport holds a response open and sends
+        # events down it. Buffering would hold those until the buffer
+        # filled or the request ended, which for a stream is the same as
+        # never; the default 60s read timeout would then cut it off.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+
+    location /hooks/ {
+        set $upstream http://${API_UPSTREAM};
+        proxy_pass $upstream;
+        # $http_host, not $host: nginx's $host drops the port, so the api
+        # would reconstruct its own address as "http://localhost" and hand
+        # agents a URL that connects to nothing. The original header is
+        # what the browser actually reached us on, which is the whole point
+        # of asking.
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    }
+
+    # OAuth's browser- and workspace-facing endpoints
+    # (server/internal/oauth/http.go's Mount) live on the api's own mux,
+    # not under /api -- an MCP client discovers them from PUBLIC_BASE_URL
+    # (this origin) via the well-known documents below, and a workspace's
+    # token.sh talks to /oauth/token and /oauth/device_authorization the
+    # same way. Without these two blocks they all fall through to the SPA
+    # and get index.html instead of JSON or a redirect.
+    location /oauth/ {
+        set $upstream http://${API_UPSTREAM};
+        proxy_pass $upstream;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # A prefix location, not two separate ones: both
+    # /.well-known/oauth-authorization-server and
+    # /.well-known/oauth-protected-resource(/mcp) start with this string
+    # (see http.go's Mount), and nginx's plain-prefix matching is exactly
+    # "starts with" -- no regex needed to cover both plus any future
+    # oauth-* discovery document the server adds here.
+    location /.well-known/oauth- {
+        set $upstream http://${API_UPSTREAM};
+        proxy_pass $upstream;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/ {
+        # proxy_pass's URI-rewrite behavior (matched location prefix ->
+        # given path) only applies to a static target -- with a variable
+        # target, nginx instead forwards the original request URI
+        # untouched, which is exactly what we want here since /api/* maps
+        # 1:1 to the backend's /api/* (lesson learnt: appending
+        # "/api/" to $upstream, expecting the static-target rewrite
+        # semantics, makes every request 404).
+        set $upstream http://${API_UPSTREAM};
+        proxy_pass $upstream;
+        # $http_host, not $host: nginx's $host drops the port, so the api
+        # would reconstruct its own address as "http://localhost" and hand
+        # agents a URL that connects to nothing. The original header is
+        # what the browser actually reached us on, which is the whole point
+        # of asking.
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+
+        # /api/tickets/stream (the board's change feed) is SSE, and the same buffering argument applies
+        # to it as to /mcp above: held events are not a live feed.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+
+    # Vite fingerprints everything under /assets, so a given URL's contents
+    # can never change -- cache it for a year and skip the revalidation
+    # round trip entirely.
+    location /assets/ {
+        include security_headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # The build tag this image was built as (the Dockerfile writes it). A
+    # deploy polls it to see the new build take over, so never cached --
+    # and an exact match, so a missing file is a 404 rather than the SPA's
+    # index.html answering in its place.
+    location = /version.json {
+        include security_headers.conf;
+        # always: a 404 mid-rollout must not be cached either.
+        add_header Cache-Control "no-store" always;
+        default_type application/json;
+        try_files $uri =404;
+    }
+
+    # Internal-only: nginx's own auth_request (below) proxies here before
+    # serving anything under /admin/. It reuses the api's own admin check
+    # (GET /api/auth/admin-check -- 204 admin / 403 signed-in non-admin /
+    # 401 signed out, see server/internal/user/invite_handler.go's
+    # AdminCheck) rather than nginx re-deriving "is this user an admin" on
+    # its own, which would drift from the server's definition the moment
+    # either side changed without the other.
+    #
+    # auth_request only looks at the status code, so the subrequest's body
+    # is dropped both ways: proxy_pass_request_body off + an emptied
+    # Content-Length strip whatever request body the original request
+    # carried (there never is one here -- this only ever fires for GETs
+    # against static admin paths -- but auth_request always replays the
+    # original method, and a GET with a stray body would otherwise be
+    # forwarded as one), and admin-check's own 204/401/403 response has
+    # nothing this needs to read.
+    location = /internal/admin-check {
+        internal;
+        set $upstream http://${API_UPSTREAM};
+        proxy_pass $upstream/api/auth/admin-check;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    # error_page's "=" form runs the named location while keeping the
+    # subrequest's own status code unless that location sets a new one --
+    # @admin_login_redirect and @admin_forbidden both do, on purpose: a 401
+    # (no session) means "send them to sign in", not "show them a 401 page".
+    location @admin_login_redirect {
+        # $http_host, not $host or a bare "/login" -- nginx completes a
+        # relative redirect target using $host, which (like $host
+        # elsewhere in this file) drops a non-default port. A dev stack
+        # reached on anything but :80 would redirect to the right host on
+        # the wrong port instead of back to itself.
+        return 302 $scheme://$http_host/login;
+    }
+
+    location @admin_forbidden {
+        default_type text/plain;
+        return 403 "Forbidden\n";
+    }
+
+    # A bare "/admin" (no trailing slash) doesn't match the "/admin/"
+    # prefix location below at all, so without this it falls through to
+    # the SPA's own "/" catch-all below -- which, finding /admin *is* a
+    # real directory on disk, has nginx auto-redirect to add the slash
+    # using $host (drops a non-default port, same issue as
+    # @admin_login_redirect above) *before* the admin gate is ever
+    # consulted. Harmless (nothing admin-only is served by either path),
+    # but worth pinning down explicitly rather than leaving it to a nginx
+    # default two directives away from the auth_request logic it looks
+    # related to.
+    location = /admin {
+        return 301 $scheme://$http_host/admin/;
+    }
+
+    # The admin bundle (vite.admin.config.ts's separate build, copied to
+    # /usr/share/nginx/html/admin/ -- see the Dockerfile) is gated by the
+    # same auth_request as its own hashed assets below: nginx must never
+    # serve index.html *or* a single admin/assets/*.js file to anyone who
+    # isn't an admin, since the JS itself is what must never reach a
+    # non-admin's browser at all, not just go unrendered once it's there.
+    #
+    # no-cache rather than the /assets/ block's immutable caching: this
+    # location also serves admin/index.html, which -- like the SPA's own
+    # index.html above -- is the one unhashed file naming the current
+    # deploy's asset hashes.
+    location /admin/ {
+        auth_request /internal/admin-check;
+        error_page 401 = @admin_login_redirect;
+        error_page 403 = @admin_forbidden;
+
+        include security_headers.conf;
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ =404;
+    }
+
+    # A regex location outranks the plain "/admin/" prefix above, so the
+    # admin bundle's own hashed assets get far-future caching -- but that
+    # means this needs its own auth_request rather than inheriting the block
+    # above's.
+    #
+    # private, where /assets/ says public: public lets a shared cache (a
+    # proxy or CDN in front of this one day) keep the response it fetched
+    # for an admin and hand it to anyone, which is the one thing the gate
+    # exists to prevent. The admin's own browser caching it is fine.
+    location ~ ^/admin/assets/ {
+        auth_request /internal/admin-check;
+        error_page 401 = @admin_login_redirect;
+        error_page 403 = @admin_forbidden;
+
+        include security_headers.conf;
+        add_header Cache-Control "private, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # SPA fallback: any non-/api path that doesn't match a built asset
+    # falls back to index.html so client-side view switching survives a
+    # hard reload/deep link.
+    #
+    # no-cache (revalidate every time, not "never store") because
+    # index.html is the one unhashed file and it names the asset hashes: a
+    # cached copy pins the browser to a previous deploy's bundle.
+    location / {
+        include security_headers.conf;
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ /index.html;
+    }
+}

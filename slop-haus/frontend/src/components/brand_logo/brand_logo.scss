@@ -1,0 +1,13 @@
+.brand-logo {
+  display: inline-block;
+  vertical-align: middle;
+  flex: none;
+}
+
+// The artwork is a neon glow with transparency; on the light theme's pale
+// surfaces it vanishes, so it keeps a dark tile of its own.
+:root[data-theme="light"] .brand-logo {
+  /* stylelint-disable-next-line color-no-hex -- fixed to the artwork's own backdrop, not a theme colour */
+  background: #020e1e;
+  border-radius: 22%;
+}

@@ -1,0 +1,36 @@
+@use "@/styles/surfaces";
+
+.running-help {
+  @include surfaces.accordion;
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+    padding: var(--space-4);
+    max-width: 78ch;
+    font-size: var(--text-sm);
+
+    p,
+    ul {
+      margin: 0;
+    }
+
+    h3 {
+      margin: 0 0 var(--space-1);
+      font-size: var(--text-md);
+    }
+  }
+
+  &__steps {
+    margin: 0;
+    padding-left: var(--space-4-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+
+    p {
+      margin: var(--space-1) 0;
+    }
+  }
+}

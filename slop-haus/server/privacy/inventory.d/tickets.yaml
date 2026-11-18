@@ -1,0 +1,40 @@
+  - name: agents
+    categories: [agents]
+  - name: agent_roles
+    categories: [agents]
+  - name: agent_role_members
+    categories: [agents]
+  - name: tickets
+    categories: [work_record]
+  - name: ticket_sequences
+    categories: [work_record]
+  - name: ticket_paths
+    categories: [work_record]
+  - name: ticket_deps
+    categories: [work_record]
+  - name: ticket_comments
+    categories: [work_record]
+  - name: ticket_revisions
+    categories: [work_record]
+  - name: ticket_snapshots
+    categories: [work_record]
+  - name: attempt_verdicts
+    categories: [work_record]
+  - name: ticket_required_roles
+    categories: [work_record]
+  - name: agent_contexts
+    categories: [work_record]
+  - name: board_revisions
+    categories: [work_record]
+  - name: board_changes
+    categories: [work_record]
+  - name: ticket_status_changes
+    categories: [work_record]
+  - name: attempts
+    categories: [work_record]
+  - name: attempt_status_changes
+    categories: [work_record]
+  - name: agent_messages
+    categories: [work_record]
+  - name: sessions
+    categories: [agent_activity]

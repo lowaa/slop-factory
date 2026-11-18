@@ -1,0 +1,30 @@
+.ticket-detail {
+  &__variant {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    p {
+      margin: 0;
+      font-size: var(--text-sm);
+    }
+  }
+
+  &__variant-picker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    max-width: 360px;
+  }
+
+  &__variant-warning {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-danger);
+    font-size: var(--text-sm);
+  }
+}

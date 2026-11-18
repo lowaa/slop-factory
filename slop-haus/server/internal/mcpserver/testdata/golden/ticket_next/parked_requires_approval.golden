@@ -1,0 +1,36 @@
+-- error: false --
+-- text --
+Granted ticket #7: Split the register
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a -- its PR's description links back here, with "slop-haus #7".
+REQUIRES HUMAN APPROVAL: once the work is finished, take your PR out of draft and call ticket_finish with its URL and a handoff. Don't merge it -- a human approves it first.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-7-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "guidance": {
+    "parked": "PARKED: a human is keeping this ticket but not planning to do it. It is not work to take, and only a human can unpark it. Don't file it again; comment on it if you have something to add.",
+    "review": "REQUIRES HUMAN APPROVAL: once the work is finished, take your PR out of draft and call ticket_finish with its URL and a handoff. Don't merge it -- a human approves it first."
+  },
+  "ticket": {
+    "body": "Move each tool next to its handler.\nNo behaviour change.",
+    "id": 7,
+    "paths": [
+      "server/internal/mcpserver/",
+      "server/internal/ticket/"
+    ],
+    "priority": "normal",
+    "requires_approval": true,
+    "revision": 0,
+    "status": "parked",
+    "title": "Split the register",
+    "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+  }
+}

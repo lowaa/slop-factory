@@ -1,0 +1,109 @@
+// Same token names @slop-factory/ui's components read (see
+// button.scss) -- each with a fallback so a host with no theme still gets
+// a legible card. A host with its own token names (a different palette
+// entirely) defines aliases onto these names once, globally, rather than
+// this file knowing every possible host's tokens; one with genuinely
+// different presentation (borders on a notice, a different card layout)
+// overrides the rule itself on its own side.
+.auth-layout {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-4);
+
+  &__card {
+    width: 100%;
+    max-width: 400px;
+    padding: var(--space-6);
+    background: var(--color-bg-raised);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+  }
+
+  &__brand {
+    margin-bottom: var(--space-5);
+  }
+
+  &__title {
+    font-size: var(--text-xl);
+    margin-bottom: var(--space-5);
+
+    // Tighten the gap to the subtitle when there is one; the subtitle's
+    // own margin carries the space down to the form instead.
+    &:has(+ .auth-layout__subtitle) {
+      margin-bottom: var(--space-1);
+    }
+  }
+
+  &__subtitle {
+    margin: 0 0 var(--space-5);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  // Shared gap container for a page's fields/notice/button/links, whether
+  // they sit inside a <form> or a plain wrapper (activate/reset render
+  // conditional non-form content too).
+  &__form,
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    font-weight: 550;
+    color: var(--color-text);
+  }
+
+  &__notice {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+
+    &--error {
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+    }
+
+    // success/info share one neutral treatment by default -- a host that
+    // wants a louder success state (a green notice, say) overrides
+    // .auth-layout__notice--success on its own side.
+    &--success,
+    &--info {
+      background: var(--color-bg-sunken);
+      color: var(--color-text-muted);
+    }
+  }
+
+  // The ui Button doesn't know about page layout, so the "make it span
+  // the card" rule lives here rather than as a library prop.
+  &__submit {
+    width: 100%;
+  }
+
+  &__switch {
+    margin: 0;
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+
+    // Underlined always, not just on hover: this link sits inline in a
+    // plain sentence, and axe's link-in-text-block check (WCAG 1.4.1)
+    // flags exactly this pattern -- the accent colour alone doesn't
+    // contrast enough against the surrounding muted text to be the only
+    // thing distinguishing it as a link.
+    a {
+      color: var(--color-accent-text);
+      text-decoration: underline;
+    }
+  }
+}

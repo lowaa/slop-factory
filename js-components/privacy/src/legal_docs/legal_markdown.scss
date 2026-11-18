@@ -1,0 +1,25 @@
+// Tokens as @slop-factory/ui's components read them, with fallbacks so a
+// host with no theme still gets legible text.
+.legal-markdown {
+  line-height: 1.6;
+  color: var(--color-text);
+
+  // Long URLs and addresses in prose must not widen the page. Tables set
+  // their own (legal_table.scss): there it would collapse the columns.
+  overflow-wrap: anywhere;
+
+  h1,
+  h2,
+  h3 {
+    line-height: 1.25;
+    margin: var(--space-5) 0 var(--space-2);
+  }
+
+  // An unreviewed gap in the text.
+  &__todo {
+    background: var(--color-warning-bg);
+    color: var(--color-warning-text);
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
+  }
+}

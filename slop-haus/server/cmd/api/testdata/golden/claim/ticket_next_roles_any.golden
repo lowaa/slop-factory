@@ -1,0 +1,7 @@
+-- error: false --
+-- text --
+#2 needs one of the roles deploy, review, which you don't have. Only a person can change an agent's roles; take other work.
+-- structured --
+{
+  "blocked": "#2 needs one of the roles deploy, review, which you don't have. Only a person can change an agent's roles; take other work."
+}

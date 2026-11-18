@@ -1,0 +1,15 @@
+@use "@/styles/typography";
+
+.help-section {
+  &__title {
+    margin: 0;
+    padding: var(--space-3-5) var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+
+    @include typography.section-label;
+  }
+
+  &--view {
+    overflow-y: auto;
+  }
+}

@@ -1,0 +1,75 @@
+// knip: unused files, exports, types and dependencies across the npm
+// workspaces and the e2e suite. dev-tools/lint/repo.sh runs it through
+// the ratchet; see dev-tools/lint/README.md. Entries knip's plugins find on
+// their own (vite, vitest, storybook, package.json exports) are not
+// repeated here.
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["dev-tools/**/*.mjs", "stylelint.config.mjs"],
+      "project": ["dev-tools/**/*.mjs"],
+      // Used from shell scripts and config strings, which knip does not
+      // read: bats by bats/run.sh, the linters by dev-tools/lint/*.sh,
+      // typescript-native by path in each package's typecheck script,
+      // postcss-scss as stylelint's customSyntax, and jsdom as the vitest
+      // environment the js-components packages name.
+      "ignoreDependencies": [
+        "bats",
+        "bats-assert",
+        "bats-support",
+        "jscpd",
+        "jsdom",
+        "oxlint",
+        "oxlint-tsgolint",
+        "postcss-scss",
+        "typescript-native"
+      ]
+    },
+    "slop-haus/frontend": {
+      // The vite and vitest plugins are off and their entries listed: the
+      // plugins make every test an entry, and lazy_route.test.ts
+      // import.meta.globs the whole of src/ as raw text to read it, which
+      // would make every file look used. The storybook plugin still finds
+      // the stories.
+      "vite": false,
+      "vitest": false,
+      "entry": [
+        "src/main.tsx",
+        "src/admin/main.tsx",
+        "vite.config.ts",
+        "vite.admin.config.ts",
+        "vitest.storybook.config.ts",
+        "src/test/setup.ts",
+        "src/**/*.test.{ts,tsx}",
+        "!src/shared/lazy_route/lazy_route.test.ts",
+        "tools/*.mjs"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "tools/*.mjs", "*.config.ts", ".storybook/*.ts"],
+      // lazy_route.test.ts is run by vitest all the same; it is left out
+      // above only so its glob is not read as imports.
+      "ignore": ["src/api_generated/**", "src/shared/lazy_route/lazy_route.test.ts"],
+      // Run by generate_api_client.sh.
+      "ignoreDependencies": ["openapi-typescript"]
+    },
+    "js-components/*": {
+      "project": ["src/**/*.{ts,tsx}", ".storybook/*.{ts,tsx}", "*.config.ts"]
+    },
+    "slop-haus/e2e_playwright_ts": {
+      // Not a root workspace: it has its own lockfile and install, which the
+      // lint does not make. So its entries are listed rather than read from
+      // playwright.config.ts, which needs @playwright/test installed to load.
+      "playwright": false,
+      "entry": ["playwright.config.ts", "tests/**/*.spec.ts", "rollout/**/*.ts"],
+      "project": ["tests/**/*.ts", "rollout/**/*.ts", "playwright.config.ts"],
+      // e2e_support/ is a copy of js-components/e2e-support/src that
+      // `npm run sync-support` makes; read the original.
+      "paths": { "@e2e-support/*": ["../../js-components/e2e-support/src/*"] },
+      // Imported by e2e-support, which knip reads from outside this
+      // workspace and so does not credit to it; playwright is the binary
+      // @playwright/test installs.
+      "ignoreDependencies": ["pg", "@types/pg", "yaml"],
+      "ignoreBinaries": ["playwright"]
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# `go build` here writes the binary beside its source.
+/slop-review

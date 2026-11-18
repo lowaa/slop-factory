@@ -1,0 +1,63 @@
+{
+  "description": "Shared test cases for the label fields (provider, model, tool) of an LLM usage record, which the server refuses a whole report over. Each client's own patterns (the Claude hook's usage-report.py, the supervisor's usage/, the pi extension) and go-llm-usage's validation all read this file, so they accept and refuse the same values. A client may be stricter than the server only where the fixture does not list the value.",
+  "provider": {
+    "valid": [
+      "anthropic",
+      "openai-codex",
+      "a",
+      "0x",
+      "a.b_c-d",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      "Anthropic",
+      "-anthropic",
+      ".x",
+      "a b",
+      "a/b",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "anthropic\n"
+    ]
+  },
+  "model": {
+    "valid": [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5[1m]",
+      "us.anthropic.claude-3:0",
+      "org/model@v1+x",
+      "M",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      "-m",
+      ".m",
+      "_m",
+      "m m",
+      "m\n",
+      "m;rm",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mödel"
+    ]
+  },
+  "tool": {
+    "valid": [
+      "Bash",
+      "mcp__slop-haus__ticket_get",
+      "_x",
+      "a.b:c-d",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      "-x",
+      ".x",
+      "a b",
+      "a/b",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "x\n"
+    ]
+  }
+}

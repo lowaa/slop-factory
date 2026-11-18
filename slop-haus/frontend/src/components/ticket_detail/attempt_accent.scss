@@ -1,0 +1,31 @@
+// One class per palette slot, so a component names an attempt's colour with
+// a class instead of an inline style (the tab links are drawn by the route,
+// which passes className through but nothing else). Spelled out rather than
+// looped: the design-token check reads var() names from the source.
+.attempt-accent-1 {
+  --attempt-accent: var(--attempt-1);
+}
+
+.attempt-accent-2 {
+  --attempt-accent: var(--attempt-2);
+}
+
+.attempt-accent-3 {
+  --attempt-accent: var(--attempt-3);
+}
+
+.attempt-accent-4 {
+  --attempt-accent: var(--attempt-4);
+}
+
+.attempt-accent-5 {
+  --attempt-accent: var(--attempt-5);
+}
+
+.attempt-accent-6 {
+  --attempt-accent: var(--attempt-6);
+}
+
+.attempt-accent-7 {
+  --attempt-accent: var(--attempt-7);
+}

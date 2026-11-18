@@ -1,0 +1,5 @@
+local_test.go errcheck defer got.Close()
+local_test.go errcheck defer got.Close()
+local_test.go errcheck defer got.Close()
+local_test.go errcheck defer gotA.Close()
+local_test.go errcheck defer gotB.Close()

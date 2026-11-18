@@ -1,0 +1,45 @@
+-- error: false --
+-- text --
+#1 Needs a plan [in_progress, revision 0]
+
+Scopes: (none declared)
+Link: {board}/tickets/1?tenant={tenant}
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+
+Comments:
+- worker-1 ({time}): Which way?
+- human ({time}): The first way.
+
+Handoff from worker-1 -- resume from here:
+Nothing built.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-1-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "comments": [
+    {
+      "at": "{time}",
+      "author": "worker-1",
+      "body": "Which way?"
+    },
+    {
+      "at": "{time}",
+      "author": "human",
+      "body": "The first way."
+    }
+  ],
+  "handoff": "Nothing built.",
+  "id": 1,
+  "paths": [],
+  "priority": "urgent",
+  "revision": 0,
+  "status": "in_progress",
+  "title": "Needs a plan",
+  "url": "{board}/tickets/1?tenant={tenant}"
+}

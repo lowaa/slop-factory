@@ -1,0 +1,38 @@
+.tenant-remote-controls {
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+
+  &__empty {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  &__name {
+    font-weight: 600;
+  }
+
+  &__owner,
+  &__seen {
+    color: var(--color-text-muted);
+  }
+}

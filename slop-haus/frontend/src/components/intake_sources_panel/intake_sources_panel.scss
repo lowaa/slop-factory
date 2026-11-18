@@ -1,0 +1,72 @@
+@use "@/styles/typography";
+@use "@/styles/surfaces";
+
+.intake-sources-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4-5);
+  margin-top: var(--space-4-5);
+
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+    padding: var(--space-4);
+
+    @include surfaces.box(var(--radius));
+
+    h2,
+    h3 {
+      margin: 0;
+
+      @include typography.heading-label;
+    }
+  }
+
+  &__instructions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-size: var(--text-md);
+    color: var(--color-text);
+
+    p {
+      margin: 0;
+    }
+  }
+
+  &__notice {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  // A notice that says the feature is off rather than that something
+  // failed -- neutral, not danger-coloured, same reasoning as
+  // ticket_card.scss's "preparing" badge.
+  &__notice--neutral {
+    border-color: var(--color-text-muted);
+    background: transparent;
+    color: var(--color-text-muted);
+  }
+
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  &__empty {
+    margin: 0;
+    padding: var(--space-3-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+}

@@ -1,0 +1,9 @@
+consent/postgres_store.go gocognit (*PostgresStore).Apply
+consent/service.go gocognit (*Service).Decide
+inventory/validate.go gocognit (*Inventory).Validate
+inventory/validate.go gocognit (*Inventory).validateTableStores
+telemetry/logs.go gocognit (*Policy).Apply
+telemetry/logs.go gocognit (*Policy).buildEvent
+telemetry/logs.go gocognit (*Policy).filterRecord
+telemetry/logs.go gocognit New
+telemetry/spans.go gocognit (*spansRewriter).readSpan

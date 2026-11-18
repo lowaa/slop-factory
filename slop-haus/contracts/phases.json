@@ -1,0 +1,5 @@
+{
+  "_doc": "The phases of a supervisor slot's state machine: fleet/phase.py (Python) and supervisorwatch.SlotPhases (Go). slot_reasons: why a slot is not running, fleet/phase.py Reason and supervisorwatch.IdleReasons.",
+  "slot_reasons": ["no_claimable", "fleet_paused", "slot_paused", "lock_queued", "cooldown", "backoff_after_error", "waiting_ci", "reviewing", "updating", "starting", "other"],
+  "slot_phases": ["idle", "running", "wait_lock", "wait_checks", "wait_review", "backoff", "wait_reset", "paused"]
+}

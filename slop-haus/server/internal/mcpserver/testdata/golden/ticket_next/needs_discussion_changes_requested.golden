@@ -1,0 +1,40 @@
+-- error: false --
+-- text --
+Granted ticket #7: Split the register
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+This ticket NEEDS DISCUSSION: its body is a direction, not a spec. Do not build it. Read it with ticket_get, work out a plan, and post the plan and your questions with ticket_discuss.
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a -- its PR's description links back here, with "slop-haus #7".
+Review: a human asked for changes to its PR (https://github.example/acme/repo/pull/12); don't merge it or open another -- plan around it and say in your discussion what should happen to it.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-7-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-7-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "guidance": {
+    "needs_discussion": "This ticket NEEDS DISCUSSION: its body is a direction, not a spec. Do not build it. Read it with ticket_get, work out a plan, and post the plan and your questions with ticket_discuss.",
+    "review": "Review: a human asked for changes to its PR (https://github.example/acme/repo/pull/12); don't merge it or open another -- plan around it and say in your discussion what should happen to it."
+  },
+  "ticket": {
+    "body": "Move each tool next to its handler.\nNo behaviour change.",
+    "id": 7,
+    "needs_discussion": true,
+    "paths": [
+      "server/internal/mcpserver/",
+      "server/internal/ticket/"
+    ],
+    "pr_url": "https://github.example/acme/repo/pull/12",
+    "priority": "normal",
+    "requires_approval": true,
+    "review": "changes_requested",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Split the register",
+    "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+  }
+}

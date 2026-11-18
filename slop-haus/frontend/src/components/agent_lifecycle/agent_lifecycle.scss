@@ -1,0 +1,57 @@
+@use "@/styles/forms";
+@use "@/styles/surfaces";
+
+.agent-lifecycle {
+  &__badge {
+    justify-self: start;
+
+    @include surfaces.tag;
+
+    font-family: var(--font-mono);
+
+    &--enabled {
+      background: var(--color-accent-dim);
+      color: var(--color-accent-hot);
+    }
+
+    &--disabled,
+    &--removed {
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+    }
+  }
+
+  &__toggle {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    cursor: pointer;
+
+    input {
+      @include forms.checkbox-control;
+    }
+  }
+
+  &__confirm,
+  &__error {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+
+  &__confirm-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  &__error {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+}

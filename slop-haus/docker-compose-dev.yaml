@@ -1,0 +1,226 @@
+# Local dev stack: Postgres + MailHog + slop-haus/server + the frontend.
+# Deliberately lean -- no traefik, no object store, no Temporal. Its OTel
+# pipeline is a collector routing by privacy.tier to the one store slop-haus
+# has. slop-haus is a local coordination tool for a handful of agents on one
+# machine, and every service here has to earn its place in a stack that
+# exists to be started and stopped constantly while iterating. MailHog is
+# the one addition since auth/tenancy landed: activation and password-reset
+# links have to go somewhere, and a real mailbox isn't it.
+#
+# The frontend's own nginx proxies /api/* to the api service (see
+# frontend/nginx.conf.template), so the browser only ever talks to one
+# origin and the Go server needs no CORS handling.
+#
+# Usage (run from the repo root, since the api build context must
+# include go-db and go-auth -- slop-haus/server depends on them via go.work,
+# not a tagged release; see server/Dockerfile), or just ./dev_env.sh up:
+#   POSTGRES_PASSWORD=devpassword \
+#     docker compose -f slop-haus/docker-compose-dev.yaml up --build
+#
+# Then:
+#   Board:    http://localhost:5273/
+#   API:      http://localhost:8190/api/tickets
+#   MailHog:  http://localhost:8126/  (activation/password-reset links land here)
+#
+# The seed service (below) creates a default, already-active dev account
+# once the api is up and migrated:
+#   email:    dev@slop-haus.local
+#   password: slop-haus-dev-password
+# (override with DEV_USER_EMAIL/DEV_USER_PASSWORD). Sign in with those at
+# the Board URL above.
+#
+# Host ports are a block other common dev stacks leave alone (5173/8080/8090
+# are taken by many), and a dev stack that cannot be brought
+# up beside a sibling project's is a dev stack you stop using. Every one is
+# overridable, which is what a *second slop-haus workspace* needs: running
+# two at once (the thing this project exists to coordinate) means giving the
+# second its own FRONTEND_PORT/API_PORT/POSTGRES_PORT/MAILHOG_PORT, or using
+# separate compose project names. The e2e suite has no such constraint -- its
+# overlay unpublishes all of these, so any number of runs coexist.
+#
+# e2e_playwright_ts/docker-compose-dev.e2e.yaml is an overlay on top of
+# this file -- it adds the Playwright runner service and duplicates none of
+# it.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-slophaus}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?required env var missing}
+      - POSTGRES_DB=${POSTGRES_DB:-slophaus}
+    volumes:
+      - slophaus-postgres:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-slophaus}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - slophaus-network
+
+  # MailHog is a local SMTP sink with a web UI + HTTP API for reading
+  # captured mail -- used instead of a real mail server so activation/reset
+  # emails can be read by a human (http://localhost:8126) or by the e2e
+  # suite (its HTTP API) without ever leaving the dev stack. Only its web
+  # UI/API port is published -- nothing on the host
+  # needs to speak SMTP to it directly, and slop-haus stays lean.
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "${MAILHOG_PORT:-8126}:8025"
+    networks:
+      - slophaus-network
+
+  api:
+    build:
+      # context is resolved relative to this compose file's directory
+      # (slop-haus/), so ".." reaches the repo root -- dockerfile is
+      # then resolved relative to that context, not to this file. Needed
+      # because slop-haus/server depends on go-db and go-auth via go.work,
+      # not a tagged release (see server/Dockerfile's own comment).
+      context: ..
+      dockerfile: slop-haus/server/Dockerfile
+      target: runtime
+    image: slop-haus-api-dev
+    environment:
+      # The owner role's DSN -- it runs migrations and creates the app role
+      # at startup (see internal/config/config.go), then the server serves
+      # every request as that app role instead.
+      - DATABASE_URL=postgres://${POSTGRES_USER:-slophaus}:${POSTGRES_PASSWORD:?required env var missing}@postgres:5432/${POSTGRES_DB:-slophaus}?sslmode=disable
+      - APP_DB_PASSWORD=${APP_DB_PASSWORD:-devapppassword}
+      - LISTEN_ADDR=:8080
+      # Where the board is served, and where activation/password-reset links
+      # in outgoing mail point -- has to be the address a browser reaches,
+      # not a cluster/container-internal one. Plain http here means
+      # SecureCookies() is false, which is what a non-TLS localhost stack
+      # needs.
+      - PUBLIC_BASE_URL=http://localhost:${FRONTEND_PORT:-5273}
+      # The frontend's nginx sits in front of the api on the compose
+      # network (Docker's 172.16/12 range), so its X-Forwarded-For is
+      # believed when counting sign-in attempts per client.
+      - TRUSTED_PROXIES=172.16.0.0/12
+      # Sign-up stays open locally, and for the e2e suite, which signs up
+      # fresh accounts; anywhere real it is invitation only.
+      - REGISTRATION_OPEN=true
+      # Not a real secret -- fixed and 48 bytes (>= the 32-byte minimum
+      # config.go enforces) purely so a fresh checkout works with no setup.
+      # Override with a real one for anything that isn't a laptop.
+      - JWT_SECRET=${JWT_SECRET:-slop-haus-local-dev-jwt-secret-not-a-real-secret}
+      - EMAIL_BACKEND=smtp
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
+      # MailHog offers no STARTTLS; anywhere real keeps the default (on).
+      - SMTP_REQUIRE_TLS=false
+      - EMAIL_FROM=slop-haus@localhost
+      # Retention. Tickets are never pruned: they are the work record. Set
+      # any of these to 0 to disable that prune.
+      - SESSION_RETENTION=${SESSION_RETENTION:-720h}
+      - LEASE_RETENTION=${LEASE_RETENTION:-720h}
+      - LLM_USAGE_RETENTION=${LLM_USAGE_RETENTION:-8760h}
+      - PENDING_ACTION_RETENTION=${PENDING_ACTION_RETENTION:-2160h}
+      - CONVERSATION_RETENTION=${CONVERSATION_RETENTION:-2160h}
+      - PROPOSAL_TTL=${PROPOSAL_TTL:-168h}
+      - PROPOSAL_MAX_PENDING_PER_AGENT=${PROPOSAL_MAX_PENDING_PER_AGENT:-50}
+      - PROPOSAL_RATE_PER_MINUTE=${PROPOSAL_RATE_PER_MINUTE:-30}
+      # Stored code host credentials (the GitHub App), which conductor
+      # conversations need to resolve their checkout: off unless you export a
+      # key (base64 of 32 bytes, e.g. `openssl rand -base64 32`). No default
+      # here, unlike JWT_SECRET: a key printed in the repo would protect a real
+      # App's private key with nothing. Keep the same key across restarts, or
+      # what was stored under the old one cannot be read.
+      - CREDENTIAL_ENCRYPTION_KEY=${CREDENTIAL_ENCRYPTION_KEY:-}
+      # Logs go to the collector, as in the cluster. Not a dependency: the
+      # export is best-effort, so the api starts and serves without it.
+      - LOGS_OTLP_ENDPOINT=http://otel-collector:4318/v1/logs
+    ports:
+      # Kept for hitting the API without the frontend in front of it. A
+      # different host port than the frontend's, since both would otherwise
+      # want the same one.
+      - "${API_PORT:-8190}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    networks:
+      - slophaus-network
+
+  # One-shot: creates the default dev account (see the top-of-file comment)
+  # once the api has migrated the database and is answering /healthz, so
+  # development and the e2e suite always have a signed-in-able account
+  # without an activation email to go read first. Idempotent (see
+  # cmd/add_user's own comment), so re-running `up` on an existing volume is
+  # a no-op rather than an error.
+  seed:
+    image: slop-haus-api-dev
+    command:
+      - /srv/bin/add_user
+      - --email=${DEV_USER_EMAIL:-dev@slop-haus.local}
+      - --display-name=${DEV_USER_DISPLAY_NAME:-Dev}
+      # An admin, so the admin pages and invites can be exercised locally.
+      - --admin
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-slophaus}:${POSTGRES_PASSWORD:?required env var missing}@postgres:5432/${POSTGRES_DB:-slophaus}?sslmode=disable
+      - ADD_USER_PASSWORD=${DEV_USER_PASSWORD:-slop-haus-dev-password}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - slophaus-network
+
+  frontend:
+    build:
+      # The repo root too: the frontend is an npm workspace of the root
+      # package.json (see frontend/Dockerfile).
+      context: ..
+      dockerfile: slop-haus/frontend/Dockerfile
+    environment:
+      - API_UPSTREAM=api:8080
+    ports:
+      - "${FRONTEND_PORT:-5273}:80"
+    depends_on:
+      - api
+    networks:
+      - slophaus-network
+
+  # Receives the api's OTLP logs and routes them by privacy.tier (see
+  # _dev_env/otel/otel-collector-config.yaml, which is the cluster's config
+  # too). Reached by the api only, over the compose network; the
+  # untiered-record counter (:8889) is published for looking at.
+  otel-collector:
+    build:
+      context: _dev_env/otel
+    depends_on:
+      - victoria-logs
+    ports:
+      - "127.0.0.1:${OTEL_COLLECTOR_TIER_METRICS_PORT:-8889}:8889"
+    networks:
+      - slophaus-network
+
+  # The operational log store, where a record with no (or an unknown) tier
+  # lands too. Queried at /select/vmui.
+  victoria-logs:
+    image: victoriametrics/victoria-logs:v1.51.0
+    command: ["-storageDataPath=/victoria-logs-data"]
+    ports:
+      - "127.0.0.1:${VICTORIA_LOGS_PORT:-9428}:9428"
+    volumes:
+      - slophaus-victoria-logs:/victoria-logs-data
+    networks:
+      - slophaus-network
+
+networks:
+  slophaus-network:
+
+volumes:
+  slophaus-postgres:
+  slophaus-victoria-logs:

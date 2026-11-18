@@ -1,0 +1,17 @@
+-- error: false --
+-- text --
+Scope narrowed. The ticket now holds: srv/a/keep/, srv/b/, srv/c.go.
+-- structured --
+{
+  "kept": [
+    "srv/a/keep/"
+  ],
+  "remaining": [
+    "srv/a/keep/",
+    "srv/b/",
+    "srv/c.go"
+  ],
+  "removed": [
+    "srv/a/"
+  ]
+}

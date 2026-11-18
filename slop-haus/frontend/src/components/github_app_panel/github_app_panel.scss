@@ -1,0 +1,158 @@
+@use "@/styles/forms";
+@use "@/styles/surfaces";
+
+.github-app-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3-5) 14px;
+
+  @include surfaces.box(var(--radius));
+
+  p,
+  ul {
+    margin: 0;
+  }
+
+  &__heading {
+    margin: 0;
+    font-size: var(--text-md);
+  }
+
+  &__hint {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  &__error {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__notice {
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+  }
+
+  &__facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+    font-size: var(--text-sm);
+
+    dt {
+      color: var(--color-text-muted);
+    }
+
+    dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  &__verification ul {
+    padding-left: var(--space-4-5);
+    font-size: var(--text-sm);
+  }
+
+  &__visible--yes {
+    color: var(--color-text-muted);
+  }
+
+  &__visible--no {
+    color: var(--color-danger);
+  }
+
+  &__create {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-1);
+      font-size: var(--text-sm);
+    }
+
+    input {
+      @include forms.text-control;
+    }
+  }
+
+  &__manual {
+    font-size: var(--text-sm);
+
+    summary {
+      cursor: pointer;
+      padding: var(--space-1) 0;
+      color: var(--color-text-muted);
+    }
+  }
+
+  &__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-1);
+      font-size: var(--text-sm);
+    }
+
+    input,
+    textarea {
+      @include forms.text-control;
+    }
+
+    textarea {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  &__warning {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-sm);
+  }
+
+  &__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-overlay);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb(0 0 0 / 50%);
+  }
+
+  &__dialog {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+    max-width: 480px;
+    padding: var(--space-4);
+
+    @include surfaces.box(var(--radius));
+
+    h4 {
+      margin: 0;
+    }
+  }
+}

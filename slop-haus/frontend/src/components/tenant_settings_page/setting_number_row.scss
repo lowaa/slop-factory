@@ -1,0 +1,33 @@
+@use "@/styles/forms";
+
+.setting-number-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+
+  &__label {
+    font-weight: 600;
+  }
+
+  &__description {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+
+  &__field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+
+    input {
+      @include forms.text-control;
+
+      width: 6em;
+    }
+  }
+
+  &__error {
+    margin: 0;
+    color: var(--color-danger);
+  }
+}

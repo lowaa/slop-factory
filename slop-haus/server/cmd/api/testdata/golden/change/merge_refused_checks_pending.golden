@@ -1,0 +1,5 @@
+-- error: true --
+-- text --
+the checks have not passed on the change's head: pending on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (ci pending)
+-- structured --
+null

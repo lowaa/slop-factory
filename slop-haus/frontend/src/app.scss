@@ -1,0 +1,390 @@
+@use "@/styles/layout";
+@use "@/styles/typography";
+
+// Shown for the one tick between mount and the first apiClient.me()
+// answer -- there's no session cookie to read synchronously, unlike
+// a localStorage token, so this is a real state rather than
+// something skipped by defaulting to signed-out.
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  // A flex item defaults to min-height: auto, which means "never smaller
+  // than my content" -- so without this the shell grows past the window
+  // and __main's overflow never engages, however bounded #root is.
+  min-height: 0;
+
+  &__header {
+    // The tenant stripe is pinned to its top edge.
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: 14px var(--space-5);
+    background: var(--color-bg-raised);
+    border-bottom: 1px solid var(--color-border);
+    // A hairline of accent under the whole header, which is what stops a
+    // near-black bar on a near-black page from disappearing.
+    box-shadow: inset 0 -1px 0 0 rgb(0 168 255 / 25%);
+
+    h1 {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: var(--text-md-plus);
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--color-accent-hot);
+      text-shadow: 0 0 14px rgb(0 168 255 / 45%);
+
+      // Held to the title's line height so the logo cannot make the header
+      // taller: the approvals list sizes itself to the room under the header.
+      .brand-logo {
+        width: 1lh;
+        height: 1lh;
+      }
+    }
+  }
+
+  // Below a wide screen the logo stands for the name, which the heading keeps
+  // for assistive tech: the header's one row needs the room more.
+  &__wordmark {
+    @include layout.header-names {
+      @include layout.visually-hidden;
+    }
+  }
+
+  &__account-initials {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border-strong);
+    color: var(--color-text);
+    font-size: var(--text-2xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+
+    @include layout.header-names {
+      display: inline-flex;
+    }
+  }
+
+  &__account-trigger-name {
+    max-width: 10rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    @include layout.header-names {
+      @include layout.visually-hidden;
+    }
+  }
+
+  &__nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    // The nav takes the slack so the title sits left and the processing
+    // switch sits right, rather than the three bunching in the middle.
+    margin-right: auto;
+  }
+
+  // A faint tint and hairline, so related tabs read as a cluster without a
+  // heavier divider competing with the active underline.
+  &__nav-group {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: rgb(255 255 255 / 3%);
+  }
+
+  &__nav-group-label {
+    display: none;
+  }
+
+  &__nav-item {
+    position: relative;
+    padding: var(--space-1-5) 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    text-decoration: none;
+    transition:
+      color 120ms ease,
+      background 120ms ease;
+
+    &:hover {
+      color: var(--color-text);
+      background: var(--color-bg-muted);
+    }
+
+    // The active tab is marked by a lit underline rather than a filled
+    // pill: four filled pills in a row is a lot of accent for a bar that
+    // is meant to be read past.
+    &--active {
+      color: var(--color-accent-hot);
+      background: var(--color-bg-muted);
+      border-color: var(--color-accent-dim);
+    }
+
+    &--active::after {
+      content: "";
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: -1px;
+      height: 2px;
+      border-radius: 2px;
+      background: var(--color-accent-hot);
+      box-shadow: 0 0 10px var(--color-accent);
+    }
+  }
+
+  &__badge {
+    display: inline-block;
+    min-width: 18px;
+    margin-left: var(--space-1-5);
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--color-warning);
+    color: var(--color-on-accent);
+    font-size: var(--text-xs);
+    line-height: 18px;
+    text-align: center;
+  }
+
+  &__account {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding-left: var(--space-3-5);
+    // A hairline rather than a full card: this is who's signed in, not
+    // another panel competing with the nav and the processing switch for
+    // attention.
+    border-left: 1px solid var(--color-border);
+  }
+
+  &__account-name {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  // Account and Admin are links out of the tabs, styled alike: plain text
+  // beside the name, lit only on hover (or, for Account, while open).
+  &__account-link,
+  &__admin-link {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    text-decoration: none;
+
+    &:hover {
+      color: var(--color-accent-hot);
+    }
+  }
+
+  &__account-link--active {
+    color: var(--color-accent-hot);
+  }
+
+  &__sign-out {
+    padding: var(--space-1-5) var(--space-3-5);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+
+    &:hover {
+      color: var(--color-text);
+      border-color: var(--color-accent);
+    }
+  }
+
+  // The More menu's panel: its groups side by side, each a column of tabs
+  // under the group's label, as the phone menu stacks them.
+  &__more {
+    display: flex;
+    gap: var(--space-5);
+  }
+
+  &__more &__nav-group {
+    flex-direction: column;
+    gap: 2px;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+
+  &__more &__nav-group-label {
+    @include typography.section-label;
+
+    display: block;
+    padding: 0 10px var(--space-1);
+  }
+
+  // The underline marks a tab on the header's edge; in a column it would
+  // underline nothing in particular.
+  &__more &__nav-item--active::after {
+    display: none;
+  }
+
+  // The account menu's panel: one column, Sign out set apart at the foot.
+  &__account-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 10rem;
+  }
+
+  &__account-menu &__account-link,
+  &__account-menu &__admin-link {
+    padding: var(--space-1-5) var(--space-2);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-md);
+
+    &:hover {
+      background: var(--color-bg-muted);
+    }
+  }
+
+  &__account-menu &__sign-out {
+    margin-top: var(--space-2);
+  }
+
+  &__main {
+    flex: 1;
+    padding: var(--space-5);
+    // A column, so a view that wants the height can ask for it with
+    // flex: 1. min-height: 0 is what lets such a
+    // child scroll its own overflow instead of stretching the page, and
+    // the overflow here is what the taller views (the board) scroll in.
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+
+    @include layout.narrow {
+      padding: var(--space-3-5);
+    }
+  }
+}
+
+// The phone header (app_shell.tsx): one row of the title, the processing
+// switch and the menu button, with everything else in the menu's panel.
+// A class rather than a media query, because the markup itself differs --
+// see lib/layout.ts.
+.app__header--narrow {
+  position: relative;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  padding: var(--space-1-5) var(--space-3-5);
+
+  h1 {
+    margin-right: auto;
+    font-size: var(--text-sm);
+  }
+
+  .app__nav {
+    flex-direction: column;
+    gap: var(--space-3-5);
+    margin-right: 0;
+  }
+
+  .app__nav-group {
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+
+  // More room between groups than inside one, so each reads as a block.
+  .app__nav-group + .app__nav-group {
+    margin-top: var(--space-2);
+  }
+
+  .app__nav-group-label {
+    @include typography.section-label;
+
+    display: block;
+    padding: 0 14px var(--space-1);
+  }
+
+  // Full text colour, indented under the group's label, with a rule down
+  // the group's links tying them to it. The rule is the item's own left
+  // border so it keeps the item's height (the touch target) and the active
+  // item can recolour its part of it.
+  .app__nav-item {
+    display: flex;
+    align-items: center;
+    min-height: layout.$touch-target;
+    padding: var(--space-1-5) 14px;
+    margin-left: 14px;
+    border-left: 2px solid var(--color-border-strong);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    color: var(--color-text);
+  }
+
+  .app__nav-item--active {
+    color: var(--color-accent-hot);
+    border-color: var(--color-accent-dim);
+  }
+
+  // The desktop underline sits on the header's bottom edge; in a column
+  // it would underline nothing in particular.
+  .app__nav-item--active::after {
+    display: none;
+  }
+
+  .tenant-switcher {
+    width: 100%;
+  }
+
+  .app__account {
+    flex-wrap: wrap;
+    padding: var(--space-3-5) 0 0;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .app__account-name {
+    flex-basis: 100%;
+  }
+
+  .app__account-link,
+  .app__admin-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: layout.$touch-target;
+    padding: 0 var(--space-2);
+  }
+
+  .app__sign-out {
+    margin-left: auto;
+  }
+}

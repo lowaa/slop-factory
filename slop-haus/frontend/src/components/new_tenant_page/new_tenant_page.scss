@@ -1,0 +1,38 @@
+@use "@/styles/forms";
+
+.new-tenant-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 480px;
+
+  &__title {
+    margin: 0;
+  }
+
+  &__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  &__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    input {
+      @include forms.text-control;
+    }
+  }
+
+  &__muted {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+
+  &__error {
+    margin: 0;
+    color: var(--color-danger);
+  }
+}

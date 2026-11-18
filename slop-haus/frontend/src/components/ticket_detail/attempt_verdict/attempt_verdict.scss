@@ -1,0 +1,40 @@
+.attempt-verdict {
+  &__current {
+    margin: 0;
+  }
+
+  &__note {
+    display: block;
+    margin-top: var(--space-1);
+    color: var(--color-text-muted);
+  }
+
+  &__note-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: var(--space-2) 0;
+    font-size: var(--text-sm);
+
+    textarea {
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: inherit;
+      resize: vertical;
+    }
+  }
+
+  &__choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  &__history {
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
+  }
+}

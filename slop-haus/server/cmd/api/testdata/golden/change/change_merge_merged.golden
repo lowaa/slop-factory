@@ -1,0 +1,9 @@
+-- error: false --
+-- text --
+Merged https://github.com/acme/repo/pull/12 (merge commit cccccccccccccccccccccccccccccccccccccccc); the ticket is done and the lock released. Nothing more to do for it.
+-- structured --
+{
+  "guidance": "Merged https://github.com/acme/repo/pull/12 (merge commit cccccccccccccccccccccccccccccccccccccccc); the ticket is done and the lock released. Nothing more to do for it.",
+  "merge_sha": "cccccccccccccccccccccccccccccccccccccccc",
+  "url": "https://github.com/acme/repo/pull/12"
+}

@@ -1,0 +1,35 @@
+-- error: false --
+-- text --
+Granted ticket #1: Change flow
+Scopes: server/flow/
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+Link: {board}/tickets/1?tenant={tenant} -- its PR's description links back here, with "slop-haus #1".
+CHANGES REQUESTED: a human asked for changes to its PR (https://github.com/acme/repo/pull/12). Address their comment here and the PR's review comments on the same branch, push, and call ticket_finish again. Don't merge it.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-1-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "guidance": {
+    "review": "CHANGES REQUESTED: a human asked for changes to its PR (https://github.com/acme/repo/pull/12). Address their comment here and the PR's review comments on the same branch, push, and call ticket_finish again. Don't merge it."
+  },
+  "ticket": {
+    "id": 1,
+    "paths": [
+      "server/flow/"
+    ],
+    "pr_url": "https://github.com/acme/repo/pull/12",
+    "priority": "normal",
+    "requires_approval": true,
+    "review": "changes_requested",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Change flow",
+    "url": "{board}/tickets/1?tenant={tenant}"
+  }
+}

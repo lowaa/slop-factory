@@ -1,0 +1,47 @@
+.consent-banner {
+  position: fixed;
+  inset: auto var(--space-4) var(--space-4) var(--space-4);
+  z-index: var(--z-toast);
+  max-width: 40rem;
+  margin-inline: auto;
+  padding: var(--space-4);
+  background: var(--color-bg-raised);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+
+  &__title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-lg);
+  }
+
+  &__text {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-md);
+    line-height: 1.5;
+  }
+
+  &__link {
+    color: var(--color-link);
+    text-decoration: underline;
+  }
+
+  &__error {
+    margin: 0 0 var(--space-3);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  // Reject all and Accept all share one rule on purpose: nothing here may
+  // style one apart from the other.
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+
+    > .button {
+      flex: 1 1 8rem;
+    }
+  }
+}

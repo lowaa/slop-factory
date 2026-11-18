@@ -1,0 +1,106 @@
+@use "@/styles/layout";
+
+.ticket-detail {
+  &__blocker-parked {
+    color: var(--color-warning);
+  }
+
+  &__retry {
+    background: none;
+    border: none;
+    color: var(--color-accent);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-decoration: underline;
+  }
+
+  &__depends {
+    margin: 0 0 var(--space-3);
+    padding: 0;
+    list-style: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--text-sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    button {
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-size: var(--text-xs);
+      padding: 2px var(--space-2);
+      cursor: pointer;
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  &__add-blocker {
+    // The picker's panel has to sit over what follows it, not push it
+    // down, so the row that holds it cannot be a stacking trap.
+    position: relative;
+    z-index: var(--z-base);
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+
+    // Wide enough to read a ticket title in; the picker itself brings the
+    // rest of its styling.
+    .dropdown {
+      flex: 1;
+      max-width: 420px;
+    }
+
+    // Direct child: the picker beside it is a widget with a button of its
+    // own, and this rule has no business reaching into it.
+    > button {
+      padding: var(--space-2) var(--space-4);
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-sm);
+      background: var(--color-accent);
+      color: var(--color-on-accent);
+      font-weight: 600;
+      cursor: pointer;
+
+      &:hover:not(:disabled) {
+        background: var(--color-accent-hot);
+        border-color: var(--color-accent-hot);
+        box-shadow: var(--glow-soft);
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  @include layout.narrow {
+    &__add-blocker {
+      flex-direction: column;
+      align-items: stretch;
+
+      .dropdown {
+        max-width: none;
+      }
+    }
+
+    // A button inside a sentence: finger-sized, it would open a gap in the
+    // line it sits in.
+    &__retry {
+      min-height: 0;
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# Added on top of docker-compose-dev.e2e.yaml by `ATTACH=1 ./test.sh`: the
+# pieces a developer iterates on, mounted from the checkout over the copies
+# baked into the images, so a change needs no rebuild. The default run
+# doesn't use this file and mounts nothing -- see test.sh.
+#
+# Paths are relative to docker-compose-dev.yaml's directory (slop-haus/),
+# like the build contexts.
+services:
+  dex:
+    volumes:
+      - ./e2e_playwright_ts/dex/config.yaml:/etc/dex/config.yaml:ro
+
+  e2e-tests-ts:
+    volumes:
+      - ./e2e_playwright_ts/tests:/srv/tests
+      - ./server/privacy/inventory.yaml:/srv/inventory.yaml:ro
+      - ../js-components/storybook-kit/src/default_style_check.ts:/srv/default_style_check.ts:ro
+      - ../js-components/e2e-support/src:/srv/e2e_support:ro
+      - ./e2e_playwright_ts/playwright.config.ts:/srv/playwright.config.ts:ro

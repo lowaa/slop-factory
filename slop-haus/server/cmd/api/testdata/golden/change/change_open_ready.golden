@@ -1,0 +1,10 @@
+-- error: false --
+-- text --
+The change from ticket-1-a1 is already open, ready for review: https://github.com/acme/repo/pull/12
+-- structured --
+{
+  "draft": false,
+  "existing": true,
+  "number": 12,
+  "url": "https://github.com/acme/repo/pull/12"
+}

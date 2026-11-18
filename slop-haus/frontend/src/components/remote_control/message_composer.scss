@@ -1,0 +1,104 @@
+@use "@/styles/forms";
+@use "@/styles/layout";
+
+// Its own area below the transcript, never over it: the page lays it out as the
+// last item of a column whose scrolling part is the transcript, so a taller box
+// shrinks the transcript instead of covering it.
+.message-composer {
+  position: relative;
+  flex: none;
+  padding: var(--space-2) 0 var(--space-3-5);
+  background: var(--color-bg);
+}
+
+// One row: the box takes what Send leaves, and Send is at the bottom of the
+// box as it grows.
+.message-composer__row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+
+  textarea {
+    @include forms.text-control;
+    // min-width 0 lets it shrink below its intrinsic width on a phone.
+    flex: 1;
+    min-width: 0;
+    max-height: 200px;
+    font: inherit;
+    // It sizes itself to its content.
+    resize: none;
+  }
+
+  @include layout.narrow {
+    button {
+      min-height: layout.$touch-target;
+    }
+  }
+}
+
+// Stop above Send, the same width, on the desktop layout; Send alone is as
+// wide as it always was. The phone has no room to spare beside the box, so
+// there they stay side by side.
+.message-composer-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  @include layout.narrow {
+    flex-direction: row;
+  }
+}
+
+.message-composer__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3-5);
+  margin-top: var(--space-1-5);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+  }
+
+  input {
+    @include forms.checkbox-control;
+  }
+}
+
+// A filled square, the stop sign of a media player.
+.message-composer-stop-icon {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-right: var(--space-1-5);
+  background: currentcolor;
+  border-radius: 1px;
+}
+
+// Under the box, apart from the options line.
+.message-composer-stop-hint {
+  margin: var(--space-1-5) 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+// The files being attached list above the box, though the field puts its list
+// after what it wraps.
+// stylelint-disable-next-line selector-class-pattern -- the field's own BEM class
+.message-composer-attachments .attachment-field__list {
+  order: -1;
+}
+
+// The phone has little height to spare: the drop and paste hint goes, the
+// Attach button stays.
+// stylelint-disable-next-line selector-class-pattern -- the field's own BEM class
+.message-composer-attachments .attachment-field__hint {
+  @include layout.narrow {
+    display: none;
+  }
+}

@@ -1,0 +1,21 @@
+-- error: false --
+-- text --
+#7 Split the register [open, revision 0]
+Move each tool next to its handler.
+No behaviour change.
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a
+-- structured --
+{
+  "body": "Move each tool next to its handler.\nNo behaviour change.",
+  "id": 7,
+  "paths": [
+    "server/internal/mcpserver/",
+    "server/internal/ticket/"
+  ],
+  "priority": "normal",
+  "revision": 0,
+  "status": "open",
+  "title": "Split the register",
+  "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+}

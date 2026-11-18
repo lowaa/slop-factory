@@ -1,0 +1,22 @@
+{
+  "receiver": "slop-haus",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {"alertname": "DiskAlmostFull", "instance": "nas:9100", "severity": "warning", "slophaus_status": "open", "slophaus_priority": "urgent"},
+      "annotations": {"summary": "Disk almost full on nas"},
+      "startsAt": "2026-10-04T09:00:00.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.monitoring:9090/graph?g0.expr=disk",
+      "fingerprint": "3333333333333333"
+    }
+  ],
+  "groupLabels": {"alertname": "DiskAlmostFull"},
+  "commonLabels": {"alertname": "DiskAlmostFull", "instance": "nas:9100", "severity": "warning", "slophaus_status": "open", "slophaus_priority": "urgent"},
+  "commonAnnotations": {"summary": "Disk almost full on nas"},
+  "externalURL": "http://alertmanager.monitoring:9093",
+  "version": "4",
+  "groupKey": "{}:{alertname=\"DiskAlmostFull\"}",
+  "truncatedAlerts": 0
+}

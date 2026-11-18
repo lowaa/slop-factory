@@ -1,0 +1,318 @@
+@use "@/styles/layout";
+@use "@slop-factory/ui/styles/z_index";
+
+// Index-level scss: global tokens and resets shared by every component.
+// Component-specific styling lives next to its component
+// instead of growing this file.
+//
+// One dark theme rather than a light/dark pair. Two schemes means every
+// focus ring, glow and panel shadow has to be checked twice, and the
+// second one was never the one being looked at -- so the app declares
+// `color-scheme: dark` and means it.
+:root {
+  // Surfaces, darkest first. Depth is carried by these three plus a
+  // border, never by a drop shadow alone: shadows disappear against a
+  // near-black background, which is how dark themes end up flat.
+  --color-bg: #06080f;
+  --color-bg-raised: #0d1220;
+  --color-bg-muted: #121a2e;
+
+  --color-border: #1b2540;
+  --color-border-strong: #2b3a63;
+
+  --color-text: #e6f0ff;
+  --color-text-muted: #7d8fb3;
+
+  // Electric blue. --accent is for anything resting, --accent-hot for
+  // hover, focus and anything currently doing something.
+  --color-accent: #00a8ff;
+  --color-accent-hot: #35d6ff;
+  --color-accent-dim: #0b3a63;
+  --color-on-accent: #04121f;
+
+  --color-danger: #ff4d6d;
+  --color-danger-bg: #2a0f1a;
+  --color-success: #2ee6a8;
+  --color-warning: #ffc44d;
+  --color-warning-bg: #2a2110;
+  --color-warning-border: var(--color-warning);
+  --color-warning-text: var(--color-warning);
+
+  // Per-attempt accents: Okabe-Ito without black, so they stay apart for the
+  // common colour-vision deficiencies. Fixed by attempt number (attempt 8
+  // wraps to --attempt-1), used only as an accent line or dot beside the
+  // attempt's number, never as a text or background fill. Each is at least
+  // 3:1 against --color-bg (WCAG 1.4.11).
+  --attempt-1: #e69f00;
+  --attempt-2: #56b4e9;
+  --attempt-3: #009e73;
+  --attempt-4: #f0e442;
+  --attempt-5: #0072b2;
+  --attempt-6: #d55e00;
+  --attempt-7: #cc79a7;
+
+  // Tenant colours: the fixed palette an owner picks from. -bg is the
+  // stripe and the badge's fill, -fg the badge's initials. Dark values
+  // here; the light values are under :root[data-theme="light"] below.
+  // tenant_palette.test.ts holds every pair to WCAG AA text contrast and
+  // every -bg to 3:1 against the header, in both themes.
+  --tenant-red-bg: #ff6b6b;
+  --tenant-red-fg: #1a0505;
+  --tenant-orange-bg: #ff9f43;
+  --tenant-orange-fg: #1f1000;
+  --tenant-amber-bg: #ffc44d;
+  --tenant-amber-fg: #1f1600;
+  --tenant-green-bg: #3ddc84;
+  --tenant-green-fg: #04180c;
+  --tenant-teal-bg: #26d0ce;
+  --tenant-teal-fg: #021a1a;
+  --tenant-blue-bg: #4da3ff;
+  --tenant-blue-fg: #031225;
+  --tenant-violet-bg: #a78bfa;
+  --tenant-violet-fg: #120833;
+  --tenant-pink-bg: #ff7eb6;
+  --tenant-pink-fg: #26061a;
+
+  // What data-colour sets, with the accent as the value where nothing has.
+  --tenant-bg: var(--color-accent);
+  --tenant-fg: var(--color-on-accent);
+
+  // Set by .attempt-accent-N on whatever shows an attempt; this is only the
+  // value where nothing has.
+  --attempt-accent: var(--color-accent);
+
+  // Links and the accent are the same hue in this theme.
+  --color-link: var(--color-accent-hot);
+
+  // The glow. A single token so every interactive element lights up by
+  // the same amount -- one widget with its own value reads as a mistake
+  // rather than as emphasis.
+  --glow-accent: 0 0 0 1px var(--color-accent), 0 0 12px rgb(0 168 255 / 35%);
+  --glow-soft: 0 0 18px rgb(0 168 255 / 12%);
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-md: var(--radius);
+
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  color-scheme: dark;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+
+  // Token aliases: the shared @slop-factory/ui and @slop-factory/auth
+  // components read a common set of custom-property names across every app
+  // in this repo, and this app's palette above uses different names for
+  // some of the same colours (--radius instead of --radius-lg, ...). Aliased once, globally, here rather
+  // than duplicated -- or redefined -- per consumer.
+  --radius-lg: var(--radius);
+
+  // No resting drop shadow: on this background depth comes from the border
+  // (see the surfaces note above), and a shadow would not show.
+  --shadow-sm: none;
+  --shadow-md: var(--glow-soft);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%), var(--glow-soft);
+  --color-accent-on: var(--color-on-accent);
+  --color-accent-hover: var(--color-accent-hot);
+  --color-accent-text: var(--color-accent-hot);
+  --color-bg-sunken: var(--color-bg-muted);
+  --color-text-subtle: var(--color-text-muted);
+
+  // Type scale. The --text-xs..xl names and values are the ones js-components
+  // use. 11px and 15px are sizes this app already uses often.
+  // 17px, 18px and the one-off `16px !important` stay literals.
+  // --text-lg-plus is the 17px sign-in panel heading in
+  // @slop-factory/auth, which has always rendered at 17px here and at 16px
+  // in other apps, so it gets its own step rather than sharing --text-lg.
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-md-plus: 15px;
+  --text-lg: 16px;
+  --text-lg-plus: 17px;
+  --text-xl: 20px;
+
+  // Spacing scale. --space-1..3 are what js-components already reads, so
+  // --space-3 stays 10px here even though js-components' own default is 12px.
+  // --space-4..6 are js-components' fallback values. Sizes this app uses that
+  // fit no whole step take a half-step name between their neighbours
+  // (--space-1-5 sits between 1 and 2), so no existing name changes value.
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 10px;
+  --space-3-5: 12px;
+  --space-4: 16px;
+  --space-4-5: 20px;
+  --space-5: 24px;
+  --space-6: 32px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--color-text);
+
+  // The faint grid is the whole "technology" cue, and it is deliberately
+  // almost invisible: at any strength you can actually read it, it fights
+  // every card and table on top of it.
+  background-color: var(--color-bg);
+  background-image:
+    linear-gradient(rgb(0 168 255 / 3.5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(0 168 255 / 3.5%) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-attachment: fixed;
+}
+
+#root {
+  // An exact height, not a minimum. A view that asks for the remaining
+  // space can only be given it if something up here is
+  // actually bounded -- with min-height the column just grows past the
+  // window and the bottom of the view ends up below the fold. The scrolling moves
+  // into .app__main instead, which also keeps the header in place.
+  //
+  // dvh after vh, for a browser that knows it: on a phone, 100vh is the
+  // height with the address bar hidden, so the bottom of the page would sit behind the browser's own toolbar.
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+@include layout.narrow {
+  // Under 16px, iOS Safari zooms the whole page in on focusing a field and
+  // leaves it zoomed. !important because component styles set their
+  // fields' size with more specific selectors, and this has to beat all of
+  // them -- it is about the device, not about any one form's look.
+  input,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  // Finger-sized buttons. :where() keeps this at no specificity, so a
+  // component that has a reason to differ (a button inline in a sentence)
+  // only has to say so.
+  :where(button) {
+    min-height: layout.$touch-target;
+  }
+}
+
+// One focus ring for the whole app. :focus-visible rather than :focus so
+// it follows the keyboard and doesn't fire on every mouse click.
+:focus-visible {
+  outline: 2px solid var(--color-accent-hot);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--color-accent-hot);
+}
+
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-text);
+}
+
+// @slop-factory/ui's Dropdown/FilterableDropdown pick up this app's
+// palette through the aliases above; these are the looks a token can't
+// express -- an accent-tinted panel and highlight rather than neutral
+// ones, and an uppercase monospace hint matching the app's terminal-ish
+// chrome (see .slop-haus-auth-brand in auth_pages_config.scss). Scoped to
+// the dropdown rather than widened into the aliases, which every other
+// consumer of --color-border/--color-bg-sunken also reads.
+//
+// Qualified with the .dropdown ancestor for specificity: index.scss loads
+// before the package's dropdown.scss (main.tsx imports it first), so at
+// equal specificity the package's `border`/`background` shorthands would
+// win the cascade and drop these overrides.
+.dropdown .dropdown__panel {
+  border-color: var(--color-accent-dim);
+}
+
+.dropdown .dropdown__option--active {
+  background: var(--color-accent-dim);
+}
+
+.dropdown .dropdown__option-hint {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+// The app ships one dark theme (see the top of this file); the palette is
+// the only token set that already carries a light value, so a light theme
+// doesn't have to rework it.
+:root[data-theme="light"] {
+  --tenant-red-bg: #b91c1c;
+  --tenant-red-fg: #fff;
+  --tenant-orange-bg: #c2410c;
+  --tenant-orange-fg: #fff;
+  --tenant-amber-bg: #b45309;
+  --tenant-amber-fg: #fff;
+  --tenant-green-bg: #15803d;
+  --tenant-green-fg: #fff;
+  --tenant-teal-bg: #0f766e;
+  --tenant-teal-fg: #fff;
+  --tenant-blue-bg: #1d4ed8;
+  --tenant-blue-fg: #fff;
+  --tenant-violet-bg: #6d28d9;
+  --tenant-violet-fg: #fff;
+  --tenant-pink-bg: #be185d;
+  --tenant-pink-fg: #fff;
+}
+
+// Points --tenant-bg and --tenant-fg at a palette pair, for whatever
+// carries data-colour (the badge, the header stripe, the picker's swatches).
+// Written out rather than looped: the token check reads this file's text,
+// and can't see through an interpolated name.
+[data-colour="red"] {
+  --tenant-bg: var(--tenant-red-bg);
+  --tenant-fg: var(--tenant-red-fg);
+}
+
+[data-colour="orange"] {
+  --tenant-bg: var(--tenant-orange-bg);
+  --tenant-fg: var(--tenant-orange-fg);
+}
+
+[data-colour="amber"] {
+  --tenant-bg: var(--tenant-amber-bg);
+  --tenant-fg: var(--tenant-amber-fg);
+}
+
+[data-colour="green"] {
+  --tenant-bg: var(--tenant-green-bg);
+  --tenant-fg: var(--tenant-green-fg);
+}
+
+[data-colour="teal"] {
+  --tenant-bg: var(--tenant-teal-bg);
+  --tenant-fg: var(--tenant-teal-fg);
+}
+
+[data-colour="blue"] {
+  --tenant-bg: var(--tenant-blue-bg);
+  --tenant-fg: var(--tenant-blue-fg);
+}
+
+[data-colour="violet"] {
+  --tenant-bg: var(--tenant-violet-bg);
+  --tenant-fg: var(--tenant-violet-fg);
+}
+
+[data-colour="pink"] {
+  --tenant-bg: var(--tenant-pink-bg);
+  --tenant-fg: var(--tenant-pink-fg);
+}

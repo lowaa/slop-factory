@@ -1,0 +1,3 @@
+reporter/reporter.go G302
+reporter/reporter.go G304
+reporter/token.go G204

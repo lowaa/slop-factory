@@ -1,0 +1,119 @@
+-- error: false --
+-- text --
+#7 Split the register [blocked, revision 7]
+Move each tool next to its handler.
+No behaviour change.
+Scopes: server/internal/mcpserver/, server/internal/ticket/
+Link: https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a
+Claimable only by an agent with all of the roles deployer, reviewer
+Blocked by: #3 Reorganise the store (done), #5 Held-lease helper (in_progress)
+
+Edits to the title/description, oldest first: (2 earlier not shown)
+- r3 by human at 2026-09-26 09:05Z: title "Title v2" -> "Title v3"
+- r4 by builder-1 at 2026-09-26 09:06Z: description:
+  - old line 4
+  + new line 4
+  + added
+- r5 by 00000000-0000-0000-0000-000000000003 at 2026-09-26 09:07Z: title "Title v4" -> "Title v5"
+- r6 by human at 2026-09-26 09:08Z: description:
+  - old line 6
+  + new line 6
+  + added
+- r7 by builder-1 at 2026-09-26 09:09Z: title "Title v6" -> "Title v7"
+
+Comments:
+- human (2026-09-26T09:02:37Z): Please keep the wording.
+- builder-1 (2026-09-26T09:02:37Z): Plan: golden tests first.
+- 00000000-0000-0000-0000-000000000003 (2026-09-26T09:02:37Z): I was here once.
+- critic-2 (2026-09-26T09:02:37Z): Looks right.
+
+Handoff from 00000000-0000-0000-0000-000000000003 -- resume from here:
+Branch ticket-7-split pushed.
+Tests pass.
+-- structured --
+{
+  "blocked_by": [
+    {
+      "id": 3,
+      "status": "done",
+      "title": "Reorganise the store"
+    },
+    {
+      "id": 5,
+      "status": "in_progress",
+      "title": "Held-lease helper"
+    }
+  ],
+  "body": "Move each tool next to its handler.\nNo behaviour change.",
+  "comments": [
+    {
+      "at": "2026-09-26T09:02:37Z",
+      "author": "human",
+      "body": "Please keep the wording."
+    },
+    {
+      "at": "2026-09-26T09:02:37Z",
+      "author": "builder-1",
+      "body": "Plan: golden tests first."
+    },
+    {
+      "at": "2026-09-26T09:02:37Z",
+      "author": "00000000-0000-0000-0000-000000000003",
+      "body": "I was here once."
+    },
+    {
+      "at": "2026-09-26T09:02:37Z",
+      "author": "critic-2",
+      "body": "Looks right."
+    }
+  ],
+  "earlier_edits": 2,
+  "edits": [
+    {
+      "at": "2026-09-26 09:05Z",
+      "by": "human",
+      "revision": 3,
+      "title": "\"Title v2\" -\u003e \"Title v3\""
+    },
+    {
+      "at": "2026-09-26 09:06Z",
+      "body": "- old line 4\n+ new line 4\n+ added",
+      "by": "builder-1",
+      "revision": 4
+    },
+    {
+      "at": "2026-09-26 09:07Z",
+      "by": "00000000-0000-0000-0000-000000000003",
+      "revision": 5,
+      "title": "\"Title v4\" -\u003e \"Title v5\""
+    },
+    {
+      "at": "2026-09-26 09:08Z",
+      "body": "- old line 6\n+ new line 6\n+ added",
+      "by": "human",
+      "revision": 6
+    },
+    {
+      "at": "2026-09-26 09:09Z",
+      "by": "builder-1",
+      "revision": 7,
+      "title": "\"Title v6\" -\u003e \"Title v7\""
+    }
+  ],
+  "handoff": "Branch ticket-7-split pushed.\nTests pass.",
+  "id": 7,
+  "paths": [
+    "server/internal/mcpserver/",
+    "server/internal/ticket/"
+  ],
+  "priority": "high",
+  "revision": 7,
+  "role_match": "all",
+  "roles": [
+    "deployer",
+    "reviewer"
+  ],
+  "status": "blocked",
+  "title": "Split the register",
+  "url": "https://board.slop-haus.test/tickets/7?tenant=00000000-0000-0000-0000-00000000000a"
+}

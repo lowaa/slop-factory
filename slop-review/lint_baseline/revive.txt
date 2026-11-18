@@ -1,0 +1,5 @@
+cmd/slop-review/main.go argument-limit
+cmd/slop-review/main.go function-length
+internal/gitctx/diff.go function-length
+internal/orchestrator/orchestrator.go argument-limit
+internal/orchestrator/orchestrator.go argument-limit

@@ -1,0 +1,24 @@
+{
+  "name": "slop-haus-e2e-playwright-ts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "TypeScript Playwright e2e tests driving slop-haus/server's ticket API and slop-haus/frontend's UI over real HTTP",
+  "type": "module",
+  "scripts": {
+    "sync-support": "test ! -d ../../js-components/e2e-support/src || (rm -rf e2e_support && cp -R ../../js-components/e2e-support/src e2e_support)",
+    "pretest": "npm run sync-support",
+    "pretypecheck": "npm run sync-support",
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^24.13.2",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.22.0",
+    "typescript": "~6.0.2"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
+}

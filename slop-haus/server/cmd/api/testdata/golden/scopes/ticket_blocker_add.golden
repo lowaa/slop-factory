@@ -1,0 +1,15 @@
+-- error: false --
+-- text --
+#1 now waits on #2. #1 is in_progress. Blocked by: #2 Prerequisite (open)
+-- structured --
+{
+  "blocked_by": [
+    {
+      "id": 2,
+      "status": "open",
+      "title": "Prerequisite"
+    }
+  ],
+  "changed": true,
+  "status": "in_progress"
+}

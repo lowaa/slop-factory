@@ -1,0 +1,58 @@
+@use "@slop-factory/ui/styles/layout" as shared with (
+  $breakpoints: (
+    // The one breakpoint between the desktop layout and the phone one.
+    narrow: 720px,
+    // Where the processing toggle's hint is dropped so the header does not
+    // wrap. Wider than the phone layout: the header runs out of room first.
+    hint: 900px,
+    // Where the paged ticket list's rows wrap. Nearly `narrow`, but kept at
+    // its own width so the rows wrap exactly where they always did.
+    rows: 600px,
+    // Where the header's wordmark and the account menu's name give way to
+    // the logo and the person's initials, so its one row still fits with a
+    // tenant switcher and an approvals count at a laptop's width.
+    header-names: 1536px
+  )
+);
+
+// The same widths are in lib/layout.ts; layout.test.ts fails if they differ.
+// A window at the boundary would otherwise get the phone header over the
+// desktop board.
+@mixin narrow {
+  @include shared.down(narrow) {
+    @content;
+  }
+}
+
+@mixin hint {
+  @include shared.down(hint) {
+    @content;
+  }
+}
+
+@mixin rows {
+  @include shared.down(rows) {
+    @content;
+  }
+}
+
+@mixin header-names {
+  @include shared.down(header-names) {
+    @content;
+  }
+}
+
+// Out of the layout but still read by assistive tech, e.g. a name a control
+// shows only as initials.
+@mixin visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+// A comfortable finger-sized target, per the usual 44px guidance. Only
+// applied in the narrow layout: desktop is laid out for a mouse.
+$touch-target: 44px;

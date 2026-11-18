@@ -1,0 +1,25 @@
+# systemd user unit, one instance per tenant: `systemctl --user enable --now slop-haus-supervisor@<tenant>`.
+# Copy to ~/.config/systemd/user/. See README.md in this directory.
+[Unit]
+Description=slop-haus supervisor for tenant %i
+After=network-online.target
+
+[Service]
+Type=simple
+# The supervisor reads <root>/secrets.env and <root>/run.env itself, so this unit sets no
+# environment. The root is the default ~/slop-haus/<tenant>; pass --root to use another.
+# uv is found before run.env is read, so its path is absolute: edit it to where `command -v uv`
+# says (the installer's default is ~/.local/bin/uv).
+ExecStart=%h/.local/bin/uv run --frozen --no-dev --project %h/slop-haus/%i/app slop-haus-supervisor run --tenant %i
+# 0 (stopped on request), 75 (another run holds the tenant) and 78 (configuration error) are
+# not retried; anything else, including 3 (a newer supervisor is wanted), is.
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=75 78
+# SIGTERM goes to the supervisor alone and it drains; whatever is left when the stop timeout
+# ends is killed. The timeout covers the default drain (120s) plus the supervisor's own grace.
+KillMode=mixed
+TimeoutStopSec=150
+
+[Install]
+WantedBy=default.target

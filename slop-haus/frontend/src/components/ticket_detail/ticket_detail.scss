@@ -1,0 +1,383 @@
+@use "@/styles/layout";
+@use "@/styles/typography";
+
+.ticket-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  &__header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+
+    h1 {
+      margin: 0;
+      font-size: var(--text-xl);
+      font-weight: 600;
+    }
+  }
+
+  &__timestamps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+
+    div {
+      display: flex;
+      gap: var(--space-1);
+    }
+
+    dt::after {
+      content: ":";
+    }
+
+    dd {
+      margin: 0;
+      font-family: var(--font-mono);
+    }
+  }
+
+  // Status and priority are Dropdowns now, which bring their own label and
+  // control styling -- this only says how wide they sit and how they line
+  // up. Anything more here would be the widget's styling in two places.
+  &__fields {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+
+    .dropdown {
+      min-width: 170px;
+    }
+  }
+
+  // Shared by every checkbox field in the header -- needs_discussion and
+  // requires_approval both toggle a single flag, so they share the same
+  // label/checkbox layout rather than each getting their own copy of it.
+  &__checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    cursor: pointer;
+
+    input[type="checkbox"] {
+      width: auto;
+      accent-color: var(--color-accent);
+    }
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  // Neutral, not the warning colour the discussion banner uses below --
+  // nothing is waiting on anyone here, a human just hasn't said this is
+  // ready yet.
+  &__preparing-banner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-muted);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+  }
+
+  &__cooldown {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3-5);
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-muted);
+    font-size: var(--text-sm);
+
+    p {
+      margin: 0;
+      flex: 1;
+    }
+  }
+
+  &__preparing-banner-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3-5);
+
+    p {
+      margin: 0;
+      flex: 1;
+    }
+
+    button {
+      padding: var(--space-1-5) 14px;
+      border: 1px solid var(--color-accent);
+      border-radius: var(--radius-sm);
+      background: var(--color-accent);
+      color: var(--color-on-accent);
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+
+      &:hover:not(:disabled) {
+        background: var(--color-accent-hot);
+        border-color: var(--color-accent-hot);
+        box-shadow: var(--glow-soft);
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  &__parked-banner {
+    border-style: dashed;
+  }
+
+  &__park {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+
+    p {
+      margin: 0;
+      flex: 1;
+    }
+
+    button {
+      padding: var(--space-1) var(--space-3-5);
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--color-text);
+      cursor: pointer;
+      white-space: nowrap;
+
+      &:hover:not(:disabled) {
+        border-color: var(--color-accent);
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  &__discussion-banner {
+    margin: 0;
+    padding: var(--space-3) var(--space-3-5);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text);
+    font-size: var(--text-sm);
+
+    strong {
+      color: var(--color-warning);
+    }
+  }
+
+  &__affinity-note,
+  &__review-outcome {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  // Bodies, comments and handoffs are written by agents and humans at a
+  // terminal, laid out with newlines and indentation, and often full of
+  // paths and code -- so they render as a terminal would: monospaced,
+  // whitespace kept. overflow-wrap is for the long unbroken path or URL,
+  // which pre-wrap alone would let run off the side of the page.
+  &__body,
+  &__comment-body,
+  &__handoff-body {
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+
+  &__comment-body,
+  &__handoff-body {
+    margin: var(--space-1) 0 0;
+  }
+
+  h2 {
+    margin: 0;
+
+    @include typography.heading-label;
+  }
+
+  &__paths {
+    margin: 0;
+    padding-left: 18px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--text-sm);
+  }
+
+  &__path-source {
+    color: var(--color-text-muted);
+    font-family: inherit;
+  }
+
+  &__notice {
+    padding: var(--space-2) var(--space-3);
+    border-radius: 6px;
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__handoffs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__handoff {
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+
+    &--latest {
+      border-color: var(--color-accent);
+    }
+  }
+
+  // A handoff and a comment are both "who said this, and when" above a
+  // body, so they read the same way.
+  &__handoff-meta,
+  &__comment-meta {
+    display: flex;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  // A link-styled button: it moves to the other tab, it does nothing to
+  // the ticket.
+  &__all-handoffs {
+    align-self: flex-start;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--color-accent);
+    font-size: var(--text-sm);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--color-accent-hot);
+      text-decoration: underline;
+    }
+  }
+
+  // The same quiet underline as the add-slot-manually route picker
+  // (supervisors_page/add_slot_manually.scss): these choose what to read, they are not
+  // actions on the ticket.
+  &__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    border-bottom: 1px solid var(--color-border);
+
+    button {
+      padding: var(--space-2) var(--space-3-5);
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: var(--text-sm);
+
+      &:hover {
+        color: var(--color-text);
+      }
+
+      &.is-selected {
+        color: var(--color-accent-hot);
+        border-bottom-color: var(--color-accent-hot);
+      }
+    }
+  }
+
+  // Lays out the main tab's sections the way .ticket-detail itself did
+  // before they moved in here.
+  &__panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+
+    // The display above beats the user agent's [hidden] rule, and the
+    // panel not on show is hidden rather than unmounted.
+    &[hidden] {
+      display: none;
+    }
+  }
+
+  &__empty {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  // A phone: every row of controls stacks, full width, rather than running
+  // off the side of the page -- the fields row alone is two dropdowns of
+  // 170px and two checkboxes.
+  @include layout.narrow {
+    &__header h1 {
+      font-size: var(--text-lg-plus);
+      overflow-wrap: anywhere;
+    }
+
+    &__fields {
+      flex-direction: column;
+      align-items: stretch;
+      // The checkboxes' rows are already finger-height, which spaces them.
+      gap: var(--space-1);
+
+      .dropdown {
+        min-width: 0;
+      }
+    }
+
+    &__checkbox-field {
+      min-height: layout.$touch-target;
+    }
+
+    // The banner's text above, its button below at full width, rather
+    // than the button squeezing the text into a column a word wide.
+    &__preparing-banner-row,
+    &__cooldown,
+    &__park {
+      flex-direction: column;
+      align-items: stretch;
+
+      button {
+        white-space: normal;
+      }
+    }
+  }
+}
+
+.ticket-detail__discuss {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-md);
+}

@@ -1,0 +1,8 @@
+  - name: review_runs
+    categories: [work_record]
+  - name: review_findings
+    categories: [work_record]
+  - name: review_finding_labels
+    categories: [work_record]
+  - name: review_requests
+    categories: [work_record]

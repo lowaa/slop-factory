@@ -1,0 +1,12 @@
+  - name: llm_usage
+    categories: [llm_usage]
+  - name: llm_tool_usage
+    categories: [llm_usage]
+  - name: llm_usage_marks
+    categories: [llm_usage]
+  - name: llm_usage_daily
+    categories: [llm_usage]
+  - name: llm_guidance_usage
+    categories: [llm_usage]
+  - name: usage_declarations
+    categories: [llm_usage]

@@ -1,0 +1,58 @@
+@use "@/styles/forms";
+@use "@/styles/layout";
+
+.session-switch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3-5);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-raised);
+  font-size: var(--text-md);
+
+  &__title {
+    margin: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  &__explanation {
+    margin: 0;
+
+    dt {
+      font-weight: 600;
+    }
+
+    dd {
+      margin: 0 0 var(--space-1-5);
+    }
+  }
+
+  &__dismiss {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+
+    input {
+      @include forms.checkbox-control;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  @include layout.narrow {
+    &__actions button {
+      flex: 1;
+      min-height: layout.$touch-target;
+    }
+
+    &__dismiss {
+      min-height: layout.$touch-target;
+    }
+  }
+}

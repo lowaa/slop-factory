@@ -1,0 +1,31 @@
+{
+  "schema_version": 3,
+  "id": "3c2b1a09-8f7e-4d6c-9b5a-4e3d2c1b0a9f",
+  "kind": "review",
+  "status": "failed",
+  "failure": {
+    "class": "usage_limit",
+    "message": "ChatGPT usage limit reached: usage_limit_reached: The usage limit has been reached; check usage at https://chatgpt.com/settings/usage",
+    "host": "agent-vm-3"
+  },
+  "repo_remote": "git@github.com:example/widgets.git",
+  "branch": "feature",
+  "base_ref": "0123456789abcdef0123456789abcdef01234567",
+  "head_sha": "89abcdef0123456789abcdef0123456789abcdef",
+  "dirty": false,
+  "tool_version": {"kind": "git_sha", "value": "c4ca88d", "attributes": {"dirty": "false"}},
+  "provider": "chatgpt",
+  "model": "gpt-5.6-luna",
+  "personas": ["standard"],
+  "config": {"max_turns": 40, "max_diff_bytes": 200000, "chunk_diff_bytes": 60000, "context_budget_bytes": 400000, "parallelism": 4, "seam_pass": true, "allow_secrets": false},
+  "verdict": "",
+  "summary": "",
+  "incomplete": false,
+  "sessions": [
+    {"persona": "standard", "part": 1, "parts": 1, "files": ["a.go"], "findings": 0,
+     "error": "session: turn 1: ChatGPT usage limit reached", "turns": 1, "elisions": 0, "input_tokens": 0, "output_tokens": 0, "duration_ms": 900}
+  ],
+  "findings": [],
+  "started_at": "2026-09-30T10:00:00Z",
+  "finished_at": "2026-09-30T10:00:02Z"
+}

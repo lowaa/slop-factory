@@ -1,0 +1,35 @@
+-- error: false --
+-- text --
+Granted ticket #1: Change flow
+Scopes: server/flow/
+Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.
+Branch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.
+Link: {board}/tickets/1?tenant={tenant} -- its PR's description links back here, with "slop-haus #1".
+APPROVED: a human approved its PR (https://github.com/acme/repo/pull/12). Call ticket_finish: where the server lands tickets it says the ticket is in the landing queue and you are done. Otherwise you merge it: merge main into the branch, re-run the tests and push, once, and get the checks green; then take integration_lock even if main has moved since, and re-check under it (if main has moved and merging it is clean, merge it, re-test and push; never merge main again before the lock, nor to avoid waiting in the lock's queue: if the lock is held, queue for it), merge the PR and release the lock; then ticket_finish with the PR's URL as pr_url. If the PR is already merged -- a human may have merged it -- just call ticket_finish. If bringing main in needs conflict resolution in this ticket's own code, don't merge: push the resolution and call ticket_finish again.
+-- structured --
+{
+  "attempt": {
+    "branch": "ticket-1-a1",
+    "guidance": "Base commit: not pinned, so slop-haus did not make your branch. Branch from origin/main.\nBranch: ticket-1-a1 -- name your branch this, and open your PR from it; change_open refuses any other.",
+    "managed": false,
+    "number": 1,
+    "ready": false
+  },
+  "guidance": {
+    "review": "APPROVED: a human approved its PR (https://github.com/acme/repo/pull/12). Call ticket_finish: where the server lands tickets it says the ticket is in the landing queue and you are done. Otherwise you merge it: merge main into the branch, re-run the tests and push, once, and get the checks green; then take integration_lock even if main has moved since, and re-check under it (if main has moved and merging it is clean, merge it, re-test and push; never merge main again before the lock, nor to avoid waiting in the lock's queue: if the lock is held, queue for it), merge the PR and release the lock; then ticket_finish with the PR's URL as pr_url. If the PR is already merged -- a human may have merged it -- just call ticket_finish. If bringing main in needs conflict resolution in this ticket's own code, don't merge: push the resolution and call ticket_finish again."
+  },
+  "ticket": {
+    "id": 1,
+    "paths": [
+      "server/flow/"
+    ],
+    "pr_url": "https://github.com/acme/repo/pull/12",
+    "priority": "normal",
+    "requires_approval": true,
+    "review": "approved",
+    "revision": 0,
+    "status": "in_progress",
+    "title": "Change flow",
+    "url": "{board}/tickets/1?tenant={tenant}"
+  }
+}

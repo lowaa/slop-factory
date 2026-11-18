@@ -1,0 +1,260 @@
+// Shared by dropdown.tsx and filterable_dropdown.tsx -- one stylesheet
+// because both render the same trigger/panel/option structure and only
+// differ in the control inside .dropdown__trigger.
+//
+// Every custom property carries a fallback: this package is consumed by
+// any app in this repo, so it has to look right against a host that
+// defines none of these tokens while still picking up the host's palette
+// when it does.
+.dropdown {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+
+  &__label {
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    color: var(--color-text-muted);
+
+    // Clipped to nothing rather than `display: none`, which would remove
+    // it from the accessibility tree and leave the combobox unnamed.
+    &--hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
+  }
+
+  // Sits over the trigger's bottom edge so the browser's validation bubble
+  // points at the dropdown. Invisible and click-through, but still laid
+  // out: a display:none input can't be focused to report itself invalid.
+  //
+  // `input&__validation` for specificity: hosts style inputs by descendant
+  // selector (a grid row's `input { width: 100% }`), and one of those
+  // stretched this across the row and pushed phones into horizontal scroll.
+  input#{&}__validation {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    min-width: 0;
+    height: 1px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  &__trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    // Without this a long option label forces the whole control wider than
+    // its grid column instead of ellipsing.
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    color: var(--color-text);
+    background: var(--color-bg-raised);
+    // The strong border, not the hairline: this is what identifies the
+    // control (WCAG 1.4.11), same as the host app's text inputs.
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition:
+      border-color 0.12s,
+      box-shadow 0.12s;
+
+    &:hover:not(:disabled) {
+      border-color: var(--color-text-muted);
+    }
+
+    &--open {
+      border-color: var(--color-accent);
+      box-shadow: var(--glow-accent);
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    // Focus ring for the closed control only. While open, --open's border
+    // plus glow already mark the control, and drawing an outline on top of
+    // them reads as two concentric rings.
+    //
+    // :focus-within as well as :focus-visible because the filterable
+    // variant's trigger is a div wrapping the real input -- focus lands on
+    // the child, so :focus-visible alone never matches the trigger.
+    &:not(&--open) {
+      &:focus-visible,
+      &:focus-within {
+        outline: 2px solid var(--color-accent-text);
+        outline-offset: 1px;
+      }
+    }
+  }
+
+  &__value {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &--placeholder {
+      color: var(--color-text-subtle);
+    }
+  }
+
+  &__input {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    color: var(--color-text);
+    background: none;
+    border: none;
+    border-radius: 0;
+    // Hosts commonly style every text input (border, glow on focus); this
+    // one sits inside a trigger that already draws both, so every such
+    // property is reset rather than just the border.
+    box-shadow: none;
+
+    &::placeholder {
+      color: var(--color-text-subtle);
+    }
+
+    // The ring lives on the wrapping .dropdown__trigger instead, so the
+    // border and outline don't double up.
+    &:focus {
+      outline: none;
+      box-shadow: none;
+    }
+  }
+
+  &__caret {
+    flex: none;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid var(--color-text-muted);
+    transition: transform 0.12s;
+  }
+
+  &__trigger--open &__caret {
+    border-top-color: var(--color-accent-text);
+    transform: rotate(180deg);
+  }
+
+  &__panel {
+    position: absolute;
+    // Sits below the label + trigger rather than at the container top.
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: var(--z-menu);
+    // max-height is set to the measured outer room, so padding and border
+    // must count inside it whatever the host's box-sizing is.
+    box-sizing: border-box;
+    // Lowered per open by usePanelPlacement to the room actually available.
+    max-height: 260px;
+    margin: 0;
+    padding: var(--space-1);
+    overflow-y: auto;
+    list-style: none;
+    background: var(--color-bg-raised);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+  }
+
+  &__option {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+
+    // Mouse hover and keyboard navigation share one active index, so this
+    // must read as "the row under the cursor", not as a focus ring. Neutral
+    // rather than red, which is reserved for the selection itself.
+    &--active {
+      background: var(--color-bg-sunken);
+    }
+
+    &--selected {
+      color: var(--color-accent-text);
+      font-weight: 550;
+
+      &::after {
+        content: "✓";
+        margin-left: auto;
+        font-size: 12px;
+      }
+    }
+
+    &--disabled {
+      color: var(--color-text-subtle);
+      cursor: not-allowed;
+    }
+  }
+
+  &__leading {
+    display: inline-flex;
+    flex: none;
+    align-self: center;
+
+  }
+
+  // The row spaces its children apart; auto margin keeps the label by its
+  // decoration and the hint (if any) at the far edge.
+  &__leading + &__option-label {
+    margin-right: auto;
+  }
+
+  // The muted hint colour falls under 4.5:1 on the active row's background.
+  &__option--active &__option-hint {
+    color: var(--color-text);
+  }
+
+  &__option-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  // Hints are usually units, where case is meaning (mmol/L is not
+  // MMOL/L), so they're shown as written rather than uppercased.
+  &__option-hint {
+    flex: none;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-subtle);
+  }
+
+  &__empty {
+    padding: var(--space-2) var(--space-3);
+    color: var(--color-text-muted);
+  }
+}
+
+// Honour a user's reduced-motion preference for the caret spin and the
+// trigger's colour transitions.
+@media (prefers-reduced-motion: reduce) {
+  .dropdown__trigger,
+  .dropdown__caret {
+    transition: none;
+  }
+}

@@ -1,0 +1,146 @@
+@use "@/styles/typography";
+@use "@/styles/surfaces";
+
+// Mirrors agents_panel.scss's shape (a form up top, a scannable list
+// below) without its multi-column grid -- members and invites each carry
+// far less per-row data than an agent's name/state/holds/action, so a
+// simple flex row is enough.
+.members-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4-5);
+
+  &__invite {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3-5);
+    padding: var(--space-4);
+
+    @include surfaces.box(var(--radius));
+
+    h2 {
+      margin: 0;
+
+      @include typography.heading-label;
+    }
+  }
+
+  &__invite-row {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-3-5);
+  }
+
+  &__field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-md);
+
+    input {
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      color: var(--color-text);
+
+      &:focus {
+        border-color: var(--color-accent);
+      }
+    }
+  }
+
+  &__notice {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-danger);
+    border-radius: var(--radius-sm);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+  }
+
+  &__section h2 {
+    margin: 0 0 var(--space-3);
+
+    @include typography.heading-label;
+  }
+
+  &__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3-5);
+    padding: var(--space-3) var(--space-3-5);
+
+    @include surfaces.box;
+  }
+
+  &__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  &__expiry {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+  }
+
+  &__empty {
+    margin: 0;
+    padding: var(--space-3-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  &__invite-row button,
+  &__row button {
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 120ms ease;
+
+    &:hover:not(:disabled) {
+      background: var(--color-accent-hot);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+
+  // Revoking is the destructive action on a row -- same reasoning as
+  // agents_panel.scss's own row button, kept muted next to the primary
+  // "Send invite" button above.
+  &__row button {
+    border-color: var(--color-border-strong);
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-weight: 400;
+
+    &:hover:not(:disabled) {
+      background: var(--color-bg-muted);
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+    }
+  }
+}

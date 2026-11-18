@@ -1,0 +1,94 @@
+// Colours come from the host app's tokens; fallbacks keep Storybook and any token-less host legible.
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-weight: 550;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+
+  &--md {
+    min-height: 36px;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-md);
+  }
+
+  &--sm {
+    min-height: 28px;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-sm);
+  }
+
+  &--primary {
+    background: var(--color-accent);
+    color: var(--color-accent-on);
+    box-shadow: var(--shadow-sm);
+
+    &:hover:not(:disabled) {
+      background: var(--color-accent-hover);
+    }
+  }
+
+  &--secondary {
+    background: var(--color-bg-raised);
+    border-color: var(--color-border-strong);
+    color: var(--color-text);
+    box-shadow: var(--shadow-sm);
+
+    &:hover:not(:disabled) {
+      background: var(--color-bg-sunken);
+    }
+  }
+
+  // Hover and focus tint the background a step toward the accent (15%: more
+  // and the label on a light theme drops under 4.5:1) and brighten the border.
+  &--tonal {
+    background: var(--color-accent-dim);
+    border-color: var(--color-accent);
+    color: var(--color-accent-text);
+
+    &:hover:not(:disabled),
+    &:focus-visible {
+      background: color-mix(in srgb, var(--color-accent-dim) 85%, var(--color-accent));
+      border-color: var(--color-accent-hover);
+    }
+  }
+
+  &--ghost {
+    background: transparent;
+    color: var(--color-text-muted);
+
+    &:hover:not(:disabled) {
+      background: var(--color-bg-sunken);
+      color: var(--color-text);
+    }
+  }
+
+  &--danger {
+    background: transparent;
+    color: var(--color-danger);
+
+    &:hover:not(:disabled) {
+      background: var(--color-danger-bg);
+    }
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: var(--glow-accent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

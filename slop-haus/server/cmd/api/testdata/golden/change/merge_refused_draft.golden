@@ -1,0 +1,5 @@
+-- error: true --
+-- text --
+the change is still a draft: mark it ready with change_open (draft false) first
+-- structured --
+null

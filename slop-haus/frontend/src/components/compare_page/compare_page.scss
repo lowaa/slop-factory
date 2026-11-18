@@ -1,0 +1,57 @@
+@use "@/styles/forms";
+
+.compare-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  input[type="text"] {
+    @include forms.text-control;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    @include forms.checkbox-control;
+  }
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  fieldset {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__pair {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+
+  &__caveat {
+    margin: 0;
+    color: var(--color-accent-hot);
+  }
+
+  &__table {
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+
+    th,
+    td {
+      padding: var(--space-1) var(--space-2);
+      text-align: left;
+    }
+  }
+
+  &__table .is-flagged {
+    font-style: italic;
+  }
+}

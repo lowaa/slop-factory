@@ -1,0 +1,51 @@
+# Local dev stack: Postgres + the demo-api HTTP server, for manually
+# verifying tenant isolation works end-to-end.
+#
+# Usage:
+#   POSTGRES_PASSWORD=devpassword docker compose -f docker-compose-dev.yaml up --build
+#
+# Then, e.g.:
+#   curl -X POST localhost:8080/tenants -d '{"name":"acme"}'
+#   curl -X POST localhost:8080/accounts -H "X-Tenant-ID: <id from above>" -d '{"name":"acc-1","currency_code":"USD"}'
+#   curl localhost:8080/accounts -H "X-Tenant-ID: <id from above>"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-go_db}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?required env var missing}
+      - POSTGRES_DB=${POSTGRES_DB:-go_db}
+    volumes:
+      - go-db-postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-go_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - go-db-network
+
+  demo-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-go_db}:${POSTGRES_PASSWORD:?required env var missing}@postgres:5432/${POSTGRES_DB:-go_db}?sslmode=disable
+      - DEMO_API_DB_PASSWORD=${DEMO_API_DB_PASSWORD:-demo_api_password}
+      - LISTEN_ADDR=:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - go-db-network
+
+networks:
+  go-db-network:
+
+volumes:
+  go-db-postgres:

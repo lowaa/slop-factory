@@ -1,0 +1,13 @@
+// The page scrolls inside the root's fixed height, like the signed-in
+// shell's main area does.
+.legal-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-5);
+  color: var(--color-text);
+}

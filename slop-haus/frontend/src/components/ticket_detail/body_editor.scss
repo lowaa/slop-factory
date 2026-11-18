@@ -1,0 +1,90 @@
+@use "@/styles/layout";
+
+.ticket-detail {
+  &__body-section {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  &__edit-body {
+    align-self: flex-start;
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    color: var(--color-text);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  &__body-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    width: 100%;
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-1);
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font: inherit;
+    }
+
+    textarea {
+      font-family: var(--font-mono);
+      resize: vertical;
+    }
+  }
+
+  &__body-actions {
+    display: flex;
+    gap: var(--space-2);
+
+    button {
+      padding: var(--space-1-5) 14px;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      cursor: pointer;
+
+      &[type="submit"] {
+        background: var(--color-accent);
+        border-color: var(--color-accent);
+        color: var(--color-on-accent);
+        font-weight: 600;
+      }
+
+      &[type="submit"]:hover:not(:disabled) {
+        background: var(--color-accent-hot);
+        border-color: var(--color-accent-hot);
+        box-shadow: var(--glow-soft);
+      }
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  @include layout.narrow {
+    &__body-actions {
+      flex-wrap: wrap;
+    }
+  }
+}

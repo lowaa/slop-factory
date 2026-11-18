@@ -1,0 +1,6 @@
+cmd/slop-review/main.go gocognit runWith
+internal/bench/markdown.go gocognit RenderMarkdown
+internal/chunk/chunk.go gocognit ByPackage
+internal/fingerprint/fingerprint.go gocognit hashSource
+internal/gitctx/diff.go gocognit ResolveScope
+internal/toolset/dispatcher.go gocognit (*Dispatcher).grep
