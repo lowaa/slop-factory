@@ -1,0 +1,38 @@
+slop-haus {{ include "slop-haus.tag" . }} is deploying to namespace {{ .Release.Namespace }}.
+{{- if eq (include "slop-haus.tag" .) "main" }}
+
+WARNING: image tag `main` moves with every commit to main. Pin image.tag to a
+sha-<12 hex> or v* tag for anything you depend on.
+{{- end }}
+
+1. Wait for the api: it migrates the database on start, then answers.
+
+     kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "slop-haus.apiName" . }}
+
+2. Create the first admin (who then invites everyone else). The password is
+   read from stdin, so it stays out of the process list; at least 10
+   characters.
+
+     read -rs PW && printf '%s\n' "$PW" | kubectl -n {{ .Release.Namespace }} exec -i deploy/{{ include "slop-haus.apiName" . }} -- \
+       sh -c 'read -r ADD_USER_PASSWORD; export ADD_USER_PASSWORD; exec /srv/bin/add_user --email=admin@example.com --display-name=Admin --admin'
+
+3. Open the board:
+{{- if .Values.ingress.enabled }}
+
+     {{ .Values.publicBaseUrl }}
+{{- else }}
+
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "slop-haus.fullname" . }}-frontend 8080:80
+
+   then http://localhost:8080 (publicBaseUrl must then be http://localhost:8080
+   for sign-in to work).
+{{- end }}
+{{- if eq .Values.api.email.backend "log" }}
+
+Email is set to `log`: invite, activation and reset links are written to the
+api's log (kubectl logs deploy/{{ include "slop-haus.apiName" . }}), not sent.
+{{- end }}
+{{- if .Values.postgresql.enabled }}
+
+The in-cluster Postgres has no backups of its own. See the chart README.
+{{- end }}

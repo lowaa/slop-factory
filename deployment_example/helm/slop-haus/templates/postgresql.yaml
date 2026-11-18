@@ -1,0 +1,109 @@
+{{- if .Values.postgresql.enabled }}
+{{- $pg := .Values.postgresql }}
+# A single Postgres for small installs. No replication, no backups: see the
+# chart README for pg_dump, or use an operator (CloudNativePG) instead.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "slop-haus.postgresName" . }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  serviceName: {{ include "slop-haus.postgresName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "slop-haus.selectorLabels" (list . "postgresql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slop-haus.labels" . | nindent 8 }}
+        app.kubernetes.io/component: postgresql
+    spec:
+      serviceAccountName: {{ include "slop-haus.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The official image's postgres user.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgresql
+          image: {{ $pg.image | quote }}
+          env:
+            - name: POSTGRES_USER
+              value: {{ $pg.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ $pg.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "slop-haus.secretName" . }}
+                  key: POSTGRES_PASSWORD
+            # A subdirectory: a fresh volume's root may hold lost+found,
+            # which initdb refuses.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml $pg.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $pg.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $pg.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "slop-haus.postgresName" . }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  selector:
+    {{- include "slop-haus.selectorLabels" (list . "postgresql") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+{{- end }}

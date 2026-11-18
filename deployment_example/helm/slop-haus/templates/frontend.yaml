@@ -1,0 +1,127 @@
+{{- $fe := .Values.frontend }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "slop-haus.fullname" . }}-frontend
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ $fe.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "slop-haus.selectorLabels" (list . "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slop-haus.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+      {{- with $fe.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "slop-haus.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: "{{ .Values.image.frontend.repository }}:{{ include "slop-haus.tag" . }}"
+          imagePullPolicy: {{ include "slop-haus.pullPolicy" . }}
+          env:
+            # Fully qualified: nginx's resolver never applies search domains.
+            - name: API_UPSTREAM
+              value: "{{ include "slop-haus.apiName" . }}.{{ .Release.Namespace }}.svc.{{ $fe.clusterDomain }}:8080"
+            - name: DNS_RESOLVER
+              value: {{ $fe.dnsResolver | quote }}
+            - name: GITHUB_WEB_ORIGIN
+              value: {{ $fe.githubWebOrigin | quote }}
+          ports:
+            - name: http
+              containerPort: 80
+          lifecycle:
+            # nginx stops listening on SIGTERM while the Service still sends
+            # it new connections for a moment: let the endpoints catch up.
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          # /version.json is a static file: no dependency on the api, so an
+          # api outage never takes the board's own pages down with it.
+          readinessProbe:
+            httpGet:
+              path: /version.json
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /version.json
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml $fe.resources | nindent 12 }}
+          # The official nginx image starts as root (to bind :80 and write its
+          # templated config) and runs its workers as `nginx`: these are the
+          # only capabilities that needs.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "SETUID", "SETGID", "NET_BIND_SERVICE"]
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-conf
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      {{- with $fe.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $fe.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $fe.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "slop-haus.fullname" . }}-frontend
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  selector:
+    {{- include "slop-haus.selectorLabels" (list . "frontend") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

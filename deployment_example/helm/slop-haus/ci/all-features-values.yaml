@@ -1,0 +1,84 @@
+# Every optional part on, for `helm template` in deployment_example/test.sh.
+# Placeholders only: nothing here is a real secret.
+image:
+  tag: sha-0123456789ab
+publicBaseUrl: https://slop-haus.example.com
+secrets:
+  appDbPassword: placeholder-app-db-password
+  jwtSecret: placeholder-jwt-secret-placeholder-jwt-secret
+  smtpPass: placeholder-smtp-pass
+  githubClientSecret: placeholder-github-client-secret
+  oidcClientSecret: placeholder-oidc-client-secret
+  credentialEncryptionKey: CHANGE_ME_base64_of_32_bytes
+  intakeKey: placeholder-intake-key-placeholder-intake-key
+  s3Credentials: |
+    S3_ACCESS_KEY_ID=placeholder
+    S3_SECRET_ACCESS_KEY=placeholder
+postgresql:
+  enabled: true
+  password: placeholder-postgres-password
+  persistence:
+    storageClass: standard
+api:
+  replicas: 2
+  trustedProxies: ["10.42.0.0/16"]
+  registrationOpen: false
+  passwordSignIn: false
+  email:
+    backend: smtp
+    from: slop-haus@example.com
+    smtp:
+      host: smtp.example.com
+      user: slop-haus
+  github:
+    clientId: placeholder-github-client-id
+  oidc:
+    issuerUrl: https://sso.example.com
+    clientId: slop-haus
+    providerName: sso
+    displayName: Example SSO
+  credentials:
+    enabled: true
+  webhook:
+    enabled: true
+    publicBaseUrl: https://hooks.slop-haus.example.com
+    ingress:
+      enabled: true
+      className: nginx
+      host: hooks.slop-haus.example.com
+      tls:
+        - secretName: slop-haus-hooks-tls
+          hosts: [hooks.slop-haus.example.com]
+  intake:
+    enabled: true
+    publicBaseUrl: http://slop-haus-api-intake.slop-haus.svc:8082
+  attachments:
+    enabled: true
+    endpoint: https://s3.example.com
+    bucket: slop-haus-attachments
+  metrics:
+    enabled: true
+  logsOtlpEndpoint: http://otel-collector.observability.svc:4318/v1/logs
+  extraEnv:
+    - name: SESSION_RETENTION
+      value: 720h
+  podAnnotations:
+    example.com/team: platform
+frontend:
+  replicas: 2
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  host: slop-haus.example.com
+  tls:
+    - secretName: slop-haus-tls
+      hosts: [slop-haus.example.com]
+networkPolicy:
+  enabled: true
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring

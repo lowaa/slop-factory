@@ -1,0 +1,45 @@
+# slop-haus through Argo CD: the chart from this repository, your values from
+# a repository of your own. See README.md beside this file.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: slop-haus
+  namespace: argocd
+  # Deleting the Application deletes what it deployed (not the Postgres
+  # volume, nor the Secret you created by hand).
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: slop-haus
+  sources:
+    - repoURL: https://github.com/lowaa/slop-factory.git
+      path: deployment_example/helm/slop-haus
+      # Pinned: a release tag or a full commit SHA. A branch (main, HEAD)
+      # would change what is deployed whenever someone pushes. Replace with
+      # one that exists.
+      targetRevision: CHANGE_ME_TAG_OR_COMMIT_SHA
+      helm:
+        releaseName: slop-haus
+        valueFiles:
+          - $values/slop-haus/values.yaml
+    # Your values (values-override.yaml is an example), in a repository you
+    # control, pinned the same way or tracking your own branch.
+    - repoURL: https://github.com/example/slop-haus-config.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: slop-haus
+  syncPolicy:
+    # Manual by default: a sync is a deliberate act, so a pushed values change
+    # or a new targetRevision runs its database migrations when someone
+    # presses Sync, not on its own. Uncomment to have Argo CD apply every
+    # change it sees; prune also deletes what the chart stops rendering, and
+    # selfHeal reverts edits made with kubectl.
+    # automated:
+    #   prune: false
+    #   selfHeal: false
+    syncOptions:
+      # Delete what the chart stopped rendering only after everything else
+      # is healthy.
+      - PruneLast=true

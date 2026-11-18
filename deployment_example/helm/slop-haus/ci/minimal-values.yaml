@@ -1,0 +1,8 @@
+# The least the chart renders with: the chart's defaults plus the required
+# values, for `helm lint` and `helm template` in deployment_example/test.sh.
+# Placeholders only: nothing here is a real secret.
+publicBaseUrl: https://slop-haus.example.com
+secrets:
+  databaseUrl: postgres://slophaus:placeholder@db.example.com:5432/slophaus?sslmode=require
+  appDbPassword: placeholder-app-db-password
+  jwtSecret: placeholder-jwt-secret-placeholder-jwt-secret

@@ -20,6 +20,7 @@ Most need Docker.
 | Test tooling | `bats/run.sh --recursive dev-tools` |
 | End to end | `SHARDS=2 slop-haus/e2e_playwright_ts/test.sh` |
 | Harnesses against a scripted model | `slop-haus/harness_e2e/test.sh` |
+| Deployment examples (compose, Helm, Argo CD), static checks | `deployment_example/test.sh` |
 
 The soak test, the lists-at-scale e2e run and the harnesses at their latest
 releases run nightly (`.github/workflows/nightly.yml`), not on pull requests.

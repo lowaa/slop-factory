@@ -1,0 +1,39 @@
+# An example of the values file the Application reads from your config
+# repository ($values/slop-haus/values.yaml). Commit no secrets here: they
+# are in the slop-haus-secrets Secret, created by hand or by a secrets
+# operator (README.md).
+image:
+  # A sha-<12 hex> or v* tag, never `main`, so a sync deploys what you chose.
+  tag: CHANGE_ME_IMAGE_TAG
+
+publicBaseUrl: https://slop-haus.example.com
+
+secrets:
+  existingSecret: slop-haus-secrets
+
+api:
+  # Your pod network's CIDR, where the ingress controller and frontend run.
+  trustedProxies: ["10.0.0.0/8"]
+  email:
+    backend: smtp
+    from: slop-haus@example.com
+    smtp:
+      host: smtp.example.com
+      user: slop-haus
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # /mcp and /api/tickets/stream are long-lived streams.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    cert-manager.io/cluster-issuer: letsencrypt
+  host: slop-haus.example.com
+  tls:
+    - secretName: slop-haus-tls
+      hosts: [slop-haus.example.com]
+
+networkPolicy:
+  enabled: true

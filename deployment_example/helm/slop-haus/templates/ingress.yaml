@@ -1,0 +1,10 @@
+{{- if .Values.ingress.enabled }}
+# One host, one path: the frontend's nginx proxies the api's paths, so the
+# api Service is deliberately not routed here.
+{{ include "slop-haus.ingress" (dict "root" . "ingress" .Values.ingress "name" (include "slop-haus.fullname" .) "service" (printf "%s-frontend" (include "slop-haus.fullname" .)) "port" 80) }}
+{{- end }}
+{{- if and .Values.api.webhook.enabled .Values.api.webhook.ingress.enabled }}
+---
+# The GitHub webhook door: only the receiver on :8081 is behind it.
+{{ include "slop-haus.ingress" (dict "root" . "ingress" .Values.api.webhook.ingress "name" (printf "%s-webhook" (include "slop-haus.fullname" .)) "service" (printf "%s-webhook" (include "slop-haus.apiName" .)) "port" 8081) }}
+{{- end }}

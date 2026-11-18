@@ -1,0 +1,105 @@
+# slop-haus from its published images: Postgres, the api and the frontend.
+# See README.md beside this file. Copy .env.example to .env and fill it in
+# first; the stack refuses to start without the required values.
+#
+# The frontend's nginx is the one front door: it serves the board and proxies
+# /api, /mcp, /hooks, /oauth and the OAuth discovery documents to the api, so
+# a browser and every agent use the same URL (PUBLIC_BASE_URL).
+
+name: slop-haus
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-slophaus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-slophaus}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [backend]
+
+  api:
+    image: ghcr.io/lowaa/slop-haus-api:${SLOP_HAUS_TAG:-main}
+    restart: unless-stopped
+    environment:
+      # The owner role. On every start the api migrates the schema as this
+      # role, creates (or checks) APP_DB_ROLE, then serves every request as
+      # that app role so row level security applies. POSTGRES_USER from the
+      # official image is a superuser, which covers the CREATEROLE this needs.
+      # The password goes into a URL: keep it to URL-safe characters.
+      DATABASE_URL: postgres://${POSTGRES_USER:-slophaus}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-slophaus}?sslmode=disable
+      APP_DB_ROLE: ${APP_DB_ROLE:-slophaus_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (at least 32 bytes)}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL in .env}
+      ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
+      # The frontend's nginx, and a reverse proxy on the host reaching it
+      # through Docker's port mapping, both sit in Docker's private range:
+      # their X-Forwarded-For is believed when rate limiting sign-ins per
+      # client.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
+      REGISTRATION_OPEN: ${REGISTRATION_OPEN:-false}
+      PASSWORD_SIGNIN: ${PASSWORD_SIGNIN:-true}
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-log}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_DISPLAY_NAME: ${OIDC_DISPLAY_NAME:-Single sign-on}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      LOGS_OTLP_ENDPOINT: ${LOGS_OTLP_ENDPOINT:-}
+    healthcheck:
+      # /healthz answers 200 once migrations are done and the database
+      # answers a ping.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend, frontend]
+
+  frontend:
+    image: ghcr.io/lowaa/slop-haus-frontend:${SLOP_HAUS_TAG:-main}
+    restart: unless-stopped
+    environment:
+      # Resolved per request through Docker's embedded DNS (the image's
+      # default DNS_RESOLVER), so nginx starts even while the api is down.
+      API_UPSTREAM: api:8080
+    ports:
+      # Loopback by default: put a TLS-terminating reverse proxy in front
+      # (README.md, "TLS and a reverse proxy").
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/version.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [frontend]
+
+networks:
+  # Postgres is on a network the frontend is not.
+  backend:
+  frontend:
+
+volumes:
+  postgres-data:

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: slop-haus
+description: slop-haus, a coordination server for a fleet of CLI coding agents -- api, frontend and an optional small Postgres
+type: application
+version: 0.1.0
+# The default image tag for both images. `main` moves with every commit to
+# main; pin image.tag to a sha-<12 hex> or v* tag for production.
+appVersion: "main"
+home: https://github.com/lowaa/slop-factory
+sources:
+  - https://github.com/lowaa/slop-factory
