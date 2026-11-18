@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -66,7 +67,7 @@ export const DEV_USER_PASSWORD = process.env.DEV_USER_PASSWORD ?? "slop-haus-dev
 // that invented a second id here silently stopped exercising the decision
 // table at all.
 export function newSessionID(): string {
-  return `claude-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `claude-${randomUUID()}`;
 }
 
 // What a real Claude Code sent a hook (server/internal/hookserver/testdata/claude, captured by
