@@ -1,0 +1,55 @@
+{{- $api := .Values.api }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "slop-haus.apiName" . }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+data:
+  LISTEN_ADDR: ":8080"
+  APP_DB_ROLE: {{ .Values.database.appRole | quote }}
+  PUBLIC_BASE_URL: {{ .Values.publicBaseUrl | quote }}
+  ALLOW_INSECURE_HTTP: {{ $api.allowInsecureHttp | quote }}
+  TRUSTED_PROXIES: {{ join "," $api.trustedProxies | quote }}
+  REGISTRATION_OPEN: {{ $api.registrationOpen | quote }}
+  PASSWORD_SIGNIN: {{ $api.passwordSignIn | quote }}
+  EMAIL_BACKEND: {{ $api.email.backend | quote }}
+  {{- if eq $api.email.backend "smtp" }}
+  EMAIL_FROM: {{ $api.email.from | quote }}
+  SMTP_HOST: {{ $api.email.smtp.host | quote }}
+  SMTP_PORT: {{ $api.email.smtp.port | quote }}
+  SMTP_USER: {{ $api.email.smtp.user | quote }}
+  SMTP_REQUIRE_TLS: {{ $api.email.smtp.requireTls | quote }}
+  {{- end }}
+  {{- with $api.github.clientId }}
+  GITHUB_CLIENT_ID: {{ . | quote }}
+  {{- end }}
+  {{- if $api.oidc.issuerUrl }}
+  OIDC_ISSUER_URL: {{ $api.oidc.issuerUrl | quote }}
+  OIDC_CLIENT_ID: {{ $api.oidc.clientId | quote }}
+  OIDC_PROVIDER_NAME: {{ $api.oidc.providerName | quote }}
+  OIDC_DISPLAY_NAME: {{ $api.oidc.displayName | quote }}
+  {{- end }}
+  GITHUB_API_BASE_URL: {{ $api.githubApiBaseUrl | quote }}
+  GITHUB_WEB_BASE_URL: {{ $api.githubWebBaseUrl | quote }}
+  {{- if $api.webhook.enabled }}
+  WEBHOOK_LISTEN_ADDR: ":8081"
+  WEBHOOK_PUBLIC_BASE_URL: {{ $api.webhook.publicBaseUrl | quote }}
+  {{- end }}
+  {{- if $api.intake.enabled }}
+  INTAKE_LISTEN_ADDR: ":8082"
+  INTAKE_PUBLIC_BASE_URL: {{ $api.intake.publicBaseUrl | quote }}
+  {{- end }}
+  {{- if $api.attachments.enabled }}
+  S3_ENDPOINT: {{ $api.attachments.endpoint | quote }}
+  S3_REGION: {{ $api.attachments.region | quote }}
+  S3_BUCKET: {{ $api.attachments.bucket | quote }}
+  S3_CREDENTIALS_FILE: /var/run/secrets/attachments/S3_CREDENTIALS
+  ATTACHMENT_TMP_DIR: /var/run/attachment-tmp
+  {{- end }}
+  {{- if $api.metrics.enabled }}
+  METRICS_LISTEN_ADDR: ":9090"
+  {{- end }}
+  {{- with $api.logsOtlpEndpoint }}
+  LOGS_OTLP_ENDPOINT: {{ . | quote }}
+  {{- end }}

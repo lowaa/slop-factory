@@ -1,0 +1,33 @@
+# Confines the slop-haus Application to its two repositories, one namespace,
+# and the kinds the chart renders. Nothing cluster-scoped.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: slop-haus
+  namespace: argocd
+spec:
+  description: slop-haus
+  sourceRepos:
+    - https://github.com/lowaa/slop-factory.git
+    - https://github.com/example/slop-haus-config.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: slop-haus
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: networking.k8s.io
+      kind: NetworkPolicy

@@ -1,0 +1,60 @@
+{{- if .Values.networkPolicy.enabled }}
+# Ingress rules only, so the api keeps its egress (GitHub, SMTP, the OIDC
+# issuer, an external database). The frontend is left open: the ingress
+# controller reaches it from wherever it runs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slop-haus.apiName" . }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slop-haus.selectorLabels" (list . "api") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "slop-haus.selectorLabels" (list . "frontend") | nindent 14 }}
+      ports:
+        - port: 8080
+    {{- if .Values.api.webhook.enabled }}
+    # GitHub's deliveries arrive through the webhook door's ingress
+    # controller, from outside this namespace.
+    - ports:
+        - port: 8081
+    {{- end }}
+    {{- if .Values.api.intake.enabled }}
+    - ports:
+        - port: 8082
+    {{- end }}
+    {{- if and .Values.api.metrics.enabled .Values.networkPolicy.metricsFrom }}
+    - from:
+        {{- toYaml .Values.networkPolicy.metricsFrom | nindent 8 }}
+      ports:
+        - port: 9090
+    {{- end }}
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slop-haus.postgresName" . }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slop-haus.selectorLabels" (list . "postgresql") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "slop-haus.selectorLabels" (list . "api") | nindent 14 }}
+      ports:
+        - port: 5432
+{{- end }}
+{{- end }}

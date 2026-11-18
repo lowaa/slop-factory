@@ -1,0 +1,237 @@
+# Values for the slop-haus chart. Required: publicBaseUrl, and the secrets
+# below (either inline, or in a Secret you create and name in
+# secrets.existingSecret). See ../README.md.
+
+image:
+  # Defaults to the chart's appVersion ("main"), which moves with every commit
+  # to main. Pin a v* tag for production. sha-<12 hex> tags are deleted once
+  # older than 14 days and outside the newest 20 (their images with them), so
+  # use one only short-term, or mirrored to a registry of your own.
+  tag: ""
+  api:
+    repository: ghcr.io/lowaa/slop-haus-api
+    # sha256:..., which takes precedence over the tag: what is pulled can then
+    # never change under the same reference. It does not survive the prune.
+    digest: ""
+  frontend:
+    repository: ghcr.io/lowaa/slop-haus-frontend
+    digest: ""
+  # Empty: Always for the moving `main` tag, IfNotPresent for any other.
+  pullPolicy: ""
+  pullSecrets: []
+
+# Required. Where the board is served: the Ingress host's https URL. Also the
+# address in emailed links and the one handed to agents. Plain http is refused
+# by the api unless the host is loopback or api.allowInsecureHttp is set.
+publicBaseUrl: ""
+
+secrets:
+  # Name of a Secret you manage (kubectl, External Secrets, Sealed Secrets...)
+  # holding the keys below. When set, the chart creates no Secret and the
+  # inline values below are ignored. Keys:
+  #   DATABASE_URL       owner DSN (required)
+  #   APP_DB_PASSWORD    (required)
+  #   JWT_SECRET         at least 32 bytes (required)
+  #   POSTGRES_PASSWORD  (required with postgresql.enabled)
+  #   SMTP_PASS, GITHUB_CLIENT_SECRET, OIDC_CLIENT_SECRET,
+  #   CREDENTIAL_ENCRYPTION_KEY, CREDENTIAL_ENCRYPTION_KEY_PREVIOUS,
+  #   INTAKE_KEY, S3_CREDENTIALS   (optional; read only when the feature is on)
+  existingSecret: ""
+  # Inline values, put into a Secret the chart creates. Fine for trying the
+  # chart; anything real belongs in existingSecret, out of your values files.
+  #
+  # The owner role's DSN, e.g.
+  # postgres://slophaus:<password>@db.example.com:5432/slophaus?sslmode=require
+  # The api migrates as this role on every start and creates the app role
+  # with it, so it needs CREATEROLE (or be a superuser). Built for you from
+  # postgresql.* when postgresql.enabled and this is empty.
+  databaseUrl: ""
+  # The least-privileged role's password (database.appRole). The api creates
+  # the role, and resets its password to this, on every start.
+  appDbPassword: ""
+  # Signs session tokens: at least 32 bytes (openssl rand -hex 32), or the api
+  # refuses to start.
+  jwtSecret: ""
+  smtpPass: ""
+  githubClientSecret: ""
+  oidcClientSecret: ""
+  # base64 of 32 bytes (openssl rand -base64 32). Keep it safe: credentials
+  # sealed under a lost key cannot be read.
+  credentialEncryptionKey: ""
+  credentialEncryptionKeyPrevious: ""
+  # At least 32 bytes, and not the JWT secret.
+  intakeKey: ""
+  # KEY=VALUE lines: S3_ACCESS_KEY_ID=... and S3_SECRET_ACCESS_KEY=...
+  s3Credentials: ""
+
+database:
+  # The role requests are served as, so Postgres row level security applies.
+  # The api creates it; it must not exist with SUPERUSER or BYPASSRLS.
+  appRole: slophaus_app
+
+# A single-instance Postgres in the cluster, for trying the chart or a small
+# install. Off: bring your own (managed Postgres, CloudNativePG...) through
+# secrets.databaseUrl. It has no backups or failover of its own; see the README.
+postgresql:
+  enabled: false
+  image: postgres:17-alpine
+  database: slophaus
+  username: slophaus
+  # Its superuser's password (or POSTGRES_PASSWORD in existingSecret). Use
+  # URL-safe characters: it is spliced into the DSN.
+  password: ""
+  persistence:
+    size: 8Gi
+    # Empty: the cluster's default StorageClass.
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+api:
+  # More than one is safe: migrations and app-role setup are advisory-locked.
+  # A rolling update runs old and new side by side for a moment, so the new
+  # version's migrations must leave the schema readable by the old one.
+  replicas: 1
+  # The ranges whose X-Forwarded-For the api believes (sign-in rate limits
+  # count per client). Your pod network's CIDR, where the frontend and the
+  # ingress controller run. Empty: none, and every client behind the frontend
+  # looks like one.
+  trustedProxies: []
+  # Plain http on a non-loopback PUBLIC_BASE_URL: only for a throwaway stack,
+  # since session cookies then lose their Secure flag.
+  allowInsecureHttp: false
+  # Off: accounts start from an admin's invite.
+  registrationOpen: false
+  # Off: sign-in is only through GitHub or OIDC (configure one, or the api
+  # refuses to start).
+  passwordSignIn: true
+  email:
+    # log writes activation, invite and reset links to the api's log; smtp
+    # sends them, and needs smtp.host and from.
+    backend: log
+    from: ""
+    smtp:
+      host: ""
+      port: 587
+      user: ""
+      # Leave on unless your relay lacks STARTTLS: the links are credentials.
+      requireTls: true
+  # Sign in with GitHub (an OAuth app, callback
+  # <publicBaseUrl>/api/auth/callback/github). Secret: githubClientSecret.
+  github:
+    clientId: ""
+  # Sign in through an OpenID Connect issuer (callback
+  # <publicBaseUrl>/api/auth/callback/<providerName>). providerName must stay
+  # tied to one issuer for the life of the install. Secret: oidcClientSecret.
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    providerName: oidc
+    displayName: Single sign-on
+  # Tenants' GitHub App credentials are stored encrypted under
+  # credentialEncryptionKey; on, the chart passes the key. GITHUB_WEB_BASE_URL
+  # and GITHUB_API_BASE_URL are for GitHub Enterprise.
+  credentials:
+    enabled: false
+  githubApiBaseUrl: https://api.github.com
+  githubWebBaseUrl: https://github.com
+  # The GitHub App webhook receiver: a listener (8081) and Service of its
+  # own, meant to be the only part reachable from the internet. publicBaseUrl
+  # is where GitHub reaches it (an origin, no path).
+  webhook:
+    enabled: false
+    publicBaseUrl: ""
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      # Empty: webhook.publicBaseUrl's host.
+      host: ""
+      tls: []
+  # The intake door (8082) external systems open tickets through
+  # (POST /hooks/intake/{source_id}). Its Service is cluster-internal.
+  intake:
+    enabled: false
+    publicBaseUrl: ""
+  # Ticket attachments in an S3-compatible bucket; the api creates it.
+  # Credentials: secrets.s3Credentials. Uploads spool to an emptyDir.
+  attachments:
+    enabled: false
+    endpoint: ""
+    region: us-east-1
+    bucket: slop-haus-attachments
+    tmpSizeLimit: 1Gi
+  # Prometheus metrics on :9090, behind a Service of their own that no
+  # Ingress routes to.
+  metrics:
+    enabled: false
+  # An OTLP/HTTP logs endpoint (e.g. http://otel-collector:4318/v1/logs).
+  # Optional: logs always go to stderr; the export is best effort.
+  logsOtlpEndpoint: ""
+  # Any other setting (slop-haus/server/internal/config/config.go), as
+  # container env entries.
+  extraEnv: []
+  extraVolumes: []
+  extraVolumeMounts: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+frontend:
+  replicas: 1
+  # nginx resolves the api per request (so it starts while the api is down),
+  # which needs an explicit resolver: your cluster DNS Service. nginx never
+  # applies search domains, so the api is named by its full Service name.
+  dnsResolver: kube-dns.kube-system.svc.cluster.local
+  clusterDomain: cluster.local
+  # The CSP's form-action allows this origin (GitHub App creation). Match
+  # api.githubWebBaseUrl.
+  githubWebOrigin: https://github.com
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# The one front door: everything (board, /api, /mcp, /hooks, /oauth) goes to
+# the frontend's nginx, which proxies the api's paths. Terminate TLS here and
+# have the controller send X-Forwarded-Proto: https. /mcp and
+# /api/tickets/stream are long-lived streams: don't buffer them, and allow
+# long read timeouts (the nginx inside allows an hour).
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Empty: publicBaseUrl's host.
+  host: ""
+  tls: []
+  #  - secretName: slop-haus-tls
+  #    hosts: [slop-haus.example.com]
+
+# Ingress-only NetworkPolicies: Postgres from the api, the api from the
+# frontend (and the metrics port from metricsFrom). The frontend stays open
+# to the ingress controller.
+networkPolicy:
+  enabled: false
+  # Peers (NetworkPolicyPeer) allowed to scrape the api's metrics port.
+  metricsFrom: []
+
+serviceAccount:
+  create: true
+  name: ""

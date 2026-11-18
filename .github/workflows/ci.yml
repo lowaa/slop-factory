@@ -190,12 +190,23 @@ jobs:
         env:
           HARNESS_PARALLEL: "1"
 
+  # The deployment examples still render and validate: compose config, helm
+  # lint, and the chart's and Argo CD's manifests against their schemas.
+  deployment-example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: deployment_example/test.sh
+
   # Images for main only once everything above passed, so the cluster never
   # gets a build ci failed. Pull requests skip it, and theirs have no
   # packages: write token to give it anyway.
   publish-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [go-libraries, server, lint, frontend, api-client, js-components, python, dev-tools, slop-review, e2e, harness-e2e]
+    needs: [go-libraries, server, lint, frontend, api-client, js-components, python, dev-tools, slop-review, e2e, harness-e2e, deployment-example]
     permissions:
       contents: read
       packages: write

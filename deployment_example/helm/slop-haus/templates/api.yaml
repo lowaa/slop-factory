@@ -1,0 +1,269 @@
+{{- $api := .Values.api }}
+{{- $secret := include "slop-haus.secretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "slop-haus.apiName" . }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ $api.replicas }}
+  strategy:
+    # The new pod must be ready before the old one stops, so something always
+    # answers. Its migrations run while the old pod still serves.
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "slop-haus.selectorLabels" (list . "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slop-haus.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        # Settings are read at startup only: roll the pods when they change.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with $api.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "slop-haus.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      # Service links would export variables like <SERVICE>_PORT into an env
+      # the api reads its configuration from.
+      enableServiceLinks: false
+      # preStop's 5s, then SIGTERM: the api ends its streams and gives requests
+      # in flight up to 15s, then flushes its logs (up to 5s).
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: {{ include "slop-haus.image" (list . "api") | quote }}
+          imagePullPolicy: {{ include "slop-haus.pullPolicy" . }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "slop-haus.apiName" . }}
+          env:
+            {{- include "slop-haus.secretEnv" (dict "root" . "name" "DATABASE_URL") | nindent 12 }}
+            {{- include "slop-haus.secretEnv" (dict "root" . "name" "APP_DB_PASSWORD") | nindent 12 }}
+            {{- include "slop-haus.secretEnv" (dict "root" . "name" "JWT_SECRET") | nindent 12 }}
+            {{- if eq $api.email.backend "smtp" }}
+            # Optional: a relay may take mail without credentials.
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: SMTP_PASS
+                  optional: true
+            {{- end }}
+            {{- if $api.github.clientId }}
+            {{- include "slop-haus.secretEnv" (dict "root" . "name" "GITHUB_CLIENT_SECRET") | nindent 12 }}
+            {{- end }}
+            {{- if $api.oidc.issuerUrl }}
+            {{- include "slop-haus.secretEnv" (dict "root" . "name" "OIDC_CLIENT_SECRET") | nindent 12 }}
+            {{- end }}
+            {{- if $api.credentials.enabled }}
+            {{- include "slop-haus.secretEnv" (dict "root" . "name" "CREDENTIAL_ENCRYPTION_KEY") | nindent 12 }}
+            # Only during a key rotation: opens what the old key sealed.
+            - name: CREDENTIAL_ENCRYPTION_KEY_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: CREDENTIAL_ENCRYPTION_KEY_PREVIOUS
+                  optional: true
+            {{- end }}
+            {{- if $api.intake.enabled }}
+            # Optional: without it, intake sources authenticate by bearer token.
+            - name: INTAKE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: INTAKE_KEY
+                  optional: true
+            {{- end }}
+            {{- with $api.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+            {{- if $api.webhook.enabled }}
+            - name: webhook
+              containerPort: 8081
+            {{- end }}
+            {{- if $api.intake.enabled }}
+            - name: intake
+              containerPort: 8082
+            {{- end }}
+            {{- if $api.metrics.enabled }}
+            - name: metrics
+              containerPort: 9090
+            {{- end }}
+          lifecycle:
+            # The pod leaves the Service's endpoints as it starts terminating,
+            # but kube-proxy and the frontend's nginx hear of it a moment
+            # later: wait before SIGTERM so new connections don't reach a
+            # server that has stopped accepting them.
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          # The listener opens only after migrations, which on an upgrade can
+          # take a while: the startup probe holds the others off until then.
+          # /api/version needs no database, so liveness never restarts a pod
+          # over a database outage; readiness (/healthz pings the database)
+          # takes it out of the Service instead.
+          startupProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            {{- toYaml $api.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $api.attachments.enabled }}
+            - name: attachments-credentials
+              mountPath: /var/run/secrets/attachments
+              readOnly: true
+            - name: attachment-tmp
+              mountPath: /var/run/attachment-tmp
+            {{- end }}
+            {{- with $api.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- if $api.attachments.enabled }}
+        # Read as a file so the keys are in no environment listing.
+        - name: attachments-credentials
+          secret:
+            secretName: {{ $secret }}
+            items:
+              - key: S3_CREDENTIALS
+                path: S3_CREDENTIALS
+        # Uploads (up to 100 MB each) spool here while they are checked.
+        - name: attachment-tmp
+          emptyDir:
+            sizeLimit: {{ $api.attachments.tmpSizeLimit }}
+        {{- end }}
+        {{- with $api.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "slop-haus.apiName" . }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    {{- include "slop-haus.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- if $api.webhook.enabled }}
+---
+# The GitHub webhook receiver alone, for an internet-facing door of its own.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "slop-haus.componentName" (list . "api-webhook") }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    {{- include "slop-haus.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: webhook
+      port: 8081
+      targetPort: webhook
+{{- end }}
+{{- if $api.intake.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "slop-haus.componentName" (list . "api-intake") }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    {{- include "slop-haus.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: intake
+      port: 8082
+      targetPort: intake
+{{- end }}
+{{- if $api.metrics.enabled }}
+---
+# No Ingress routes here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "slop-haus.componentName" (list . "api-metrics") }}
+  labels:
+    {{- include "slop-haus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    {{- include "slop-haus.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+{{- end }}
