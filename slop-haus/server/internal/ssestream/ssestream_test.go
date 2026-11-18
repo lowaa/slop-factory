@@ -273,3 +273,10 @@ func TestLoop_EndsOnClosedAndOnAFailedKeepalive(t *testing.T) {
 	r.fake.Advance(time.Second)
 	r.awaitEnd(t)
 }
+
+func TestIDWritesNoFieldForASequenceThatIsNotPositive(t *testing.T) {
+	assert.Equal(t, "", ssestream.ID(0))
+	assert.Equal(t, "", ssestream.ID(-1))
+	assert.Equal(t, "1", ssestream.ID(1))
+	assert.Equal(t, "9007199254740993", ssestream.ID(9007199254740993))
+}

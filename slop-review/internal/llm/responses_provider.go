@@ -349,7 +349,10 @@ func buildResponsesParams(req CompletionRequest, effort string) (*responses.Resp
 		case RoleUser:
 			input = append(input, responses.ResponseInputItemParamOfMessage(m.Content, responses.EasyInputMessageRoleUser))
 		case RoleTool:
-			input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(m.ToolCallID, m.Content))
+			// The helper takes only the output; the call it answers is set on the item.
+			item := responses.ResponseInputItemParamOfFunctionCallOutput(m.Content)
+			item.OfFunctionCallOutput.CallID = param.NewOpt(m.ToolCallID)
+			input = append(input, item)
 		case RoleAssistant:
 			items, err := assistantInput(m)
 			if err != nil {

@@ -191,7 +191,7 @@ func (s *BoardStream) Stream(ctx context.Context, input *BoardStreamRequest, sen
 				}
 				break
 			}
-			if err := send(sse.Message{ID: int(revision), Data: body}); err != nil {
+			if err := send(sse.Message{IDString: ssestream.ID(revision), Data: body}); err != nil {
 				return false, true
 			}
 			sent, known = revision, true

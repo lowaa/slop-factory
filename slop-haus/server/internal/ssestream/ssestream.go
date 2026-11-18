@@ -6,6 +6,7 @@ package ssestream
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -190,4 +191,15 @@ func (s *Stream) Loop(ctx context.Context, send sse.Sender, closed <-chan struct
 		case <-ticker.C():
 		}
 	}
+}
+
+// ID is an event's SSE `id:` field for a sequence number: empty, so no field
+// is written, for one that is not positive, as huma's deprecated
+// sse.Message.ID did. A client resumes from the last id it saw, and these
+// streams have never sent a zero one.
+func ID(seq int64) string {
+	if seq <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(seq, 10)
 }

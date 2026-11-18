@@ -255,7 +255,7 @@ func (h *Handler) sendEventsAfter(ctx context.Context, who *authn.User, auth *st
 			}
 		}
 		for i := range events {
-			if err := send(sse.Message{ID: int(events[i].Seq), Data: eventBody(&events[i])}); err != nil {
+			if err := send(sse.Message{IDString: ssestream.ID(events[i].Seq), Data: eventBody(&events[i])}); err != nil {
 				return sent, err
 			}
 			sent = events[i].Seq
