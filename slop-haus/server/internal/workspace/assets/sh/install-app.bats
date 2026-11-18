@@ -194,7 +194,7 @@ big_package() {
   local pkg
   pkg="$(big_package)"
   ln -s /etc "${pkg}/aaa-link"
-  tar -czf "${BATS_TEST_TMPDIR}/package.tar.gz" -C "${pkg}" aaa-link pyproject.toml $(cd "${pkg}" && ls | grep -v -e aaa-link -e pyproject.toml)
+  (cd "${pkg}" && tar -czf "${BATS_TEST_TMPDIR}/package.tar.gz" aaa-link pyproject.toml file-with-a-longish-name-*)
   install_app CURL_VERSION=bad001
   assert_failure
   assert_output --partial "something other than files and directories"
@@ -208,7 +208,7 @@ big_package() {
   mkdir -p "${BATS_TEST_TMPDIR}/outside"
   : > "${BATS_TEST_TMPDIR}/outside/escape"
   # -P keeps the ../: tar strips it from member names otherwise.
-  tar -czPf "${BATS_TEST_TMPDIR}/package.tar.gz" -C "${pkg}" ../outside/escape pyproject.toml $(cd "${pkg}" && ls | grep -v pyproject.toml)
+  (cd "${pkg}" && tar -czPf "${BATS_TEST_TMPDIR}/package.tar.gz" ../outside/escape pyproject.toml file-with-a-longish-name-*)
   install_app CURL_VERSION=bad002
   assert_failure
   assert_output --partial "names a path outside itself"
