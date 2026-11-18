@@ -20,7 +20,7 @@
   },
   "peerDependencies": {
     "typescript": "~6.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^5.1.0"
   },
   "devDependencies": {
     "@storybook/addon-a11y": "^10.6.5",
@@ -39,6 +39,6 @@
     "storybook": "^10.6.5",
     "typescript": "~6.0.2",
     "vite": "^8.3.5",
-    "vitest": "^4.1.10"
+    "vitest": "^5.1.0"
   }
 }
