@@ -61,7 +61,7 @@ printf '%s\n%s\n%s\n' "${SLOP_REVIEW_REPORT_URL:-}" "${SLOP_REVIEW_REPORT_TOKEN_
 case "${FAKE_MODE:-ok}" in
   fail) echo "slop-review: provider failed for $persona" >&2; exit 3 ;;
   garbage) echo "not json" ;;
-  block) echo "$persona" > "$FAKE_FIFO"; exec sleep 600 ;;
+  block) sleep 600 & echo "$persona" > "$FAKE_FIFO"; wait; exit 1 ;;
   *) printf '{"review": {"verdict": "request_changes", "findings": [{"file": "x"}]}, "report": {"run_id": "r-%s"}}\n' "$persona" ;;
 esac
 """
@@ -325,7 +325,7 @@ class ReviewerTest(unittest.TestCase):
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         (bin_dir / "git").write_text(
-            f'#!/bin/sh\nfor a in "$@"; do [ "$a" = clone ] && {{ echo clone > "{self.fifo}"; exec sleep 600; }}; done\nexec "{real}" "$@"\n'
+            f'#!/bin/sh\nfor a in "$@"; do [ "$a" = clone ] && {{ sleep 600 & echo clone > "{self.fifo}"; wait; exit 1; }}; done\nexec "{real}" "$@"\n'
         )
         (bin_dir / "git").chmod(0o755)
         with mock.patch.dict(os.environ, {"PATH": f"{bin_dir}:{os.environ['PATH']}"}):
