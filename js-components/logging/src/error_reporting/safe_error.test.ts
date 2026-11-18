@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { errorType, isBenignError, MESSAGE_WITHHELD, safeErrorMessage, safeErrorStack, safeStack } from "./safe_error";
+import {
+  errorType,
+  isBenignError,
+  isFrameLine,
+  MESSAGE_WITHHELD,
+  safeErrorMessage,
+  safeErrorStack,
+  safeStack,
+  withoutQueryOrFragment,
+} from "./safe_error";
 
 // A health value and a name, as a thrown message or a parse error would
 // carry them.
@@ -99,6 +108,80 @@ describe("safeStack", () => {
   it("is undefined when there are no frames", () => {
     expect(safeStack(`Error: ${SECRET}`)).toBeUndefined();
     expect(safeStack(undefined)).toBeUndefined();
+  });
+});
+
+describe("stack formats", () => {
+  it.each([
+    ["V8 function frame", "    at parse (https://app.example/a.js:1:2345)", true],
+    ["V8 location-only frame", "    at https://app.example/a.js:1:99", true],
+    ["V8 async frame without a location", "    at async Promise.all (index 0)", false],
+    ["V8 native frame", "    at <anonymous>", true],
+    ["V8 eval frame", "    at eval (eval at f (https://a/b.js:1:1), <anonymous>:1:1)", true],
+    ["Firefox frame", "parse@https://app.example/a.js:1:2345", true],
+    ["Firefox anonymous frame", "@https://app.example/a.js:3:4", true],
+    ["Safari native frame", "map@[native code]", false],
+    ["React component stack frame", "    at Button (https://app.example/a.js:10:5)", true],
+    ["React component stack name only", "    at Button", false],
+    ["a message line", "Hemoglobin 13.5 g/dL for Jane Doe", false],
+    ["V8 frame without leading whitespace", "at f (https://a/b.js:1:1)", false],
+    ["V8 frame with a carriage return", "    at f (https://a/b.js:1:1)\r", false],
+    ["a location with no column", "    at f (https://a/b.js:1)", false],
+    ["whitespace in a Firefox frame", "f @https://a/b.js:1:1", false],
+  ])("%s", (_name, line, expected) => {
+    expect(isFrameLine(line)).toBe(expected);
+  });
+
+  it("keeps a React component stack, which has no header", () => {
+    const out = safeStack("\n    at Button (https://a/b.js:10:5)\n    at div\n    at App (https://a/b.js:20:3)");
+    expect(out).toBe("    at Button (https://a/b.js:10:5)\n    at App (https://a/b.js:20:3)");
+  });
+});
+
+// Each of these line shapes made the regexes this replaced backtrack
+// quadratically (tens of seconds at this size). Vitest cannot interrupt a
+// synchronous match, so a regression shows as a slow run that times out.
+describe("worst-case lines", () => {
+  const N = 200_000;
+
+  it.each([
+    ["many @ and no location", `${"@".repeat(N)}!`],
+    ["many @ ahead of a location", `${"@".repeat(N)}:1:1x`],
+  ])("isFrameLine finishes on %s", (_name, line) => {
+    expect(isFrameLine(line)).toBe(false);
+  });
+
+  it("withoutQueryOrFragment finishes on many ? that a ) cuts off from the location", () => {
+    const line = `f@${"?".repeat(N)}):1:1`;
+    expect(withoutQueryOrFragment(line)).toBe(line);
+  });
+
+  it("safeStack skips a frame past the length cap, and frames past the line cap", () => {
+    const frame = "    at f (https://a/b.js:1:1)";
+    const tooLong = `    at g (https://a/${"x".repeat(N)}.js:1:1)`;
+    const stack = [tooLong, frame, ...Array.from({ length: N }, () => "noise"), frame].join("\n");
+    expect(safeStack(stack)).toBe(frame);
+  });
+});
+
+function frameOfLength(length: number): string {
+  const prefix = "    at f (";
+  const suffix = ":1:1)";
+  return `${prefix}${"x".repeat(length - prefix.length - suffix.length)}${suffix}`;
+}
+
+describe("input bounds", () => {
+  it("keeps a line of exactly the length cap and drops one character more", () => {
+    expect(safeStack(frameOfLength(2000))).toBeDefined();
+    expect(safeStack(frameOfLength(2001))).toBeUndefined();
+  });
+
+  it("reads exactly the line cap of lines", () => {
+    const keep = "    at keep (https://a/b.js:1:1)";
+    const late = "    at late (https://a/b.js:1:1)";
+    const noise = Array.from({ length: 498 }, () => "noise");
+    expect(safeStack([keep, ...noise, late].join("\n"))).toContain("late");
+    expect(safeStack([keep, ...noise, "noise", late].join("\n"))).not.toContain("late");
   });
 });
 
