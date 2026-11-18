@@ -96,6 +96,21 @@ func TestKeyring_AnAlteredBlobDoesNotOpen(t *testing.T) {
 	assert.ErrorIs(t, err, secretbox.ErrCannotOpen)
 }
 
+func TestKeyring_SealsUpToTheSizeBound(t *testing.T) {
+	ring := newRing(t, newKey(t), nil)
+	b := binding()
+
+	atBound := bytes.Repeat([]byte{'k'}, secretbox.MaxPlaintextSize)
+	blob, err := ring.Seal(atBound, b)
+	require.NoError(t, err)
+	got, err := ring.Open(blob, b)
+	require.NoError(t, err)
+	assert.Equal(t, atBound, got)
+
+	_, err = ring.Seal(append(atBound, 'k'), b)
+	assert.ErrorIs(t, err, secretbox.ErrTooLarge)
+}
+
 func TestKeyring_EverySealUsesAFreshNonce(t *testing.T) {
 	ring := newRing(t, newKey(t), nil)
 	b := binding()

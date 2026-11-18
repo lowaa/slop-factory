@@ -26,7 +26,22 @@ const (
 	keyIDSize   = 8
 	nonceSize   = 12
 	headerSize  = 1 + keyIDSize + nonceSize
+	// cipher.NewGCM's tag; a constant rather than Overhead() keeps the
+	// size bounds below static.
+	gcmTagSize = 16
 )
+
+// MaxPlaintextSize bounds what Seal takes. What is sealed is a credential:
+// a code host App private key or webhook secret -- kilobytes at most. A
+// mebibyte is far above any of them, and keeps the blob's size arithmetic
+// clear of int overflow by construction rather than by the caller's limits.
+const MaxPlaintextSize = 1 << 20
+
+// maxBlobSize is the largest blob Seal can make.
+const maxBlobSize = headerSize + MaxPlaintextSize + gcmTagSize
+
+// ErrTooLarge means a plaintext is over MaxPlaintextSize.
+var ErrTooLarge = fmt.Errorf("secretbox: plaintext is over %d bytes", MaxPlaintextSize)
 
 // ErrCannotOpen means a blob was not sealed by any key the keyring holds,
 // or has been altered, or belongs to another tenant or row. The cases are
@@ -119,7 +134,10 @@ func (k *Keyring) CurrentID() string { return hex.EncodeToString(k.current.id[:]
 // every time: a nonce reused under one key breaks GCM, and a credential is
 // sealed on every replace and verify.
 func (k *Keyring) Seal(plaintext []byte, b Binding) ([]byte, error) {
-	blob := make([]byte, headerSize, headerSize+len(plaintext)+k.current.aead.Overhead())
+	if len(plaintext) > MaxPlaintextSize {
+		return nil, ErrTooLarge
+	}
+	blob := make([]byte, headerSize, headerSize+len(plaintext)+gcmTagSize)
 	blob[0] = blobVersion
 	copy(blob[1:], k.current.id[:])
 	nonce := blob[1+keyIDSize : headerSize]
@@ -131,7 +149,7 @@ func (k *Keyring) Seal(plaintext []byte, b Binding) ([]byte, error) {
 
 // Open decrypts a blob Seal made for b.
 func (k *Keyring) Open(blob []byte, b Binding) ([]byte, error) {
-	if len(blob) < headerSize || blob[0] != blobVersion {
+	if len(blob) < headerSize || len(blob) > maxBlobSize || blob[0] != blobVersion {
 		return nil, ErrCannotOpen
 	}
 	entry := k.entryFor(blob[1 : 1+keyIDSize])
