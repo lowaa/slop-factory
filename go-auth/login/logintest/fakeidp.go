@@ -29,6 +29,7 @@ const keyID = "fakeidp-key"
 type Server struct {
 	*httptest.Server
 	clientID, clientSecret string
+	redirectURIs           []string
 	key                    *rsa.PrivateKey
 
 	mu            sync.Mutex
@@ -45,12 +46,17 @@ type grant struct {
 	user                          map[string]any
 }
 
-// New starts a fake IdP accepting one client, closed when t ends.
-func New(t testing.TB, clientID, clientSecret string) *Server {
+// New starts a fake IdP accepting one client, closed when t ends. As a real
+// IdP does, it redirects only to a redirect URI registered for the client,
+// matched exactly; a test that authorizes registers its callback here.
+func New(t testing.TB, clientID, clientSecret string, redirectURIs ...string) *Server {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	s := &Server{clientID: clientID, clientSecret: clientSecret, key: key, signKey: key, grants: map[string]*grant{}}
+	s := &Server{
+		clientID: clientID, clientSecret: clientSecret, redirectURIs: redirectURIs,
+		key: key, signKey: key, grants: map[string]*grant{},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.discovery)
 	mux.HandleFunc("GET /keys", s.jwks)
@@ -159,14 +165,19 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nonce is required", http.StatusBadRequest)
 		return
 	}
-	redirect, err := url.Parse(q.Get("redirect_uri"))
-	if err != nil || redirect.Host == "" {
-		http.Error(w, "bad redirect_uri", http.StatusBadRequest)
+	registered, ok := s.registeredRedirect(q.Get("redirect_uri"))
+	if !ok {
+		http.Error(w, "redirect_uri is not registered for this client", http.StatusBadRequest)
+		return
+	}
+	redirect, err := url.Parse(registered)
+	if err != nil {
+		http.Error(w, "bad registered redirect_uri", http.StatusInternalServerError)
 		return
 	}
 	code := randomString()
 	s.mu.Lock()
-	s.grants[code] = &grant{challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), redirectURI: redirect.String(), user: s.user}
+	s.grants[code] = &grant{challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), redirectURI: registered, user: s.user}
 	s.mu.Unlock()
 
 	back := redirect.Query()
@@ -174,6 +185,17 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	back.Set("state", q.Get("state"))
 	redirect.RawQuery = back.Encode()
 	http.Redirect(w, r, redirect.String(), http.StatusFound)
+}
+
+// registeredRedirect returns the registered string that uri names, so the
+// redirect is built from what the test registered, not from the request.
+func (s *Server) registeredRedirect(uri string) (string, bool) {
+	for _, r := range s.redirectURIs {
+		if r == uri {
+			return r, true
+		}
+	}
+	return "", false
 }
 
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
