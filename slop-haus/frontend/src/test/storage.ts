@@ -1,7 +1,7 @@
 import { onTestFinished, vi } from "vitest";
 
-// stubLocalStorage gives this test a working localStorage that starts empty:
-// this project's jsdom setup has none that works. Undone when the test ends.
+// stubLocalStorage gives this test its own localStorage that starts empty,
+// whatever earlier tests in the file left in jsdom's. Undone when the test ends.
 export function stubLocalStorage(): Storage {
   const data = new Map<string, string>();
   const storage = {
