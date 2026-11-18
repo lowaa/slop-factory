@@ -1,7 +1,8 @@
 version: 2
-# Each ecosystem gets one grouped pull request a week. The cooldown leaves a
-# new release two weeks to be pulled if it turns out to be bad or
-# compromised.
+# Each ecosystem gets one grouped pull request a week for patch and minor
+# updates; a major update comes as its own pull request, since each needs its
+# own migration and review. The cooldown leaves a new release two weeks to be
+# pulled if it turns out to be bad or compromised.
 updates:
   # The workflows pin every action to a commit SHA, so nothing else moves them.
   - package-ecosystem: github-actions
@@ -38,6 +39,7 @@ updates:
     groups:
       go:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   # The root lockfile resolves every npm workspace.
   - package-ecosystem: npm
@@ -49,3 +51,9 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # The types follow the Node the repo runs (22, in CI and the images);
+      # a newer major describes APIs that Node does not have.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
