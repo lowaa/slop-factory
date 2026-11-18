@@ -8,6 +8,7 @@ import os
 import select
 import subprocess
 import tempfile
+import time
 import unittest
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -342,8 +343,7 @@ class ReviewerTest(unittest.TestCase):
         handle = self.reviewer().start(self.job())
         self.assertEqual(PERSONA, self.next_started(handle))
         self.assertIsNone(handle.wait(0))
-        sleepers = self._sleepers()
-        self.assertEqual(1, len(sleepers))
+        sleepers = self._await_sleepers(1)
 
         handle.kill()
 
@@ -369,6 +369,17 @@ class ReviewerTest(unittest.TestCase):
             if ended is not None:
                 self.fail(f"the review ended before its run blocked: {ended}")
         return self._fifo.readline().strip()
+
+    def _await_sleepers(self, count: int) -> list[int]:
+        """The run's sleepers once there are `count`: the fake forks `sleep` before it signals, but the child is
+        still a copy of the shell until it execs, so it may not show yet. A deadline, not a fixed wait."""
+        deadline = time.monotonic() + 10
+        while True:
+            found = self._sleepers()
+            if len(found) >= count or time.monotonic() > deadline:
+                self.assertEqual(count, len(found), "the fake's sleeper never appeared")
+                return found
+            time.sleep(0.01)
 
     def _sleepers(self) -> list[int]:
         """This test's `sleep 600` processes, found through /proc: the image the tests run in has no pgrep."""

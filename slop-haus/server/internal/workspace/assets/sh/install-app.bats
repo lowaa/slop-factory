@@ -178,6 +178,43 @@ install_app() {
   assert_equal "$(cat "${APP}/src/slop_haus_supervisor/marker")" "v1"
 }
 
+# A listing far longer than a pipe's buffer, with the bad entry first: grep
+# has its answer at once, so a `tar | grep -q` check under pipefail sees tar
+# die of SIGPIPE and lets the package through. These hold whatever the timing.
+big_package() {
+  local pkg="${BATS_TEST_TMPDIR}/big" i
+  mkdir -p "${pkg}"
+  : > "${pkg}/pyproject.toml"
+  for ((i = 0; i < 3000; i++)); do : > "${pkg}/file-with-a-longish-name-${i}"; done
+  echo "${pkg}"
+}
+
+@test "an archive whose first entry is a link is refused however long its listing" {
+  install_app SLOP_HAUS_URL=
+  local pkg
+  pkg="$(big_package)"
+  ln -s /etc "${pkg}/aaa-link"
+  tar -czf "${BATS_TEST_TMPDIR}/package.tar.gz" -C "${pkg}" aaa-link pyproject.toml $(cd "${pkg}" && ls | grep -v -e aaa-link -e pyproject.toml)
+  install_app CURL_VERSION=bad001
+  assert_failure
+  assert_output --partial "something other than files and directories"
+  assert_equal "$(cat "${APP}/src/slop_haus_supervisor/marker")" "v1"
+}
+
+@test "an archive whose first entry leaves it is refused however long its listing" {
+  install_app SLOP_HAUS_URL=
+  local pkg
+  pkg="$(big_package)"
+  mkdir -p "${BATS_TEST_TMPDIR}/outside"
+  : > "${BATS_TEST_TMPDIR}/outside/escape"
+  # -P keeps the ../: tar strips it from member names otherwise.
+  tar -czPf "${BATS_TEST_TMPDIR}/package.tar.gz" -C "${pkg}" ../outside/escape pyproject.toml $(cd "${pkg}" && ls | grep -v pyproject.toml)
+  install_app CURL_VERSION=bad002
+  assert_failure
+  assert_output --partial "names a path outside itself"
+  assert_equal "$(cat "${APP}/src/slop_haus_supervisor/marker")" "v1"
+}
+
 @test "an archive naming a path outside itself is refused" {
   python3 - "${BATS_TEST_TMPDIR}/package.tar.gz" << 'PY'
 import io, sys, tarfile

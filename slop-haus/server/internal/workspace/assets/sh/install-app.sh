@@ -133,11 +133,20 @@ main() {
   # Files and directories only, and none outside the directory: the archive is the
   # server's, but what is written under .slop-haus runs with this workspace's
   # credentials in reach.
-  if tar -tzvf "$work/package.tar.gz" 2> /dev/null | grep -qv '^[-d]'; then
+  # Listed once, into a variable, before grep: under pipefail `tar | grep -q`
+  # reports a match as a failure whenever grep exits before tar has written
+  # the whole listing (tar dies of SIGPIPE), which let a package with a link
+  # or a ../ path through. A listing that fails is a refusal too.
+  local entries names
+  if ! entries=$(tar -tzvf "$work/package.tar.gz" 2> /dev/null) || ! names=$(tar -tzf "$work/package.tar.gz" 2> /dev/null); then
+    echo "slop-haus: the Remote Control host package is not a readable archive -- refusing to unpack it" >&2
+    return 1
+  fi
+  if grep -qv '^[-d]' <<< "$entries"; then
     echo "slop-haus: the Remote Control host package holds something other than files and directories -- refusing to unpack it" >&2
     return 1
   fi
-  if tar -tzf "$work/package.tar.gz" 2> /dev/null | grep -qE '(^/|(^|/)\.\.(/|$))'; then
+  if grep -qE '(^/|(^|/)\.\.(/|$))' <<< "$names"; then
     echo "slop-haus: the Remote Control host package names a path outside itself -- refusing to unpack it" >&2
     return 1
   fi

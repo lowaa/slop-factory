@@ -186,7 +186,7 @@ mv -f "$tmp" '.slop-haus/sync-repos.sh'
 mkdir -p '.slop-haus'
 tmp=$(mktemp '.slop-haus/install-app.sh.XXXXXX')
 cat > "$tmp" <<'SLOPHAUS_EOF'
-<<embedded .slop-haus/install-app.sh sha256=c86855b7a9de1330834c68a67537709569ac10b61a8f0de54a5909cf38691c7e>>
+<<embedded .slop-haus/install-app.sh sha256=576fa4647fa44b333e226538499b0d87e456dd5d54e3810ba53ddb09eeeed229>>
 SLOPHAUS_EOF
 chmod 755 "$tmp"
 mv -f "$tmp" '.slop-haus/install-app.sh'
@@ -683,7 +683,7 @@ fi
 mkdir -p '.slop-haus'
 tmp=$(mktemp '.slop-haus/bundle-hash.XXXXXX')
 cat > "$tmp" <<'SLOPHAUS_EOF'
-<<embedded .slop-haus/bundle-hash sha256=e76d88f3d135f7489b7fc9006e8e341aa2fcb28893ca481f5a1243fced320274>>
+<<embedded .slop-haus/bundle-hash sha256=b563d5643d94660ddaeda52f574b409f61a1974126e8c405ada44e7ad88d0f11>>
 SLOPHAUS_EOF
 chmod 644 "$tmp"
 mv -f "$tmp" '.slop-haus/bundle-hash'
