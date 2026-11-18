@@ -19,6 +19,7 @@ import (
 const (
 	testClientID     = "example-app"
 	testClientSecret = "client-secret"
+	testCallbackURL  = "http://127.0.0.1/auth/callback"
 )
 
 func newOIDCProvider(t *testing.T, idp *logintest.Server) *login.OIDCAuthProvider {
@@ -27,7 +28,7 @@ func newOIDCProvider(t *testing.T, idp *logintest.Server) *login.OIDCAuthProvide
 		IssuerURL:    idp.URL,
 		ClientID:     testClientID,
 		ClientSecret: testClientSecret,
-		CallbackURL:  "http://127.0.0.1/auth/callback",
+		CallbackURL:  testCallbackURL,
 		Name:         "dex",
 		DisplayName:  "Dex",
 		RetryMin:     5 * time.Millisecond,
@@ -38,7 +39,7 @@ func newOIDCProvider(t *testing.T, idp *logintest.Server) *login.OIDCAuthProvide
 // discovered is a fake IdP and a provider that has already discovered it.
 func discovered(t *testing.T) (*logintest.Server, *login.OIDCAuthProvider) {
 	t.Helper()
-	idp := logintest.New(t, testClientID, testClientSecret)
+	idp := logintest.New(t, testClientID, testClientSecret, testCallbackURL)
 	p := newOIDCProvider(t, idp)
 	require.NoError(t, p.Discover(context.Background()))
 	return idp, p
@@ -222,7 +223,7 @@ func TestOIDC_RejectsAnIDTokenWithAnEmptySubject(t *testing.T) {
 }
 
 func TestOIDC_UnavailableUntilDiscovered(t *testing.T) {
-	idp := logintest.New(t, testClientID, testClientSecret)
+	idp := logintest.New(t, testClientID, testClientSecret, testCallbackURL)
 	idp.SetDiscoveryDown(true)
 	p := newOIDCProvider(t, idp)
 
@@ -241,7 +242,7 @@ func TestOIDC_UnavailableUntilDiscovered(t *testing.T) {
 // Start keeps retrying in the background, so an IdP that comes up after
 // the server does becomes usable without a restart.
 func TestOIDC_StartRetriesUntilTheIssuerIsUp(t *testing.T) {
-	idp := logintest.New(t, testClientID, testClientSecret)
+	idp := logintest.New(t, testClientID, testClientSecret, testCallbackURL)
 	idp.SetDiscoveryDown(true)
 	p := newOIDCProvider(t, idp)
 	p.Start()
@@ -255,7 +256,7 @@ func TestOIDC_StartRetriesUntilTheIssuerIsUp(t *testing.T) {
 }
 
 func TestOIDC_CloseStopsRetrying(t *testing.T) {
-	idp := logintest.New(t, testClientID, testClientSecret)
+	idp := logintest.New(t, testClientID, testClientSecret, testCallbackURL)
 	idp.SetDiscoveryDown(true)
 	p := newOIDCProvider(t, idp)
 	p.Start()

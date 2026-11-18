@@ -1,3 +1,2 @@
 authn/rejected_guard.go G101
 authn/user.go G101
-login/logintest/fakeidp.go G710

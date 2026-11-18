@@ -17,7 +17,6 @@ internal/db/migrate.go G115
 internal/intake/credential.go G101
 internal/jobs/jobs.go G118
 internal/jobs/jobs.go G404
-internal/oauth/http.go G710
 internal/oauth/store.go G101
 internal/prune/rules.go G101
 internal/secretbox/keyring.go G115

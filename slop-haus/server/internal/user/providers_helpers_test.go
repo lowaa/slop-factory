@@ -44,10 +44,11 @@ const (
 // OIDCAuthProvider pointed at it, discovered and ready.
 func newFakeOIDC(t *testing.T) (*logintest.Server, testProvider) {
 	t.Helper()
-	idp := logintest.New(t, oidcClientID, oidcSecret)
+	callback := baseURL + user.CallbackPath(oidcName)
+	idp := logintest.New(t, oidcClientID, oidcSecret, callback)
 	p := gologin.NewOIDCAuthProvider(&gologin.OIDCOptions{
 		IssuerURL: idp.URL, ClientID: oidcClientID, ClientSecret: oidcSecret,
-		CallbackURL: baseURL + user.CallbackPath(oidcName),
+		CallbackURL: callback,
 		Name:        oidcName, DisplayName: "Dex",
 	}, slog.DiscardHandler)
 	require.NoError(t, p.Discover(t.Context()))

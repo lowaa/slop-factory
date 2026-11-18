@@ -100,6 +100,52 @@ func TestAuthorizeOverHTTP(t *testing.T) {
 	assert.Empty(t, rec.Header().Get("Location"), "never redirected to an unregistered URI")
 }
 
+// An error is only sent to a redirect URI the client registered, matched
+// exactly; anything else, however wrong the rest of the request, gets the
+// page and no redirect (RFC 6749 section 4.1.2.1).
+func TestAuthorizeErrorsNeverRedirectToAnUnverifiedURI(t *testing.T) {
+	f := newFixture(t)
+	c := f.client(t)
+	mux := f.mux()
+
+	for name, uri := range map[string]string{
+		"another loopback port": "http://localhost:1/callback",
+		"another host":          "https://evil.example/callback",
+		"other case":            "http://LOCALHOST:33418/callback",
+		"trailing slash":        redirect + "/",
+		"extra query":           redirect + "?next=https://evil.example",
+		"none":                  "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			// No PKCE challenge, so the request is invalid as well.
+			rec := serve(mux, httptest.NewRequest(http.MethodGet, authorizeURL(c.ID, uri, ""), nil))
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Empty(t, rec.Header().Get("Location"))
+			assert.Contains(t, rec.Body.String(), "did not come from a registered client")
+		})
+	}
+	t.Run("unknown client", func(t *testing.T) {
+		rec := serve(mux, httptest.NewRequest(http.MethodGet, authorizeURL("nope", redirect, ""), nil))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Empty(t, rec.Header().Get("Location"))
+	})
+}
+
+func TestAuthorizeErrorsRedirectToTheRegisteredURIWithState(t *testing.T) {
+	f := newFixture(t)
+	c := f.client(t)
+
+	q := url.Values{"response_type": {"token"}, "client_id": {c.ID}, "redirect_uri": {redirect}, "state": {"st-9"}}
+	rec := serve(f.mux(), httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+q.Encode(), nil))
+	require.Equal(t, http.StatusFound, rec.Code, rec.Body.String())
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	require.NoError(t, err)
+	assert.Equal(t, "unsupported_response_type", loc.Query().Get("error"))
+	assert.Equal(t, "st-9", loc.Query().Get("state"))
+	loc.RawQuery = ""
+	assert.Equal(t, redirect, loc.String(), "the registered URI, as registered")
+}
+
 func postForm(mux *http.ServeMux, path string, form url.Values) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
