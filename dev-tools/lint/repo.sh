@@ -19,6 +19,8 @@ export LC_ALL=C
 shopt -s inherit_errexit
 
 LINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=SCRIPTDIR/lib.sh
+. "${LINT_DIR}/lib.sh"
 REPO="$(cd "${LINT_DIR}/../.." && pwd)"
 BIN="${REPO}/node_modules/.bin"
 ALL_TOOLS=(knip jscpd)
@@ -60,8 +62,7 @@ report_knip() {
   # Its cache (a quarter of the time, warm) keys on each file's content, not
   # on its own config or the installed packages, so those name the cache.
   # CI starts with none, and so runs it cold.
-  # sha256sum is GNU's and only in newer macOS; shasum is on every Mac.
-  key="$(cat knip.jsonc package-lock.json | if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-16)"
+  key="$(cat knip.jsonc package-lock.json | hash16)"
   "${BIN}/knip" --no-progress --reporter json --cache --cache-location "node_modules/.cache/knip-${key}" || true
 }
 

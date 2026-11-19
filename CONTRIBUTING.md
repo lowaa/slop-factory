@@ -65,9 +65,10 @@ see `RunProcesses` in `slop-haus/supervisor/src/slop_haus_supervisor/harness/run
 
 ## Images
 
-Once ci passes on `main` (every job but the advisory `macos`), its last job pushes `ghcr.io/<owner>/slop-haus-api`
-and `ghcr.io/<owner>/slop-haus-frontend` as `sha-<12 hex>` and `main`; a `v*`
-tag pushes them as that tag (`.github/workflows/publish_images.yml`).
+Once ci passes on `main` (every job but the advisory `macos`), its last job
+pushes `ghcr.io/<owner>/slop-haus-api` and
+`ghcr.io/<owner>/slop-haus-frontend` as `sha-<12 hex>` and `main`; a `v*` tag
+pushes them as that tag (`.github/workflows/publish_images.yml`).
 `.github/workflows/prune_images.yml` trims old `sha-*` versions weekly and
 never touches `v*` or `main`; run it by hand for a dry run.
 

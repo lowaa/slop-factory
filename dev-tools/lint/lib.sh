@@ -18,6 +18,12 @@ normalise() {
   printf '%s\n' "${out}"
 }
 
+# hash16: the first 16 hex digits of stdin's SHA-256, for cache keys.
+# sha256sum is GNU's and only in newer macOS; shasum is on every Mac.
+hash16() {
+  if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-16
+}
+
 # install_dir TMP DIR: move the freshly built TMP to DIR unless another run
 # got there first, whose copy is the same and is kept. GNU `mv -T` refuses to
 # move into an existing DIR, but BSD mv has no -T and nests TMP inside it, so
