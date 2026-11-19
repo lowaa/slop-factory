@@ -6,7 +6,8 @@ name: publish-images
 # prune_images.yml keeps every v* and `main` and trims old sha-* tags, so a
 # new tag scheme here has to be mirrored in its exclude-tags.
 on:
-  # ci.yml's last job, once every other job has passed on a push to main.
+  # ci.yml's last job, once every other job but the advisory macos one has
+  # passed on a push to main.
   # Called rather than triggered by workflow_run, which would run with write
   # access on events a fork's pull request can also raise.
   workflow_call:

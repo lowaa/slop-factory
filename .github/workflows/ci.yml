@@ -219,17 +219,23 @@ jobs:
           - suite: slop-review
             run: slop-review/report/test.sh && slop-review/test.sh
           # The Go libraries whose tests need no database (go-db, go-privacy
-          # and go-settings run Postgres in Docker).
+          # and go-settings run Postgres in Docker). One runner for the five,
+          # each run whatever the one before did, so one red hides nothing.
           - suite: go-libraries
-            run: for lib in artifact-store go-auth go-clock go-llm-usage go-web; do "${lib}/test.sh"; done
+            run: >-
+              failed=();
+              for lib in artifact-store go-auth go-clock go-llm-usage go-web; do "${lib}/test.sh" || failed+=("${lib}"); done;
+              if ((${#failed[@]})); then echo "failed: ${failed[*]}"; exit 1; fi
           # dev-tools' own tests, less those that need Docker (shell.bats runs
-          # shellcheck and shfmt from images, reap_lib.bats real containers)
-          # and ts.bats (oxlint needs every workspace's npm ci).
+          # shellcheck and shfmt from images, reap_lib.bats real containers),
+          # ts.bats (oxlint needs every workspace's npm ci) and coverage.bats
+          # (Playwright's Chromium).
           - suite: dev-tools
             run: >-
               bats/run.sh dev-tools/lint/lib.bats dev-tools/lint/go.bats dev-tools/lint/ruff.bats
               dev-tools/lint/ratchet.bats dev-tools/lint/lint.bats dev-tools/shard
               dev-tools/reap/reap_label.bats dev-tools/reap/no_pid_names.bats
+              dev-tools/style-check/stylelint_ratchet/stylelint_ratchet.bats
     name: macos (${{ matrix.suite }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -246,7 +252,8 @@ jobs:
       - run: ${{ matrix.run }}
 
   # Images for main only once everything above passed, so the cluster never
-  # gets a build ci failed. Pull requests skip it, and theirs have no
+  # gets a build ci failed. Everything but macos, which is advisory: it
+  # catches what breaks a Mac developer, not what the images run. Pull requests skip it, and theirs have no
   # packages: write token to give it anyway.
   publish-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

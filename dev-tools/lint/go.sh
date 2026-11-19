@@ -75,7 +75,8 @@ fi
 # fetches it where the installed Go is older).
 build_tools() {
   local key dir tmp
-  key="$(cat "${LINT_DIR}/go.mod" "${LINT_DIR}/go.sum" | sha256sum | cut -c1-16)"
+  # sha256sum is GNU's and only in newer macOS; shasum is on every Mac.
+  key="$(cat "${LINT_DIR}/go.mod" "${LINT_DIR}/go.sum" | if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-16)"
   dir="${LINT_GO_BIN_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/slop-factory/lint-go-${key}}"
   if [[ ! -f "${dir}/.built" ]]; then
     mkdir -p "$(dirname "${dir}")"

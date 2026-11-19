@@ -60,7 +60,8 @@ report_knip() {
   # Its cache (a quarter of the time, warm) keys on each file's content, not
   # on its own config or the installed packages, so those name the cache.
   # CI starts with none, and so runs it cold.
-  key="$(cat knip.jsonc package-lock.json | sha256sum | cut -c1-16)"
+  # sha256sum is GNU's and only in newer macOS; shasum is on every Mac.
+  key="$(cat knip.jsonc package-lock.json | if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-16)"
   "${BIN}/knip" --no-progress --reporter json --cache --cache-location "node_modules/.cache/knip-${key}" || true
 }
 
