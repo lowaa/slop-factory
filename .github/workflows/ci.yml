@@ -201,6 +201,50 @@ jobs:
           persist-credentials: false
       - run: deployment_example/test.sh
 
+  # The host-side suites again on an Apple-silicon Mac: with only Linux above,
+  # a GNU-only flag or a /proc read passes here and breaks a Mac developer's
+  # run (CONTRIBUTING.md, macOS). GitHub's macOS runners have no Docker, so
+  # only what runs without it: the Docker suites stay Linux-only.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: supervisor
+            run: slop-haus/supervisor/test.sh
+          - suite: token
+            run: slop-haus/token/test.sh
+          - suite: slop-review
+            run: slop-review/report/test.sh && slop-review/test.sh
+          # The Go libraries whose tests need no database (go-db, go-privacy
+          # and go-settings run Postgres in Docker).
+          - suite: go-libraries
+            run: for lib in artifact-store go-auth go-clock go-llm-usage go-web; do "${lib}/test.sh"; done
+          # dev-tools' own tests, less those that need Docker (shell.bats runs
+          # shellcheck and shfmt from images, reap_lib.bats real containers)
+          # and ts.bats (oxlint needs every workspace's npm ci).
+          - suite: dev-tools
+            run: >-
+              bats/run.sh dev-tools/lint/lib.bats dev-tools/lint/go.bats dev-tools/lint/ruff.bats
+              dev-tools/lint/ratchet.bats dev-tools/lint/lint.bats dev-tools/shard
+              dev-tools/reap/reap_label.bats dev-tools/reap/no_pid_names.bats
+    name: macos (${{ matrix.suite }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+          uv: "true"
+          npm-ci: tools
+      # What a Mac developer installs too (CONTRIBUTING.md): /bin/bash is 3.2,
+      # and macOS has no flock, which the supervisor's and token's tests use.
+      - run: brew install bash flock
+      - run: ${{ matrix.run }}
+
   # Images for main only once everything above passed, so the cluster never
   # gets a build ci failed. Pull requests skip it, and theirs have no
   # packages: write token to give it anyway.

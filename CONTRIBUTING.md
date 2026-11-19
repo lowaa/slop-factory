@@ -49,10 +49,11 @@ stay on). What differs is the host:
   (`slop-haus/supervisor`, `slop-haus/token`, `slop-review`, the Go
   libraries' lint), as on Linux.
 
-The host-side scripts stick to what BSD and GNU tools share. CI only runs
-Linux, so a script change that reaches for a GNU-only flag (`find -printf`,
-`mv -T`, `stat -c`, `date -r FILE`, `realpath --relative-to`) passes there
-and breaks here.
+The host-side scripts stick to what BSD and GNU tools share: a GNU-only flag
+(`find -printf`, `mv -T`, `stat -c`, `date -r FILE`, `realpath
+--relative-to`) or a read of `/proc` breaks here. CI's `macos` job runs the
+suites that need no Docker on an Apple-silicon runner to catch that; the
+Docker suites run on Linux only.
 
 The supervisor runs on macOS, with one gap Linux does not have: macOS hides
 the environment of Apple's own binaries (`/bin/bash`, `/bin/sleep`, ...)
