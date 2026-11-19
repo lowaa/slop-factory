@@ -15,8 +15,6 @@
 # It always exits 0 once it has printed a block: a test failing on the base is
 # the good outcome, so this must never fail the pull request.
 set -euo pipefail
-# shellcheck source=SCRIPTDIR/../../dev-tools/require_bash.sh
-. "$(dirname "${BASH_SOURCE[0]}")/../../dev-tools/require_bash.sh"
 
 MODULE_DIR=slop-haus/server
 

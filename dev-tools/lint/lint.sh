@@ -110,6 +110,11 @@ done < "${REGISTRY}"
 relative_to_repo() {
   local p="$1" part root parent out=() parts
   [[ "${p}" == /* ]] || p="$(pwd -P)/${p}"
+  # An existing path resolves fully, links in its last part and before a ..
+  # included, as GNU's would; plain realpath does that on both.
+  if [[ -e "${p}" ]]; then
+    p="$(realpath "${p}")"
+  fi
   IFS=/ read -r -a parts <<< "${p}"
   for part in "${parts[@]}"; do
     case "${part}" in

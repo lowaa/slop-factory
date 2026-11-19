@@ -39,8 +39,9 @@ stay on). What differs is the host:
   The first run of each suite builds its images cold, so expect it to take
   several times longer than the next.
 - **bash 5**, first on `PATH`: `brew install bash`. macOS's `/bin/bash` is
-  3.2, and the host-side scripts stop with a message saying so
-  (`dev-tools/require_bash.sh`).
+  3.2: the lint runners, `bats/run.sh` and `slop-haus/server/test.sh` stop
+  with a message saying so (`dev-tools/require_bash.sh`); other scripts may
+  just fail.
 - Go, Node 22 and uv on the host for the suites that run outside Docker
   (`slop-haus/supervisor`, `slop-haus/token`, `slop-review`, the Go
   libraries' lint), as on Linux.

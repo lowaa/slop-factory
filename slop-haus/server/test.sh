@@ -24,6 +24,13 @@
 # github.com/lowaa/slop-factory/go-auth via go.work, not a tagged release (same reason
 # ../Dockerfile's build context is the repo root)..
 set -euo pipefail
+# Inline rather than dev-tools/require_bash.sh: test_sh.bats runs this in an
+# image without dev-tools/. bash 3.2 (macOS's /bin/bash) treats the empty
+# arrays below as unbound under set -u.
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "test.sh: needs bash >= 5 (this is ${BASH_VERSION}); on macOS \`brew install bash\` and make sure it is first on PATH" >&2
+  exit 1
+fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
