@@ -49,4 +49,14 @@ describe("ScopeOverlaps", () => {
     await screen.findByRole("heading", { name: /#12\b/ });
     expect(screen.queryByRole("region", { name: "Scope overlaps" })).toBeNull();
   });
+
+  it("says a real conflict blocks nothing when the tenant has scope locking off", async () => {
+    show({
+      scope_overlaps: [{ ticket_id: 6, title: "Real", status: "open", path: "db/", other: "db/x.go", locking_off: true }],
+    });
+
+    const region = await screen.findByRole("region", { name: "Scope overlaps" });
+    expect(region).toHaveTextContent("Scope locking is off for this tenant");
+    expect(region.querySelector("li")).toHaveTextContent("scope locking is off, blocks nothing");
+  });
 });

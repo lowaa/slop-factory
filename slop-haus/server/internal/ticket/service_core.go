@@ -101,6 +101,9 @@ type LeaseStore interface {
 	Peek(ctx context.Context, agentID uuid.UUID, only *int64) (*ClaimResult, error)
 	// QueueBlockage is Peek asked of every idle agent: see QueueBlockage.
 	QueueBlockage(ctx context.Context) (*QueueBlockage, error)
+	// ScopeLocking is whether overlapping scopes block, for readers outside a
+	// claim; a claim reads it in its own transaction.
+	ScopeLocking(ctx context.Context) (bool, error)
 	Heartbeat(ctx context.Context, agentID uuid.UUID, ttl time.Duration) error
 	ServerStore
 	// RecentRevocation is the context for an agent that holds nothing

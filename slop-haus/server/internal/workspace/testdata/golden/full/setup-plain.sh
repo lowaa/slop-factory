@@ -5101,7 +5101,8 @@ cat > "$tmp" <<'SLOPHAUS_EOF'
 # slop-haus agent: builder-1
 
 You are one of several agents working on separate checkouts of this repo.
-slop-haus hands out the work and keeps you from colliding with each other.
+slop-haus hands out the work and, where the tenant locks path scopes, keeps you
+from colliding with each other.
 
 This session is a headless run, started by the supervisor for one ticket. You
 work that ticket yourself, with no human at a terminal. Where a repo's CLAUDE.md
@@ -5217,9 +5218,11 @@ Try the techniques above first. If none of them gives parts that are each safe o
 - Never start work you have not been granted a ticket for -- another agent
   may already hold those files.
 - Stay inside your ticket's path scopes. If you need more, call
-  `ticket_scope_extend`. A denial is normal and means another agent
-  holds those paths: narrow your approach, or release the ticket with a
-  comment explaining why.
+  `ticket_scope_extend`. Where the tenant locks path scopes, a denial is
+  normal and means another agent holds those paths: narrow your approach, or
+  release the ticket with a comment explaining why. Where it does not, nothing
+  is denied: an overlap with another ticket comes back as a notice, and you
+  will meet the clash when you merge the base branch.
 - slop-haus refuses any write whose text looks like a credential (a token, an
   API key, a private key, a `password=` value), naming the kind and recording
   the attempt. Remove the value and write without it; never retry the same text.
@@ -5563,7 +5566,8 @@ This directory is slop-haus's, not a repo's. Each repo is a subfolder:
 # slop-haus agent: builder-1
 
 You are one of several agents working on separate checkouts of this repo.
-slop-haus hands out the work and keeps you from colliding with each other.
+slop-haus hands out the work and, where the tenant locks path scopes, keeps you
+from colliding with each other.
 
 This session is a headless run, started by the supervisor for one ticket. You
 work that ticket yourself, with no human at a terminal. Where a repo's CLAUDE.md
@@ -5679,9 +5683,11 @@ Try the techniques above first. If none of them gives parts that are each safe o
 - Never start work you have not been granted a ticket for -- another agent
   may already hold those files.
 - Stay inside your ticket's path scopes. If you need more, call
-  `ticket_scope_extend`. A denial is normal and means another agent
-  holds those paths: narrow your approach, or release the ticket with a
-  comment explaining why.
+  `ticket_scope_extend`. Where the tenant locks path scopes, a denial is
+  normal and means another agent holds those paths: narrow your approach, or
+  release the ticket with a comment explaining why. Where it does not, nothing
+  is denied: an overlap with another ticket comes back as a notice, and you
+  will meet the clash when you merge the base branch.
 - slop-haus refuses any write whose text looks like a credential (a token, an
   API key, a private key, a `password=` value), naming the kind and recording
   the attempt. Remove the value and write without it; never retry the same text.
@@ -5912,7 +5918,7 @@ fi
 mkdir -p '.slop-haus'
 tmp=$(mktemp '.slop-haus/bundle-hash.XXXXXX')
 cat > "$tmp" <<'SLOPHAUS_EOF'
-d8ac74fa1bcfedde
+155975c189957abe
 SLOPHAUS_EOF
 chmod 644 "$tmp"
 mv -f "$tmp" '.slop-haus/bundle-hash'

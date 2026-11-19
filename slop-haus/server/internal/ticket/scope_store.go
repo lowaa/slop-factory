@@ -38,6 +38,10 @@ func (s *PostgresStore) ExtendScope(ctx context.Context, agentID uuid.UUID, path
 			return err
 		}
 		others := heldByOthers(held, ticketID)
+		locking, err := scopeLocking(ctx, q)
+		if err != nil {
+			return err
+		}
 
 		if check != nil {
 			if err := check(heldBy(held, ticketID)); err != nil {
@@ -46,12 +50,13 @@ func (s *PostgresStore) ExtendScope(ctx context.Context, agentID uuid.UUID, path
 		}
 
 		for _, p := range paths {
-			blocked, sharedOverlaps := scanConflicts(ticketID, []string{p.Path}, others, shared)
-			if blocked != nil {
-				result.Denied = blocked
-				return recordExtensionDenied(ctx, q, agentID, ticketID, p.Path, blocked)
+			scan := scanConflicts(ticketID, []string{p.Path}, others, shared, locking)
+			if scan.Blocked != nil {
+				result.Denied = scan.Blocked
+				return recordExtensionDenied(ctx, q, agentID, ticketID, p.Path, scan.Blocked)
 			}
-			result.SharedOverlaps = append(result.SharedOverlaps, sharedOverlaps...)
+			result.SharedOverlaps = append(result.SharedOverlaps, scan.Shared...)
+			result.LockingOffOverlaps = append(result.LockingOffOverlaps, scan.LockingOff...)
 		}
 
 		for _, p := range paths {

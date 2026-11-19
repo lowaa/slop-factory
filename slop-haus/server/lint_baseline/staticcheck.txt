@@ -14,7 +14,6 @@ internal/landing/writers_test.go SA1019
 internal/manifest/manifest_test.go ST1018
 internal/onboarding/handler.go S1016
 internal/pendingaction/handler.go S1016
-internal/pendingaction/handler.go S1016
 internal/pendingaction/steward_draft.go S1016
 internal/reports/lock_holds_handler.go S1016
 internal/reports/scope_cost_handler.go S1016
@@ -27,7 +26,6 @@ internal/ticket/lease_handler.go S1016
 internal/ticket/replay_batch.go S1016
 internal/ticket/replay_batch.go S1016
 internal/ticket/update_serialized_test.go ST1008
-internal/ticket/wire.go S1016
 internal/usagemetrics/ui_handler.go S1016
 internal/user/handler.go S1016
 internal/user/signin_handler.go S1016

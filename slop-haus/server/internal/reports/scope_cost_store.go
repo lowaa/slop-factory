@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/db"
+	"github.com/lowaa/slop-factory/slop-haus/server/internal/settings"
 )
 
 const (
@@ -59,6 +60,12 @@ SELECT l.acquired_at,
 func (s *PostgresStore) ScopeCostRows(ctx context.Context, from, to time.Time) (*ScopeCostInput, error) {
 	in := &ScopeCostInput{From: from, To: to}
 	err := s.readTx(ctx, func(q db.Querier) error {
+		locking, err := settings.EnabledIn(ctx, q, settings.TicketScopeLocking)
+		if err != nil {
+			return fmt.Errorf("reports: scope locking: %w", err)
+		}
+		in.LockingOff = !locking
+
 		rows, err := q.Query(ctx, queryScopeBlocks, from, to)
 		if err != nil {
 			return fmt.Errorf("reports: scope blocks: %w", err)

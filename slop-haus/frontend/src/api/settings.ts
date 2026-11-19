@@ -4,7 +4,7 @@ import {
 } from "./client";
 import type {
   NamedIntegrationLock,
-  QueueBlockage,
+  QueueBlockageState,
   ServerSettingHistory,
   Setting,
   TenantSettingHistory,
@@ -36,9 +36,11 @@ export const settingsApi = {
     );
   },
 
-  // null when nothing is waiting on scopes.
-  async getQueueBlockage(): Promise<QueueBlockage | null> {
-    return (await unwrap(client.GET("/api/queue/blockage"))).blockage;
+  // blockage is null when nothing is waiting on scopes; lockingOff says that
+  // is because the tenant has turned scope locking off.
+  async getQueueBlockage(): Promise<QueueBlockageState> {
+    const body = await unwrap(client.GET("/api/queue/blockage"));
+    return { blockage: body.blockage, lockingOff: body.locking_off };
   },
 
   async listMySettings(): Promise<UserSetting[]> {

@@ -69,6 +69,27 @@ export const TENANT_SETTING_LABELS: Record<string, SettingLabel> = {
       "Lets each machine's supervisor bring its agents' repo checkouts in line with the workspace manifest. Off by default; nothing on a machine changes while off.",
     ownerOnly: true,
   },
+  ticket_scope_locking: {
+    label: "Lock overlapping ticket scopes",
+    description:
+      "On, an agent can't claim or extend into a path another ticket holds, including one in review. Off, overlapping tickets run in parallel and the overlap is only reported; clashes are met when the base branch is merged. On by default.",
+    ownerOnly: true,
+    confirm: {
+      on: {
+        lead: "Scopes will lock again: new claims and extensions are refused while another ticket holds an overlapping path, and tickets in review hold their files again.",
+        action: "Turn on",
+      },
+      off: {
+        lead: "Turn off scope locking?",
+        consequences: [
+          "Nothing stops: running agents keep their tickets.",
+          "Agents can claim tickets whose paths overlap, and a ticket in review stops holding its files.",
+          "Overlaps are only reported, so agents may produce conflicting changes that surface at merge.",
+        ],
+        action: "Turn off",
+      },
+    },
+  },
   "integration_lock.dead_holder_after": {
     label: "Flag a silent integration-lock holder after",
     description:

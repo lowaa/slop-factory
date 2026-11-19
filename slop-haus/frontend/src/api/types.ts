@@ -70,6 +70,10 @@ export type IntegrationLock = Schemas["IntegrationLockStateResponseBody"];
 // QueueBlockage is the queue waiting on path scopes held elsewhere: work
 // idle agents could take, each ticket of it colliding with a held scope.
 export type QueueBlockage = Schemas["QueueBlockageBody"];
+export interface QueueBlockageState {
+  blockage: QueueBlockage | null;
+  lockingOff: boolean;
+}
 export type NamedIntegrationLock = Schemas["NamedLockBody"];
 
 // Lease is the ticket an agent currently holds, if any.

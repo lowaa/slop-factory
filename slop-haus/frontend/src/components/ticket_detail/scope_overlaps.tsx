@@ -13,19 +13,21 @@ interface ScopeOverlapsProps {
 export default function ScopeOverlaps({ ticket }: ScopeOverlapsProps) {
   const overlaps = ticket.scope_overlaps ?? [];
   if (overlaps.length === 0) return null;
+  const lockingOff = overlaps.some((o) => o.locking_off);
   return (
     <section className="ticket-detail__scope-overlaps" aria-label="Scope overlaps">
       <h2>Scope overlaps</h2>
       <p className="ticket-detail__hint">
-        These live tickets cover paths this ticket also covers, so they can't be claimed in parallel, unless an
-        overlap is marked shared. Narrower paths (leaf directories or files) avoid that; a real conflict is fine.
+        {lockingOff
+          ? "These live tickets cover paths this ticket also covers. Scope locking is off for this tenant, so none of them blocks a claim; expect to merge their changes."
+          : "These live tickets cover paths this ticket also covers, so they can't be claimed in parallel, unless an overlap is marked shared. Narrower paths (leaf directories or files) avoid that; a real conflict is fine."}
       </p>
       <ul className="ticket-detail__depends">
         {overlaps.map((o) => (
           <li key={o.ticket_id}>
             <span>
               #{o.ticket_id} {o.title} ({o.status}): {o.path} overlaps {o.other}
-              <SharedOverlapTag resolve={o.resolve} />
+              <SharedOverlapTag resolve={o.resolve} lockingOff={o.locking_off} />
             </span>
           </li>
         ))}

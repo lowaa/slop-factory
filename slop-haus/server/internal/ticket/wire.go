@@ -18,18 +18,19 @@ type PathBody struct {
 // it is reported on. Path is that ticket's own scope, Other the live
 // ticket's.
 type ScopeOverlapBody struct {
-	TicketID int64  `json:"ticket_id"`
-	Title    string `json:"title"`
-	Status   Status `json:"status"`
-	Path     string `json:"path"`
-	Other    string `json:"other"`
-	Resolve  string `json:"resolve,omitempty" enum:"migration,regenerate,merge" doc:"set when the overlap lies inside a shared path of the workspace: it blocks nothing, and this says how a clash there is settled when the base branch is merged"`
+	TicketID   int64  `json:"ticket_id"`
+	Title      string `json:"title"`
+	Status     Status `json:"status"`
+	Path       string `json:"path"`
+	Other      string `json:"other"`
+	LockingOff bool   `json:"locking_off,omitempty" doc:"set when the tenant has scope locking off: this overlap would have blocked a claim, and now blocks nothing"`
+	Resolve    string `json:"resolve,omitempty" enum:"migration,regenerate,merge" doc:"set when the overlap lies inside a shared path of the workspace: it blocks nothing, and this says how a clash there is settled when the base branch is merged"`
 }
 
 func overlapsToBody(overlaps []ScopeOverlap) []ScopeOverlapBody {
 	out := make([]ScopeOverlapBody, len(overlaps))
 	for i, o := range overlaps {
-		out[i] = ScopeOverlapBody{TicketID: o.TicketID, Title: o.Title, Status: o.Status, Path: o.Path, Other: o.Other, Resolve: o.Resolve}
+		out[i] = ScopeOverlapBody{TicketID: o.TicketID, Title: o.Title, Status: o.Status, Path: o.Path, Other: o.Other, Resolve: o.Resolve, LockingOff: o.LockingOff}
 	}
 	return out
 }

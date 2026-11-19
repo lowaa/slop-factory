@@ -89,3 +89,21 @@ func TestWorkspaceReconcileSetting_OffByDefaultAndOwnerOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, on)
 }
+
+func TestTicketScopeLockingSetting_OnByDefaultAndOwnerOnly(t *testing.T) {
+	ctx := db.WithTenant(context.Background(), uuid.New())
+	svc := stewardService(newFakeStore(), &fakeOwners{owner: true})
+
+	on, err := svc.ScopeLockingEnabled(ctx)
+	require.NoError(t, err)
+	assert.True(t, on, "existing and new tenants keep blocking on overlap")
+
+	_, err = stewardService(newFakeStore(), &fakeOwners{owner: false}).Set(ctx, settings.TicketScopeLocking, settings.BoolValue(false), actor)
+	assert.ErrorIs(t, err, settings.ErrNotOwner)
+
+	_, err = svc.Set(ctx, settings.TicketScopeLocking, settings.BoolValue(false), actor)
+	require.NoError(t, err)
+	on, err = svc.ScopeLockingEnabled(ctx)
+	require.NoError(t, err)
+	assert.False(t, on)
+}

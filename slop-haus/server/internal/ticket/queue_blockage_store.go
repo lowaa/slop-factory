@@ -52,6 +52,10 @@ func (s *PostgresStore) QueueBlockage(ctx context.Context) (*QueueBlockage, erro
 		if err != nil {
 			return err
 		}
+		locking, err := scopeLocking(ctx, q)
+		if err != nil {
+			return err
+		}
 		rows, err := q.Query(ctx, `
 			SELECT a.id FROM agents a
 			 WHERE a.disabled_at IS NULL AND a.kind = 'worker'
@@ -76,7 +80,7 @@ func (s *PostgresStore) QueueBlockage(ctx context.Context) (*QueueBlockage, erro
 				if err != nil {
 					return err
 				}
-				blocked := firstConflict(candidateID, paths, held, shared)
+				blocked := firstConflict(candidateID, paths, held, shared, locking)
 				if blocked == nil {
 					return nil
 				}

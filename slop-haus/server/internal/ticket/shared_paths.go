@@ -22,6 +22,20 @@ func (s *PostgresStore) sharedPaths(ctx context.Context) (*scope.SharedPaths, er
 	return scope.NewSharedPaths(pl.All), nil
 }
 
+// LockingOffNotice tells a worker granted a scope about the overlaps a tenant
+// with scope locking off let through, or "" when there are none.
+func LockingOffNotice(overlaps []LockingOffOverlap) string {
+	if len(overlaps) == 0 {
+		return ""
+	}
+	lines := make([]string, len(overlaps))
+	for i, o := range overlaps {
+		lines[i] = fmt.Sprintf("  - %s, also held by #%d", o.Path, o.TicketID)
+	}
+	return "SCOPE LOCKING IS OFF: these overlap scopes other tickets hold, and nothing blocked you. " +
+		"Expect to meet the clash when you merge the base branch:\n" + strings.Join(lines, "\n")
+}
+
 // SharedOverlapNotice tells a worker granted a scope about the overlaps that
 // did not block it, or "" when there are none.
 func SharedOverlapNotice(overlaps []SharedOverlap) string {

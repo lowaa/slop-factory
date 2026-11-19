@@ -765,6 +765,9 @@
               "id": {
                 "type": "integer"
               },
+              "locking_off": {
+                "type": "boolean"
+              },
               "other": {
                 "type": "string"
               },
@@ -1400,6 +1403,28 @@
         "human_message": {
           "type": "string"
         },
+        "locking_off_overlaps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "ticket_id": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ticket_id",
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
         "message": {
           "type": "string"
         },
@@ -1667,6 +1692,28 @@
         },
         "human_message": {
           "type": "string"
+        },
+        "locking_off_overlaps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "ticket_id": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ticket_id",
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
         },
         "notice": {
           "type": "string"

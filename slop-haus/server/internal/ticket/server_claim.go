@@ -196,9 +196,13 @@ func (s *PostgresStore) serverClaim(ctx context.Context, serverAgent uuid.UUID, 
 		if err != nil {
 			return err
 		}
-		blocked, overlaps := scanConflicts(ticketID, paths, held, shared)
-		if blocked != nil {
-			result.Blocked = blocked
+		locking, err := scopeLocking(ctx, q)
+		if err != nil {
+			return err
+		}
+		scan := scanConflicts(ticketID, paths, held, shared, locking)
+		if scan.Blocked != nil {
+			result.Blocked = scan.Blocked
 			return nil
 		}
 
@@ -219,7 +223,7 @@ func (s *PostgresStore) serverClaim(ctx context.Context, serverAgent uuid.UUID, 
 				return fmt.Errorf("keep who is owed %s: %w", ref, err)
 			}
 		}
-		result.Ticket, result.Attempt, result.SharedOverlaps = granted, ref, overlaps
+		result.Ticket, result.Attempt, result.SharedOverlaps, result.LockingOffOverlaps = granted, ref, scan.Shared, scan.LockingOff
 		return endScopeBlocksOf(ctx, q, ticketID, scopeBlockClaimed)
 	})
 	if err != nil {

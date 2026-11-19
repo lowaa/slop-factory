@@ -6,6 +6,11 @@ import (
 	"slices"
 )
 
+// ScopeLocking is whether the tenant's overlapping scopes block.
+func (s *Service) ScopeLocking(ctx context.Context) (bool, error) {
+	return s.store.ScopeLocking(ctx)
+}
+
 // QueueBlockage reports whether the queue is waiting on path scopes held
 // elsewhere, for the board to say so. Read-only, and not gated by the
 // processing switch for the same reason Peek is not: it reports the true

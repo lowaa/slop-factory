@@ -80,6 +80,10 @@ func (s *fakeLeaseStore) QueueBlockage(context.Context) (*ticket.QueueBlockage, 
 	return nil, errFakeLeaseStore
 }
 
+func (s *fakeLeaseStore) ScopeLocking(context.Context) (bool, error) {
+	return true, nil
+}
+
 func (s *fakeLeaseStore) ExtendScope(context.Context, uuid.UUID, []model.Path, func([]string) error) (*ticket.ExtendResult, error) {
 	return nil, errFakeLeaseStore
 }

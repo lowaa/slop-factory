@@ -81,6 +81,7 @@ export function makeScopeCostReport(overrides: Partial<ScopeCostReport> = {}): S
     paths: [],
     denials: { total: 0, granted: 0, narrowed: 0, gave_up: 0, open: 0, median_seconds_to_resolve: null, paths: [] },
     narrowings: 0,
+    locking_off: false,
     ...overrides,
   };
 }

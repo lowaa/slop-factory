@@ -5,9 +5,9 @@
 // Service holds every rule. The REST handlers here, and the MCP tools and
 // hook endpoints that land in later stages, are all thin callers of it --
 // a rule reimplemented slightly differently in one transport is how the
-// "two agents can't hold overlapping paths" guarantee stops being a
-// property of the system and becomes a property of whichever door the
-// agent came through.
+// "two agents can't hold overlapping paths" guarantee (the default; a tenant
+// can turn scope locking off) stops being a property of the system and
+// becomes a property of whichever door the agent came through.
 package ticket
 
 import (

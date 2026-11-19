@@ -150,6 +150,10 @@ func NewBatchSelectorFrom(policies BatchPolicySource, files ChangedFiles) *Batch
 // serial landing. A candidate that touches a solo file, that is in no single
 // app or whose files cannot be read is left for a batch of its own; the head
 // whose files cannot be read is an error, because nothing is known to be safe.
+//
+// It does not rely on ticket scopes being disjoint: with a tenant's scope
+// locking off, members may overlap, and BatchBuilder finds the clash when it
+// merges them, handing the member back with a conflict like any other.
 func (s *BatchSelector) Select(ctx context.Context, cands []Candidate, size int) ([]Candidate, error) {
 	if len(cands) == 0 {
 		return nil, nil
