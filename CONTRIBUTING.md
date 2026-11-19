@@ -42,6 +42,9 @@ stay on). What differs is the host:
   3.2: the lint runners, `bats/run.sh` and `slop-haus/server/test.sh` stop
   with a message saying so (`dev-tools/require_bash.sh`); other scripts may
   just fail.
+- **flock**: `brew install flock`. macOS has no `flock(1)`; the
+  supervisor's tests and the workspace scripts a supervisor host runs
+  (`update.sh` among them) call it.
 - Go, Node 22 and uv on the host for the suites that run outside Docker
   (`slop-haus/supervisor`, `slop-haus/token`, `slop-review`, the Go
   libraries' lint), as on Linux.

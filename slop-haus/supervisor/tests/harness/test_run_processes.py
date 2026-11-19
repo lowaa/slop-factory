@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import subprocess
@@ -121,6 +122,21 @@ class RealProcessesTest(unittest.TestCase):
             if hasattr(module, name):
                 self.addCleanup(setattr, module, name, getattr(module, name))
                 delattr(module, name)
+        self._find_and_kill_a_background_command()
+
+    def test_where_the_kernel_will_not_open_a_pidfd_it_still_kills(self) -> None:
+        def refused(*_args: object) -> int:
+            raise OSError(errno.ENOSYS, "pidfd_open")
+
+        def unreachable(*_args: object) -> None:
+            raise AssertionError("signalled through a pidfd that was never opened")
+
+        for module, name, stand_in in ((os, "pidfd_open", refused), (signal, "pidfd_send_signal", unreachable)):
+            if hasattr(module, name):
+                self.addCleanup(setattr, module, name, getattr(module, name))
+            else:
+                self.addCleanup(delattr, module, name)
+            setattr(module, name, stand_in)
         self._find_and_kill_a_background_command()
 
     def _find_and_kill_a_background_command(self) -> None:

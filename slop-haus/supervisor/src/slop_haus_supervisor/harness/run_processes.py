@@ -118,7 +118,9 @@ class RunProcesses:
 
     def _send(self, pid: int, sig: int) -> bool:
         if _has_pidfd():
-            return self._send_by_pidfd(pid, sig)
+            sent = self._send_by_pidfd(pid, sig)
+            if sent is not None:
+                return sent
         try:
             if not self.carries(pid):
                 return False
@@ -127,13 +129,18 @@ class RunProcesses:
         except (ProcessLookupError, PermissionError):
             return False
 
-    def _send_by_pidfd(self, pid: int, sig: int) -> bool:
+    def _send_by_pidfd(self, pid: int, sig: int) -> bool | None:
+        """Whether sig was sent, or None where this host will not open a pidfd at all."""
         if sys.platform != "linux":  # for pyright: pidfd_open and pidfd_send_signal exist only there
-            return False
+            return None
         try:
             pidfd = os.pidfd_open(pid)
-        except OSError:
+        except ProcessLookupError:
             return False
+        except OSError:
+            # ENOSYS before Linux 5.3, EPERM under a seccomp profile that blocks it. Giving up here would leave every
+            # process of the run alive, and the check-then-kill path still works.
+            return None
         try:
             if not self.carries(pid):
                 return False
