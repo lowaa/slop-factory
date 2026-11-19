@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# Helpers the runners share (go.sh, ruff.sh, shell.sh). Sourced, not run.
+# Helpers the runners share (go.sh, repo.sh, ruff.sh, shell.sh). Sourced, not run.
 
 # normalise SED_EXPR: rewrite each line of a tool's output with the pattern,
 # failing if a line does not match it, so a change in the tool's format
@@ -16,6 +16,12 @@ normalise() {
     return 1
   fi
   printf '%s\n' "${out}"
+}
+
+# hash16: the first 16 hex digits of stdin's SHA-256, for cache keys.
+# sha256sum is GNU's and only in newer macOS; shasum is on every Mac.
+hash16() {
+  if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-16
 }
 
 # install_dir TMP DIR: move the freshly built TMP to DIR unless another run

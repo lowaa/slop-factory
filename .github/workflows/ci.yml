@@ -201,8 +201,70 @@ jobs:
           persist-credentials: false
       - run: deployment_example/test.sh
 
-  # Images for main only once everything above passed, so the cluster never
-  # gets a build ci failed. Pull requests skip it, and theirs have no
+  # The host-side suites again on an Apple-silicon Mac: with only Linux above,
+  # a GNU-only flag or a /proc read passes here and breaks a Mac developer's
+  # run (CONTRIBUTING.md, macOS). GitHub's macOS runners have no Docker, so
+  # only what runs without it: the Docker suites stay Linux-only.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: supervisor
+            uv: "true"
+            run: slop-haus/supervisor/test.sh
+          - suite: token
+            uv: "true"
+            run: slop-haus/token/test.sh
+          - suite: slop-review
+            go: "true"
+            npm-ci: tools
+            run: slop-review/report/test.sh && slop-review/test.sh
+          # The Go libraries whose tests need no database (go-db, go-privacy
+          # and go-settings run Postgres in Docker). One runner for the five,
+          # each run whatever the one before did, so one red hides nothing.
+          - suite: go-libraries
+            go: "true"
+            run: >-
+              failed=();
+              for lib in artifact-store go-auth go-clock go-llm-usage go-web; do "${lib}/test.sh" || failed+=("${lib}"); done;
+              if ((${#failed[@]})); then echo "failed: ${failed[*]}"; exit 1; fi
+          # dev-tools' own tests, found rather than listed so a new one runs
+          # here too, less those that need Docker (shell.bats runs shellcheck
+          # and shfmt from images, reap_lib.bats real containers), ts.bats
+          # (oxlint needs every workspace's npm ci) and coverage.bats
+          # (Playwright's Chromium).
+          - suite: dev-tools
+            go: "true"
+            uv: "true"
+            npm-ci: tools
+            # An empty list fails rather than passing with no tests run.
+            run: >-
+              find dev-tools -name '*.bats'
+              ! -name shell.bats ! -name reap_lib.bats ! -name ts.bats ! -name coverage.bats
+              | sort > "${RUNNER_TEMP}/bats_files"
+              && test -s "${RUNNER_TEMP}/bats_files"
+              && tr '\n' '\0' < "${RUNNER_TEMP}/bats_files" | xargs -0 bats/run.sh
+    name: macos (${{ matrix.suite }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go: ${{ matrix.go || 'false' }}
+          uv: ${{ matrix.uv || 'false' }}
+          npm-ci: ${{ matrix.npm-ci || 'none' }}
+      # What a Mac developer installs too (CONTRIBUTING.md): /bin/bash is 3.2,
+      # and macOS has no flock, which the supervisor's and token's tests use.
+      - run: brew install bash flock
+      - run: ${{ matrix.run }}
+
+  # Images for main only once every job above but macos has passed, so the
+  # cluster never gets a build ci failed. macos is advisory: it catches what
+  # breaks a Mac developer, not what the images run. Pull requests skip it, and theirs have no
   # packages: write token to give it anyway.
   publish-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

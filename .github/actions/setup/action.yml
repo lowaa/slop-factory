@@ -1,5 +1,5 @@
 name: setup
-description: Toolchains the test.sh entrypoints expect on the host. Docker is already on the runner.
+description: Toolchains the test.sh entrypoints expect on the host. Docker is already on the Linux runners (the macOS ones have none).
 inputs:
   go:
     description: Install Go (the version slop-haus/server/go.mod names)

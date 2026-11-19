@@ -49,10 +49,11 @@ stay on). What differs is the host:
   (`slop-haus/supervisor`, `slop-haus/token`, `slop-review`, the Go
   libraries' lint), as on Linux.
 
-The host-side scripts stick to what BSD and GNU tools share. CI only runs
-Linux, so a script change that reaches for a GNU-only flag (`find -printf`,
-`mv -T`, `stat -c`, `date -r FILE`, `realpath --relative-to`) passes there
-and breaks here.
+The host-side scripts stick to what BSD and GNU tools share: a GNU-only flag
+(`find -printf`, `mv -T`, `stat -c`, `date -r FILE`, `realpath
+--relative-to`) or a read of `/proc` breaks here. CI's `macos` job runs the
+host-side suites listed in `ci.yml` on an Apple-silicon runner to catch that;
+the Docker suites run on Linux only.
 
 The supervisor runs on macOS, with one gap Linux does not have: macOS hides
 the environment of Apple's own binaries (`/bin/bash`, `/bin/sleep`, ...)
@@ -64,9 +65,10 @@ see `RunProcesses` in `slop-haus/supervisor/src/slop_haus_supervisor/harness/run
 
 ## Images
 
-Once ci passes on `main`, its last job pushes `ghcr.io/<owner>/slop-haus-api`
-and `ghcr.io/<owner>/slop-haus-frontend` as `sha-<12 hex>` and `main`; a `v*`
-tag pushes them as that tag (`.github/workflows/publish_images.yml`).
+Once ci passes on `main` (every job but the advisory `macos`), its last job
+pushes `ghcr.io/<owner>/slop-haus-api` and
+`ghcr.io/<owner>/slop-haus-frontend` as `sha-<12 hex>` and `main`; a `v*` tag
+pushes them as that tag (`.github/workflows/publish_images.yml`).
 `.github/workflows/prune_images.yml` trims old `sha-*` versions weekly and
 never touches `v*` or `main`; run it by hand for a dry run.
 
