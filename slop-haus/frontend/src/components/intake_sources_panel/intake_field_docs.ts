@@ -97,6 +97,6 @@ export const FIELD_DOCS: Record<FieldKey, FieldDoc> = {
     label: "Paths",
     hint: "Comma separated repo paths, e.g. server/internal/.",
     tooltip:
-      "Path scopes set on every ticket this source files. They keep two agents out of the same files, as a ticket's scopes do anywhere else. Leave empty for none.",
+      "Path scopes set on every ticket this source files. Where the tenant locks path scopes, they keep two agents out of the same files, as a ticket's scopes do anywhere else. Leave empty for none.",
   },
 };

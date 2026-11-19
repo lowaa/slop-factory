@@ -3,7 +3,6 @@ package pendingaction_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/lowaa/slop-factory/slop-haus/server/internal/settings"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/db"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/db/dbtest"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/pendingaction"
+	"github.com/lowaa/slop-factory/slop-haus/server/internal/settings"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/ticket"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/ticket/model"
 )

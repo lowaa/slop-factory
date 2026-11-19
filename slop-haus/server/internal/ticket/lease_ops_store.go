@@ -53,7 +53,7 @@ func (s *PostgresStore) withHeldLease(ctx context.Context, agentID uuid.UUID, fn
 // claim path: an agent's request can be in flight while Claim expires that
 // same lease and re-opens the ticket for someone else. A blind extend would
 // resurrect a lease the server has already given away, and two agents would
-// hold overlapping paths -- the one failure this whole design exists to
+// hold the same ticket -- the one failure this whole design exists to
 // prevent.
 //
 // Zero rows updated is a meaningful result, not a no-op: the agent's ticket

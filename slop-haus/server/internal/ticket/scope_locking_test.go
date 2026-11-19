@@ -235,7 +235,8 @@ func TestScopeLockingOff_ATogglePendingBehindAClaimDoesNotChangeItsDecision(t *t
 	require.Eventually(t, func() bool {
 		var queued int
 		err := f.database.QueryRow(f.ctx,
-			`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&queued)
+			`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			   AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&queued)
 		return err == nil && queued > 0
 	}, 10*time.Second, 10*time.Millisecond, "the toggle never queued on the claim lock")
 	select {
