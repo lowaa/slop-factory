@@ -44,8 +44,8 @@ func (*githubHookModule) Close() {}
 // service sealed.
 type appWebhookSecrets struct{ keyring *secretbox.Keyring }
 
-func (a appWebhookSecrets) Open(tenant, credential uuid.UUID, sealed []byte) (string, error) {
-	secret, err := githubapp.OpenWebhookSecret(a.keyring, tenant, credential, sealed)
+func (a appWebhookSecrets) Open(tenant, app uuid.UUID, sealed []byte) (string, error) {
+	secret, err := githubapp.OpenWebhookSecret(a.keyring, tenant, app, sealed)
 	if err != nil {
 		return "", err
 	}

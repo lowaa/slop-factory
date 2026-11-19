@@ -53,10 +53,14 @@ func (f *fixture) connectApp(keyring *secretbox.Keyring, tenant *tenantFixture, 
 	sealed, err := keyring.Seal([]byte(secret), secretbox.Binding{Tenant: tenant.id, Row: id, Purpose: webhookPurpose})
 	require.NoError(f.t, err)
 	_, err = f.database.Exec(tenant.ctx, `
-		INSERT INTO codehost_credentials (id, provider, app_id, installation_id, private_key_enc, key_id, key_fingerprint,
-		                                  webhook_secret_enc, webhook_secret_key_id)
-		VALUES ($1, 'github_app', 1, $2, '\x00', $3, $4, $5, $3)`,
-		id, installation, keyring.CurrentID(), strings.Repeat("f", 64), sealed)
+		INSERT INTO codehost_apps (id, provider, app_id, private_key_enc, key_id, key_fingerprint,
+		                           webhook_secret_enc, webhook_secret_key_id)
+		VALUES ($1, 'github_app', 1, '\x00', $2, $3, $4, $2)`,
+		id, keyring.CurrentID(), strings.Repeat("f", 64), sealed)
+	require.NoError(f.t, err)
+	_, err = f.database.Exec(tenant.ctx, `
+		INSERT INTO codehost_credentials (id, app_ref, installation_id, binding) VALUES (gen_random_uuid(), $1, $2, 'github.com')`,
+		id, installation)
 	require.NoError(f.t, err)
 }
 
@@ -219,7 +223,7 @@ func TestReceiveApp_ARemovedCredentialStopsDeliveries(t *testing.T) {
 	f := newFixture(t)
 	keyring := f.useApp()
 	f.connectApp(keyring, f.a, appInstallation, "app-secret")
-	_, err := f.database.Exec(f.a.ctx, `DELETE FROM codehost_credentials`)
+	_, err := f.database.Exec(f.a.ctx, `DELETE FROM codehost_apps`)
 	require.NoError(t, err)
 
 	rec := f.deliverApp(appDelivery{event: "ping", signWith: "app-secret", body: withInstallation(`{}`, appInstallation)})

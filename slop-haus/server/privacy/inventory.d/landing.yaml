@@ -10,6 +10,8 @@
     categories: [work_record]
   - name: batches
     categories: [work_record]
+  - name: codehost_apps
+    categories: [code_host_credential]
   - name: codehost_credentials
     categories: [code_host_credential]
   - name: codehost_setup_states

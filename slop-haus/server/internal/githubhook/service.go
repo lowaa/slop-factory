@@ -203,7 +203,7 @@ func (s *Service) ReceiveApp(ctx context.Context, in *Incoming) (*Receipt, error
 func (s *Service) signedBy(ctx context.Context, candidates []AppInstallation, in *Incoming) (uuid.UUID, bool) {
 	for i := range candidates {
 		c := &candidates[i]
-		secret, err := s.cfg.AppSecrets.Open(c.Tenant, c.CredentialID, c.SecretEnc)
+		secret, err := s.cfg.AppSecrets.Open(c.Tenant, c.AppID, c.SecretEnc)
 		if err != nil {
 			s.logger.ErrorContext(ctx, "cannot open a GitHub App webhook secret", "tenant", c.Tenant, "err", err)
 			continue

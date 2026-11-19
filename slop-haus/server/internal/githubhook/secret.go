@@ -8,5 +8,5 @@ import "github.com/google/uuid"
 // holds: the signature is checked before anything is trusted, but not before
 // that one global read.
 type AppSecrets interface {
-	Open(tenant, credential uuid.UUID, sealed []byte) (secret string, err error)
+	Open(tenant, app uuid.UUID, sealed []byte) (secret string, err error)
 }

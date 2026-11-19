@@ -32,11 +32,11 @@ func newWebhookSecret() (*WebhookSecret, error) {
 
 func (s *WebhookSecret) Reveal() string { return s.value }
 
-// OpenWebhookSecret opens a sealed webhook secret copied out of a credential
-// row, for the receiver that checks the App's deliveries. The tenant and the
-// credential's id are what it was sealed for.
-func OpenWebhookSecret(keyring *secretbox.Keyring, tenant, credential uuid.UUID, blob []byte) (*WebhookSecret, error) {
-	plain, err := keyring.Open(blob, secretbox.Binding{Tenant: tenant, Row: credential, Purpose: webhookSecretPurpose})
+// OpenWebhookSecret opens a sealed webhook secret copied out of an App row, for
+// the receiver that checks the App's deliveries. The tenant and the App's id
+// are what it was sealed for.
+func OpenWebhookSecret(keyring *secretbox.Keyring, tenant, app uuid.UUID, blob []byte) (*WebhookSecret, error) {
+	plain, err := keyring.Open(blob, secretbox.Binding{Tenant: tenant, Row: app, Purpose: webhookSecretPurpose})
 	if err != nil {
 		return nil, err
 	}

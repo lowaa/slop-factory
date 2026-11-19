@@ -250,12 +250,15 @@ data_categories:
     legal_basis: TODO-LEGAL
     stores:
       - kind: table
+        name: codehost_apps
+      - kind: table
         name: codehost_credentials
+        note: one installation of an App plus the binding saying which repos it serves
       - kind: table
         name: codehost_setup_states
       - kind: table
         name: global_github_app_installations
-        note: the lookup from an installation id to its tenant, with a copy of the sealed webhook secret, kept in step with the credential by a trigger
+        note: the lookup from an installation id to its tenant, with a copy of the sealed webhook secret of its App, kept in step with the credentials and Apps by triggers
     retention: work_record
 
   - id: client_addresses

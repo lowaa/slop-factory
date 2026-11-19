@@ -192,7 +192,7 @@ func TestTheGitHubURLIsServerConfigurationNotAnythingARequestCanSet(t *testing.T
 	// And nothing of the kind is stored or answered.
 	var cols []string
 	rows, err := f.owners.Global().Query(t.Context(),
-		`SELECT column_name FROM information_schema.columns WHERE table_name = 'codehost_credentials'`)
+		`SELECT column_name FROM information_schema.columns WHERE table_name = 'codehost_apps'`)
 	require.NoError(t, err)
 	defer rows.Close()
 	for rows.Next() {
@@ -267,7 +267,7 @@ func TestHandler_KnownVerifyFailuresAreNotServerErrors(t *testing.T) {
 			blob, err := f.keyring.Seal([]byte("not a pem"), secretbox.Binding{Tenant: a.id, Row: rec.ID})
 			require.NoError(t, err)
 			_, err = f.owners.Global().Exec(context.Background(),
-				`UPDATE codehost_credentials SET private_key_enc = $1 WHERE id = $2`, blob, rec.ID)
+				`UPDATE codehost_apps SET private_key_enc = $1 WHERE id = $2`, blob, rec.ID)
 			require.NoError(t, err)
 		}, http.StatusConflict, "connect the GitHub App again"},
 		"credential replaced mid-verify": {func(f *fixture, a *tenant) {

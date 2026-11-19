@@ -3,18 +3,42 @@ package seeddata
 import (
 	"crypto/sha256"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+// seededCredentialID is the same every round: the table has no one-per-tenant
+// key to replace the last round's row by, and a binding is unique per tenant.
+func seededCredentialID(tenant uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(tenant, []byte("codehost credential"))
+}
 
 func init() {
 	register(Registry{
-		"codehost_credentials": tenantSeeder(func(s *seed) error {
-			s.upsert("codehost_credentials", "(tenant_id)", map[string]any{
-				"tenant_id": s.tenant, "id": s.tenant.String(), "provider": "github_app", "app_id": 1, "installation_id": 2,
+		// Before the codehost_apps migration this table held the App too.
+		"codehost_apps": tenantSeeder(func(s *seed) error {
+			s.upsert("codehost_apps", "(tenant_id, id)", map[string]any{
+				"tenant_id": s.tenant, "id": s.tenant.String(), "provider": "github_app", "app_id": 1,
 				"private_key_enc": []byte("not a real blob"), "key_id": "0123456789abcdef", "key_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				"created_by": s.lastFor(s.tenant, "global_users").get("id"), "updated_at": s.at(0),
 			})
 			return nil
 		}),
+		"codehost_credentials": tenantSeederAfter(func(s *seed) error {
+			if s.cols["codehost_apps"] == nil {
+				s.upsert("codehost_credentials", "(tenant_id)", map[string]any{
+					"tenant_id": s.tenant, "id": s.tenant.String(), "provider": "github_app", "app_id": 1, "installation_id": 2,
+					"private_key_enc": []byte("not a real blob"), "key_id": "0123456789abcdef", "key_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"created_by": s.lastFor(s.tenant, "global_users").get("id"), "updated_at": s.at(0),
+				})
+				return nil
+			}
+			s.upsert("codehost_credentials", "(tenant_id, binding)", map[string]any{
+				"tenant_id": s.tenant, "id": seededCredentialID(s.tenant), "app_ref": s.tenant.String(), "installation_id": 2,
+				"binding": "github.com", "updated_at": s.at(0),
+			})
+			return nil
+		}, "global_users"),
 		"codehost_setup_states": tenantSeederAfter(func(s *seed) error {
 			hash := sha256.Sum256([]byte(s.tag("state")))
 			s.insert("codehost_setup_states", map[string]any{

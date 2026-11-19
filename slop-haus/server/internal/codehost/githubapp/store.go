@@ -14,9 +14,11 @@ import (
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/tenantstate"
 )
 
-// Record is a tenant's stored credential. PrivateKeyEnc is the sealed key:
-// the one field that is secret, and the only one nothing but Service reads.
+// Record is a tenant's App as the single-credential Service sees it, joined
+// with the App's credential. PrivateKeyEnc is the sealed key: the one field
+// that is secret, and the only one nothing but Service reads.
 type Record struct {
+	// ID is the App's, which its sealed key and webhook secret are bound to.
 	ID    uuid.UUID
 	AppID int64
 	// InstallationID is 0 while the App is created but not installed (or the
@@ -45,10 +47,16 @@ type Record struct {
 // Pending is a credential whose App has no installation yet.
 func (r *Record) Pending() bool { return r.InstallationID == 0 }
 
-// Store keeps the tenant's credential, one row. Every call runs in the
+// Store keeps the tenant's Apps and their credentials. Every call runs in the
 // context's tenant, which row level security enforces.
+//
+// The methods below are the single-credential view the current Service is
+// written against: the tenant's App joined with its first credential, and
+// Record.ID is the App's id (what its sealed key and webhook secret are bound
+// to). The App and credential methods of AppStore are what replaces them.
 type Store interface {
 	SetupStates
+	AppStore
 
 	// Get returns an error wrapping codehost.ErrNotConnected for no row.
 	Get(ctx context.Context) (*Record, error)
@@ -108,9 +116,14 @@ func NewPostgresStore(database *db.DB) *PostgresStore { return &PostgresStore{db
 
 var _ Store = (*PostgresStore)(nil)
 
-const recordColumns = `id, app_id, coalesce(installation_id, 0), coalesce(app_slug, ''), private_key_enc, key_id,
-	key_fingerprint, created_by, created_at, updated_at, verified_at,
-	webhook_secret_enc, coalesce(webhook_secret_key_id, ''), coalesce(webhook_url, ''), webhook_applied_at`
+// recordSelect reads the tenant's first App with its first credential, the
+// one the single-credential Service sees.
+const recordSelect = `
+	SELECT a.id, a.app_id, coalesce(c.installation_id, 0), coalesce(a.app_slug, ''), a.private_key_enc, a.key_id,
+	       a.key_fingerprint, a.created_by, a.created_at, a.updated_at, a.verified_at,
+	       a.webhook_secret_enc, coalesce(a.webhook_secret_key_id, ''), coalesce(a.webhook_url, ''), a.webhook_applied_at
+	  FROM codehost_apps a
+	  LEFT JOIN codehost_credentials c ON c.tenant_id = a.tenant_id AND c.app_ref = a.id`
 
 func scanRecord(row pgx.Row) (*Record, error) {
 	var r Record
@@ -121,7 +134,11 @@ func scanRecord(row pgx.Row) (*Record, error) {
 }
 
 func (s *PostgresStore) Get(ctx context.Context) (*Record, error) {
-	r, err := scanRecord(s.q(ctx).QueryRow(ctx, `SELECT `+recordColumns+` FROM codehost_credentials`))
+	return s.getRecord(ctx, s.q(ctx), "")
+}
+
+func (s *PostgresStore) getRecord(ctx context.Context, q db.Querier, where string, args ...any) (*Record, error) {
+	r, err := scanRecord(q.QueryRow(ctx, recordSelect+where+` ORDER BY a.created_at, a.id, c.created_at, c.id LIMIT 1`, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, codehost.ErrNotConnected
 	}
@@ -131,70 +148,104 @@ func (s *PostgresStore) Get(ctx context.Context) (*Record, error) {
 	return r, nil
 }
 
-// Put replaces the row whole, id included: the sealed key is bound to the
-// id, so a replace is a new row in everything but its place.
+// inTx runs fn in the webhook lock's transaction when ctx came from it, else
+// in a transaction of its own.
+func (s *PostgresStore) inTx(ctx context.Context, fn func(q db.Querier) error) error {
+	if q, ok := ctx.Value(lockedTxKey{}).(db.Querier); ok {
+		return fn(q)
+	}
+	return s.db.InTx(ctx, fn)
+}
+
+// Put replaces the tenant's Apps whole, id included: the sealed key is bound
+// to the id, so a replace is a new App in everything but its place. The one
+// credential it leaves is bound to the host-wide 'github.com', as a migrated
+// one is.
 func (s *PostgresStore) Put(ctx context.Context, rec *Record) (*Record, error) {
-	r, err := scanRecord(s.q(ctx).QueryRow(ctx, `
-		INSERT INTO codehost_credentials
-		    (id, provider, app_id, installation_id, app_slug, private_key_enc, key_id, key_fingerprint, created_by)
-		VALUES ($1, 'github_app', $2, nullif($3::bigint, 0), nullif($4, ''), $5, $6, $7, $8)
-		ON CONFLICT (tenant_id) DO UPDATE
-		   SET id = EXCLUDED.id, app_id = EXCLUDED.app_id, installation_id = EXCLUDED.installation_id,
-		       app_slug = EXCLUDED.app_slug,
-		       private_key_enc = EXCLUDED.private_key_enc, key_id = EXCLUDED.key_id,
-		       key_fingerprint = EXCLUDED.key_fingerprint, created_by = EXCLUDED.created_by,
-		       updated_at = now(), verified_at = NULL,
-		       webhook_secret_enc = NULL, webhook_secret_key_id = NULL, webhook_url = NULL, webhook_applied_at = NULL
-		RETURNING `+recordColumns,
-		rec.ID, rec.AppID, rec.InstallationID, rec.AppSlug, rec.PrivateKeyEnc, rec.KeyID, rec.Fingerprint, rec.CreatedBy))
+	var out *Record
+	err := s.inTx(ctx, func(q db.Querier) error {
+		if _, err := q.Exec(ctx, `DELETE FROM codehost_apps`); err != nil {
+			return err
+		}
+		if _, err := q.Exec(ctx, `
+			INSERT INTO codehost_apps (id, provider, app_id, app_slug, private_key_enc, key_id, key_fingerprint, created_by)
+			VALUES ($1, 'github_app', $2, nullif($3, ''), $4, $5, $6, $7)`,
+			rec.ID, rec.AppID, rec.AppSlug, rec.PrivateKeyEnc, rec.KeyID, rec.Fingerprint, rec.CreatedBy); err != nil {
+			return err
+		}
+		if _, err := q.Exec(ctx, `
+			INSERT INTO codehost_credentials (id, app_ref, installation_id, binding)
+			VALUES (gen_random_uuid(), $1, nullif($2::bigint, 0), $3)`, rec.ID, rec.InstallationID, HostWideBinding); err != nil {
+			return err
+		}
+		var err error
+		out, err = s.getRecord(ctx, q, ` WHERE a.id = $1`, rec.ID)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("githubapp: put credential: %w", err)
 	}
-	return r, nil
+	return out, nil
 }
 
 // SetInstallation records the installation a pending credential waits for,
-// only if the row is still the credential id (a replace in between changes
-// its id) and still pending. It bumps updated_at, which versions the
-// credential's meaning, and clears verified_at.
+// only if the App is still id (a replace in between changes its id) and
+// still pending. It bumps updated_at, which versions the credential's
+// meaning, and clears verified_at.
 func (s *PostgresStore) SetInstallation(ctx context.Context, id uuid.UUID, installationID int64) (*Record, error) {
-	r, err := scanRecord(s.q(ctx).QueryRow(ctx, `
-		UPDATE codehost_credentials SET installation_id = $2, updated_at = now(), verified_at = NULL
-		 WHERE id = $1 AND installation_id IS NULL
-		RETURNING `+recordColumns, id, installationID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrCredentialChanged
+	var out *Record
+	err := s.inTx(ctx, func(q db.Querier) error {
+		tag, err := q.Exec(ctx, `
+			UPDATE codehost_credentials SET installation_id = $2, updated_at = now()
+			 WHERE app_ref = $1 AND installation_id IS NULL`, id, installationID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrCredentialChanged
+		}
+		if _, err := q.Exec(ctx, `UPDATE codehost_apps SET updated_at = now(), verified_at = NULL WHERE id = $1`, id); err != nil {
+			return err
+		}
+		out, err = s.getRecord(ctx, q, ` WHERE a.id = $1`, id)
+		return err
+	})
+	if errors.Is(err, ErrCredentialChanged) {
+		return nil, err
 	}
 	if err != nil {
-		return nil, fmt.Errorf("githubapp: set installation: %w", err)
+		return nil, fmt.Errorf("githubapp: set installation: %w", mapStoreError(err))
 	}
-	return r, nil
+	return out, nil
 }
 
 // Reseal leaves updated_at alone: it versions the credential's meaning,
 // which a re-encryption does not change, and cached tokens are keyed by it.
 func (s *PostgresStore) Reseal(ctx context.Context, id uuid.UUID, blob []byte, keyID string) (bool, error) {
 	tag, err := s.q(ctx).Exec(ctx,
-		`UPDATE codehost_credentials SET private_key_enc = $2, key_id = $3 WHERE id = $1`, id, blob, keyID)
+		`UPDATE codehost_apps SET private_key_enc = $2, key_id = $3 WHERE id = $1`, id, blob, keyID)
 	if err != nil {
 		return false, fmt.Errorf("githubapp: reseal credential: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
 }
 
+// WithWebhookLock is per tenant, a superset of per App: a tenant's Apps queue
+// behind one another, which a few GitHub calls each can afford.
 func (s *PostgresStore) WithWebhookLock(ctx context.Context, fn func(ctx context.Context) error) error {
 	return s.db.InTx(ctx, func(q db.Querier) error {
 		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_tenant()::text || '/github-app-webhook', 0))`); err != nil {
 			return fmt.Errorf("githubapp: lock webhook: %w", err)
 		}
 		// Held after the tenant's own, in that order only, so two tenants
-		// sharing an installation queue here without deadlocking. Row level
-		// security shows this tenant's credential alone, so a tenant takes at
-		// most its own installation's key, never two. The first to finish has
-		// stored its secret by the time the second looks.
+		// sharing an installation queue here without deadlocking, and in
+		// installation order so two tenants sharing several do not either.
+		// Row level security shows this tenant's credentials alone. The first
+		// to finish has stored its secret by the time the second looks.
 		if _, err := q.Exec(ctx, `
 			SELECT pg_advisory_xact_lock(hashtextextended('github-app-installation/' || installation_id::text, 0))
-			  FROM codehost_credentials WHERE installation_id IS NOT NULL`); err != nil {
+			  FROM (SELECT DISTINCT installation_id FROM codehost_credentials
+			         WHERE installation_id IS NOT NULL ORDER BY installation_id) held`); err != nil {
 			return fmt.Errorf("githubapp: lock installation: %w", err)
 		}
 		return fn(context.WithValue(ctx, lockedTxKey{}, q))
@@ -207,7 +258,7 @@ func (s *PostgresStore) InstallationHeldByOther(ctx context.Context) (bool, erro
 		SELECT EXISTS (
 		    SELECT 1 FROM global_github_app_installations g
 		     WHERE g.tenant <> current_tenant()
-		       AND g.installation_id = (SELECT installation_id FROM codehost_credentials))`).Scan(&held)
+		       AND g.installation_id IN (SELECT installation_id FROM codehost_credentials))`).Scan(&held)
 	if err != nil {
 		return false, fmt.Errorf("githubapp: check installation: %w", err)
 	}
@@ -220,7 +271,7 @@ func (s *PostgresStore) Tenants(ctx context.Context) ([]uuid.UUID, error) {
 
 func (s *PostgresStore) SetWebhook(ctx context.Context, id uuid.UUID, secretEnc []byte, keyID, url string) (bool, error) {
 	tag, err := s.q(ctx).Exec(ctx, `
-		UPDATE codehost_credentials
+		UPDATE codehost_apps
 		   SET webhook_secret_enc = $2, webhook_secret_key_id = $3, webhook_url = $4, webhook_applied_at = now()
 		 WHERE id = $1`, id, secretEnc, keyID, url)
 	if err != nil {
@@ -231,7 +282,7 @@ func (s *PostgresStore) SetWebhook(ctx context.Context, id uuid.UUID, secretEnc 
 
 func (s *PostgresStore) ResealWebhook(ctx context.Context, id uuid.UUID, blob []byte, keyID string) (bool, error) {
 	tag, err := s.q(ctx).Exec(ctx,
-		`UPDATE codehost_credentials SET webhook_secret_enc = $2, webhook_secret_key_id = $3
+		`UPDATE codehost_apps SET webhook_secret_enc = $2, webhook_secret_key_id = $3
 		  WHERE id = $1 AND webhook_secret_enc IS NOT NULL`, id, blob, keyID)
 	if err != nil {
 		return false, fmt.Errorf("githubapp: reseal webhook secret: %w", err)
@@ -240,7 +291,7 @@ func (s *PostgresStore) ResealWebhook(ctx context.Context, id uuid.UUID, blob []
 }
 
 func (s *PostgresStore) MarkVerified(ctx context.Context, id uuid.UUID) (bool, error) {
-	tag, err := s.q(ctx).Exec(ctx, `UPDATE codehost_credentials SET verified_at = now() WHERE id = $1`, id)
+	tag, err := s.q(ctx).Exec(ctx, `UPDATE codehost_apps SET verified_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return false, fmt.Errorf("githubapp: mark verified: %w", err)
 	}
@@ -248,7 +299,7 @@ func (s *PostgresStore) MarkVerified(ctx context.Context, id uuid.UUID) (bool, e
 }
 
 func (s *PostgresStore) Delete(ctx context.Context) (bool, error) {
-	tag, err := s.q(ctx).Exec(ctx, `DELETE FROM codehost_credentials`)
+	tag, err := s.q(ctx).Exec(ctx, `DELETE FROM codehost_apps`)
 	if err != nil {
 		return false, fmt.Errorf("githubapp: delete credential: %w", err)
 	}

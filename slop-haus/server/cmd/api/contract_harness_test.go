@@ -560,10 +560,14 @@ func (r *contractRig) webhook() *contractWebhook {
 		sealed, err := keyring.Seal([]byte(appWebhookSecret), secretbox.Binding{Tenant: r.user.TenantID, Row: id, Purpose: "webhook secret"})
 		require.NoError(r.t, err)
 		_, err = r.boot.appDB.Exec(db.WithTenant(r.t.Context(), r.user.TenantID), `
-			INSERT INTO codehost_credentials (id, provider, app_id, installation_id, private_key_enc, key_id, key_fingerprint,
-			                                  webhook_secret_enc, webhook_secret_key_id)
-			VALUES ($1, 'github_app', 1, $2, '\x00', $3, $4, $5, $3)`,
-			id, appInstallationID, keyring.CurrentID(), strings.Repeat("f", 64), sealed)
+			INSERT INTO codehost_apps (id, provider, app_id, private_key_enc, key_id, key_fingerprint,
+			                           webhook_secret_enc, webhook_secret_key_id)
+			VALUES ($1, 'github_app', 1, '\x00', $2, $3, $4, $2)`,
+			id, keyring.CurrentID(), strings.Repeat("f", 64), sealed)
+		require.NoError(r.t, err)
+		_, err = r.boot.appDB.Exec(db.WithTenant(r.t.Context(), r.user.TenantID), `
+			INSERT INTO codehost_credentials (id, app_ref, installation_id, binding) VALUES (gen_random_uuid(), $1, $2, 'github.com')`,
+			id, appInstallationID)
 		require.NoError(r.t, err)
 		r.hook = &contractWebhook{url: "http://" + r.boot.cfg.Webhook.ListenAddr + githubhook.AppReceivePath, secret: appWebhookSecret}
 	}

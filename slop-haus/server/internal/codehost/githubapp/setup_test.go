@@ -192,7 +192,7 @@ func TestSetup_TheCodeIsExchangedAndTheKeyStoredEncryptedAndNeverReturned(t *tes
 
 	var blob []byte
 	require.NoError(t, s.owners.Global().QueryRow(context.Background(),
-		`SELECT private_key_enc FROM codehost_credentials WHERE tenant_id = $1`, s.tn.id).Scan(&blob))
+		`SELECT private_key_enc FROM codehost_apps WHERE tenant_id = $1`, s.tn.id).Scan(&blob))
 	assert.NotContains(t, string(blob), pemBody)
 	assert.NotContains(t, string(blob), "PRIVATE KEY")
 	for _, secret := range []string{pemBody, manifestOK, state, "secret-value"} {

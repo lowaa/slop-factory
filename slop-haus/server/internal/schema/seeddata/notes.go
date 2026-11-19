@@ -20,7 +20,12 @@ type Note struct {
 
 // Notes are the migrations that may touch existing data, by version. One
 // absent from here must leave every existing row exactly as it was.
-var Notes = map[int64]Note{}
+var Notes = map[int64]Note{
+	176: {
+		Why:             "codehost_credentials is split into codehost_apps and a new codehost_credentials (one credential per migrated row); the installation lookup is rebuilt by the triggers",
+		RewrittenTables: []string{"codehost_credentials", "global_github_app_installations"},
+	},
+}
 
 // NotesBetween merges the notes of the migrations after from, up to and
 // including to: what a database may have lost going from one version to

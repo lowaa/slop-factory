@@ -65,6 +65,7 @@ var tableOwners = map[string]string{
 	"review_requests":                 "reviewreport",
 	"board_changes":                   "ticket",
 	"board_revisions":                 "ticket",
+	"codehost_apps":                   "codehost",
 	"codehost_credentials":            "codehost",
 	"codehost_setup_states":           "codehost",
 	"conductor_conversation_events":   "conductor",

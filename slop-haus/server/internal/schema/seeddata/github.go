@@ -4,14 +4,20 @@ import "time"
 
 func init() {
 	register(Registry{
-		// Kept by a trigger on codehost_credentials, whose seeded row has no
+		// Kept by a trigger on codehost_credentials, whose seeded App has no
 		// webhook secret: a row is put here directly so the table has data.
 		"global_github_app_installations": globalSeeder(func(s *seed) error {
 			for _, tenant := range s.w.tenants {
 				ts := s.as(tenant)
-				ts.upsert("global_github_app_installations", "(tenant)", map[string]any{
+				values := map[string]any{
 					"tenant": tenant, "installation_id": 2, "credential_id": tenant.String(), "webhook_secret_enc": []byte("not a real blob"),
-				})
+				}
+				target := "(tenant)"
+				if s.cols["global_github_app_installations"]["app_ref"] {
+					values["credential_id"], values["app_ref"] = seededCredentialID(tenant), tenant.String()
+					target = "(credential_id)"
+				}
+				ts.upsert("global_github_app_installations", target, values)
 			}
 			return nil
 		}),

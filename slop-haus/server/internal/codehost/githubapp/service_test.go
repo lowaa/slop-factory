@@ -51,7 +51,7 @@ func TestConnect_StoresTheKeyEncryptedAndNeverReturnsIt(t *testing.T) {
 	// which does not contain the key in any encoding it was handed over in.
 	var blob []byte
 	require.NoError(t, f.owners.Global().QueryRow(context.Background(),
-		`SELECT private_key_enc FROM codehost_credentials WHERE tenant_id = $1`, a.id).Scan(&blob))
+		`SELECT private_key_enc FROM codehost_apps WHERE tenant_id = $1`, a.id).Scan(&blob))
 	body := strings.Split(pkcs1PEM(key), "\n")[1]
 	assert.NotContains(t, string(blob), body)
 	assert.NotContains(t, string(blob), "PRIVATE KEY")
@@ -86,7 +86,7 @@ func TestConnect_ReplacingKeepsOneRowAndReSealsUnderANewId(t *testing.T) {
 
 	var rows int
 	require.NoError(t, f.owners.Global().QueryRow(context.Background(),
-		`SELECT count(*) FROM codehost_credentials WHERE tenant_id = $1`, a.id).Scan(&rows))
+		`SELECT count(*) FROM codehost_apps WHERE tenant_id = $1`, a.id).Scan(&rows))
 	assert.Equal(t, 1, rows)
 }
 
@@ -172,8 +172,8 @@ func TestTenancy_ASealedKeyMovedToAnotherTenantsRowDoesNotOpen(t *testing.T) {
 	// An attacker with write access to the database copies a's blob into
 	// b's row (as the table's owner, past row level security).
 	_, err := f.owners.Global().Exec(context.Background(), `
-		UPDATE codehost_credentials SET private_key_enc =
-			(SELECT private_key_enc FROM codehost_credentials WHERE tenant_id = $1)
+		UPDATE codehost_apps SET private_key_enc =
+			(SELECT private_key_enc FROM codehost_apps WHERE tenant_id = $1)
 		WHERE tenant_id = $2`, a.id, b.id)
 	require.NoError(t, err)
 
@@ -362,7 +362,7 @@ func TestTokenFor_CachesUntilNearExpiryAndNeverStoresTheToken(t *testing.T) {
 	// In memory only: a dump of every table has no trace of it.
 	var found int
 	require.NoError(t, f.owners.Global().QueryRow(context.Background(),
-		`SELECT count(*) FROM codehost_credentials WHERE row_to_json(codehost_credentials)::text LIKE '%'||$1||'%'`,
+		`SELECT count(*) FROM codehost_apps WHERE row_to_json(codehost_apps)::text LIKE '%'||$1||'%'`,
 		secretToken).Scan(&found))
 	assert.Zero(t, found)
 }
@@ -777,7 +777,7 @@ func TestConnected_OnlyAKeyThatOpensCounts(t *testing.T) {
 		a := f.tenant()
 		f.connect(a, 0)
 		_, err := f.owners.Global().Exec(context.Background(),
-			`UPDATE codehost_credentials SET private_key_enc = '\xdeadbeef' WHERE tenant_id = $1`, a.id)
+			`UPDATE codehost_apps SET private_key_enc = '\xdeadbeef' WHERE tenant_id = $1`, a.id)
 		require.NoError(t, err)
 		got, err := f.svc.Connected(a.ctx)
 		require.NoError(t, err)

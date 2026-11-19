@@ -18,7 +18,8 @@ import (
 // Store is the persistence Service needs.
 type Store interface {
 	// AppInstallations are the tenants with a GitHub App installation id and
-	// a webhook secret stored, read before any tenant is known. More than
+	// a webhook secret stored, each with the App whose secret signs the
+	// installation's deliveries, read before any tenant is known. More than
 	// one is possible: nothing stops two tenants connecting the same
 	// installation, and whose secret signed the delivery tells them apart.
 	AppInstallations(ctx context.Context, installationID int64) ([]AppInstallation, error)
@@ -44,11 +45,13 @@ type Store interface {
 	ListDeliveries(ctx context.Context, limit int) ([]Delivery, error)
 }
 
-// AppInstallation is one tenant's side of an installation: where its sealed
-// webhook secret is, and what it was sealed for.
+// AppInstallation is one tenant's side of an installation: the App it belongs
+// to, whose sealed webhook secret this is. The secret was sealed for AppID, one
+// per App however many installations the App has.
 type AppInstallation struct {
 	Tenant       uuid.UUID
 	CredentialID uuid.UUID
+	AppID        uuid.UUID
 	SecretEnc    []byte
 }
 
@@ -70,7 +73,7 @@ const appInstallationsLimit = 20
 
 func (s *PostgresStore) AppInstallations(ctx context.Context, installationID int64) ([]AppInstallation, error) {
 	rows, err := s.db.Global().Query(ctx, `
-		SELECT tenant, credential_id, webhook_secret_enc FROM global_github_app_installations
+		SELECT tenant, credential_id, app_ref, webhook_secret_enc FROM global_github_app_installations
 		 WHERE installation_id = $1
 		 ORDER BY tenant
 		 LIMIT $2`, installationID, appInstallationsLimit)
@@ -81,7 +84,7 @@ func (s *PostgresStore) AppInstallations(ctx context.Context, installationID int
 	var out []AppInstallation
 	for rows.Next() {
 		var a AppInstallation
-		if err := rows.Scan(&a.Tenant, &a.CredentialID, &a.SecretEnc); err != nil {
+		if err := rows.Scan(&a.Tenant, &a.CredentialID, &a.AppID, &a.SecretEnc); err != nil {
 			return nil, fmt.Errorf("scan github app installation: %w", err)
 		}
 		out = append(out, a)

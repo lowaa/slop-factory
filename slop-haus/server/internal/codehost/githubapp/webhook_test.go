@@ -70,7 +70,7 @@ func (f *fixture) storedSecret(tn *tenant, ring *secretbox.Keyring) (secret stri
 	f.t.Helper()
 	var id string
 	require.NoError(f.t, f.owners.Global().QueryRow(context.Background(),
-		`SELECT id::text, webhook_secret_enc, coalesce(webhook_url, '') FROM codehost_credentials WHERE tenant_id = $1`, tn.id).
+		`SELECT id::text, webhook_secret_enc, coalesce(webhook_url, '') FROM codehost_apps WHERE tenant_id = $1`, tn.id).
 		Scan(&id, &blob, &url))
 	if blob == nil {
 		return "", nil, url
@@ -425,7 +425,7 @@ func TestOpenWebhookSecret_OpensWhatApplyStoredAndNothingElse(t *testing.T) {
 	var credential uuid.UUID
 	var copied []byte
 	require.NoError(t, f.owners.Global().QueryRow(context.Background(),
-		`SELECT credential_id, webhook_secret_enc FROM global_github_app_installations WHERE tenant = $1`, tn.id).Scan(&credential, &copied))
+		`SELECT app_ref, webhook_secret_enc FROM global_github_app_installations WHERE tenant = $1`, tn.id).Scan(&credential, &copied))
 
 	opened, err := githubapp.OpenWebhookSecret(f.keyring, tn.id, credential, copied)
 	require.NoError(t, err)
