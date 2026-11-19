@@ -20,11 +20,12 @@ class RunProcesses:
     run: not the owner's other processes, nor another run's.
 
     A pid is never signalled on the strength of an earlier look. The token is checked again just
-    before the signal. On Linux that is through a pidfd opened first, so a pid reused by an
-    unrelated process cannot be hit. Elsewhere (macOS has no pidfd, nor do uv's standalone Linux
-    Pythons, which the supervisor runs on) the check and the kill are two steps, which leaves a window of microseconds in which a process that exited and whose pid was
-    reused could be hit. A command that clears its own environment escapes: this finds what the
-    model started in the ordinary way, not what hides from it.
+    before the signal. Where Python has pidfd_open and pidfd_send_signal (most Linux Pythons) that
+    is through a pidfd opened first, so a pid reused by an unrelated process cannot be hit.
+    Otherwise (macOS, and uv's standalone Linux Pythons, which the supervisor runs on) the check and
+    the kill are two steps, which leaves a window of microseconds in which a process that exited
+    and whose pid was reused could be hit. A command that clears its own environment escapes: this
+    finds what the model started in the ordinary way, not what hides from it.
 
     Without /proc (macOS) the environment is read with `ps -E`, which omits it for Apple platform
     binaries (/bin/bash, /bin/sleep, /usr/bin/*), so a run's processes there are those whose

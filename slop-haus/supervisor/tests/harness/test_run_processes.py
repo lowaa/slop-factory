@@ -6,15 +6,18 @@ import subprocess
 import sys
 import threading
 import unittest
+from collections.abc import Callable
+import uuid
 
-from process_state import process_running
+from process_state import command_line, process_running
 from slop_haus_supervisor.harness.run_processes import RUN_TOKEN_ENV, RunProcesses
 
 TOKEN = "run-token"
-GONE_WITHIN = 10.0
-ROOT = """
+SETTLES_WITHIN = 10.0
+SLEEPER = "/bin/sleep 600"
+ROOT = f"""
 import subprocess
-subprocess.run(["/bin/bash", "-c", "/bin/sleep 600 & echo $!; wait"])
+subprocess.run(["/bin/bash", "-c", "{SLEEPER} & echo $!; wait"])
 """
 
 
@@ -31,56 +34,60 @@ def tree(*pairs: tuple[int, int]) -> bytes:
 
 
 class MarkedAndDescendantsTest(unittest.TestCase):
-    """The rule used where `ps -E` hides the environment of Apple platform binaries, on canned `ps` output."""
+    """The rule used where `ps -E` hides the environment of Apple platform binaries, on canned `ps` output.
+
+    The canned pids are above any real pid (99999 on macOS, at most 4194304 on Linux): the rule leaves out this
+    process, and in a fresh pid namespace, as in CI's containers, a pytest worker's own pid is often in the hundreds.
+    """
 
     def setUp(self) -> None:
         self.processes = RunProcesses(TOKEN)
 
     def test_a_marked_process_and_everything_below_it_is_the_run(self) -> None:
-        environments = marked(100) + unmarked(101) + unmarked(102) + unmarked(103)
-        parents = tree((100, 1), (101, 100), (102, 101), (103, 102))
-        self.assertEqual([103, 102, 101, 100], self.processes.marked_and_descendants(environments, parents, {}))
+        environments = marked(9000100) + unmarked(9000101) + unmarked(9000102) + unmarked(9000103)
+        parents = tree((9000100, 1), (9000101, 9000100), (9000102, 9000101), (9000103, 9000102))
+        self.assertEqual([9000103, 9000102, 9000101, 9000100], self.processes.marked_and_descendants(environments, parents, {}))
 
     def test_children_come_before_their_parents(self) -> None:
-        parents = tree((100, 1), (101, 100), (102, 100), (103, 101))
-        found = self.processes.marked_and_descendants(marked(100) + unmarked(101), parents, {})
-        self.assertEqual([100], found[-1:])
-        self.assertLess(found.index(103), found.index(101))
+        parents = tree((9000100, 1), (9000101, 9000100), (9000102, 9000100), (9000103, 9000101))
+        found = self.processes.marked_and_descendants(marked(9000100) + unmarked(9000101), parents, {})
+        self.assertEqual([9000100], found[-1:])
+        self.assertLess(found.index(9000103), found.index(9000101))
 
     def test_a_process_reparented_away_is_not_found_by_the_tree(self) -> None:
-        environments = marked(100) + unmarked(101)
-        parents = tree((100, 1), (101, 1))
-        self.assertEqual([100], self.processes.marked_and_descendants(environments, parents, {}))
+        environments = marked(9000100) + unmarked(9000101)
+        parents = tree((9000100, 1), (9000101, 1))
+        self.assertEqual([9000100], self.processes.marked_and_descendants(environments, parents, {}))
 
     def test_other_runs_and_unrelated_processes_are_left_alone(self) -> None:
-        environments = marked(100) + marked(200, token="other") + marked(300, token=TOKEN + "x") + unmarked(400)
-        parents = tree((100, 1), (200, 1), (201, 200), (300, 1), (400, 1))
-        self.assertEqual([100], self.processes.marked_and_descendants(environments, parents, {}))
+        environments = marked(9000100) + marked(9000200, token="other") + marked(9000300, token=TOKEN + "x") + unmarked(9000400)
+        parents = tree((9000100, 1), (9000200, 1), (9000201, 9000200), (9000300, 1), (9000400, 1))
+        self.assertEqual([9000100], self.processes.marked_and_descendants(environments, parents, {}))
 
     def test_this_process_is_never_found_even_below_a_marked_one(self) -> None:
         me = os.getpid()
-        parents = tree((100, 1), (me, 100))
-        self.assertEqual([100], self.processes.marked_and_descendants(marked(100), parents, {}))
+        parents = tree((9000100, 1), (me, 9000100))
+        self.assertEqual([9000100], self.processes.marked_and_descendants(marked(9000100), parents, {}))
 
     def test_a_parent_loop_does_not_hang_the_walk(self) -> None:
-        parents = tree((100, 101), (101, 100))
-        self.assertEqual([101, 100], self.processes.marked_and_descendants(marked(100), parents, {}))
+        parents = tree((9000100, 9000101), (9000101, 9000100))
+        self.assertEqual([9000101, 9000100], self.processes.marked_and_descendants(marked(9000100), parents, {}))
 
     def test_a_process_seen_before_is_still_the_run_once_orphaned(self) -> None:
-        self.processes.remembered = {200: b"Thu Nov 19 07:00:00 2026"}
-        parents = tree((100, 1), (200, 1), (201, 200))
-        starts = {200: b"Thu Nov 19 07:00:00 2026"}
-        self.assertEqual([201, 200, 100], self.processes.marked_and_descendants(marked(100), parents, starts))
+        self.processes.remembered = {9000200: b"Thu Nov 19 07:00:00 2026"}
+        parents = tree((9000100, 1), (9000200, 1), (9000201, 9000200))
+        starts = {9000200: b"Thu Nov 19 07:00:00 2026"}
+        self.assertEqual([9000201, 9000200, 9000100], self.processes.marked_and_descendants(marked(9000100), parents, starts))
 
     def test_a_pid_reused_by_a_newer_process_is_not_the_run(self) -> None:
-        self.processes.remembered = {200: b"Thu Nov 19 07:00:00 2026"}
-        parents = tree((100, 1), (200, 1))
-        starts = {200: b"Thu Nov 19 07:05:00 2026"}
-        self.assertEqual([100], self.processes.marked_and_descendants(marked(100), parents, starts))
+        self.processes.remembered = {9000200: b"Thu Nov 19 07:00:00 2026"}
+        parents = tree((9000100, 1), (9000200, 1))
+        starts = {9000200: b"Thu Nov 19 07:05:00 2026"}
+        self.assertEqual([9000100], self.processes.marked_and_descendants(marked(9000100), parents, starts))
 
     def test_garbage_lines_are_skipped(self) -> None:
-        parents = b"PID PPID\n\nnot a line\n101 100\n"
-        self.assertEqual([101, 100], self.processes.marked_and_descendants(marked(100), parents, {}))
+        parents = b"PID PPID\n\nnot a line\n9000101 9000100\n"
+        self.assertEqual([9000101, 9000100], self.processes.marked_and_descendants(marked(9000100), parents, {}))
 
 
 @unittest.skipIf(os.path.isdir("/proc/self"), "the re-check by start time is the path for hosts without /proc")
@@ -117,8 +124,10 @@ class RealProcessesTest(unittest.TestCase):
         self._find_and_kill_a_background_command()
 
     def _find_and_kill_a_background_command(self) -> None:
-        run = RunProcesses(TOKEN)
-        env = {**os.environ, RUN_TOKEN_ENV: TOKEN}
+        # A token of its own: pytest runs tests in parallel, and kill_all ends everything carrying the token.
+        token = uuid.uuid4().hex
+        run = RunProcesses(token)
+        env = {**os.environ, RUN_TOKEN_ENV: token}
         # The root is Python, as the harness's real child (claude, pi, codex) is: an Apple platform binary such as
         # bash shows no environment to `ps -E`, so it could not be the one marked.
         # A session of its own, as the harness's process is: the shell and its background `sleep` share the group.
@@ -132,6 +141,9 @@ class RealProcessesTest(unittest.TestCase):
         self.addCleanup(self._kill_group, shell.pid)
         self.addCleanup(run.kill_all)
         sleeper = int(shell.stdout.readline())
+        # `$!` is printed as soon as bash forks. Until the child's exec of sleep is done, Linux shows the environment
+        # of the bash it was forked from and then, mid-exec, none at all, so a look could miss it.
+        self.assertTrue(self._within(lambda: command_line(sleeper) == SLEEPER), "the background command never started")
         self.assertIn(sleeper, run.find())
         self.assertTrue(run.carries(sleeper))
         self.assertFalse(run.carries(os.getpid()))
@@ -140,7 +152,7 @@ class RealProcessesTest(unittest.TestCase):
         shell.wait()
         self.assertIn(sleeper, run.find())
         run.kill_all()
-        self.assertTrue(self._gone(sleeper), "the background command survived kill_all")
+        self.assertTrue(self._within(lambda: not process_running(sleeper)), "the background command survived kill_all")
         self.assertNotIn(sleeper, run.find())
 
     @staticmethod
@@ -151,10 +163,10 @@ class RealProcessesTest(unittest.TestCase):
             pass
 
     @staticmethod
-    def _gone(pid: int) -> bool:
+    def _within(condition: Callable[[], bool]) -> bool:
         settled = threading.Event()
-        for _ in range(int(GONE_WITHIN * 200)):
-            if not process_running(pid):
+        for _ in range(int(SETTLES_WITHIN * 200)):
+            if condition():
                 return True
             settled.wait(0.005)
         return False
