@@ -82,6 +82,9 @@ type ScopeCostInput struct {
 	// lease.
 	Workers []Span
 	Busy    []Span
+	// LockingOff is whether the tenant has scope locking off now: no block
+	// is recorded while it is, so an empty report is not a clean one.
+	LockingOff bool
 }
 
 // ScopeWait is one ticket's time held back.
@@ -148,6 +151,7 @@ type ScopeCost struct {
 	Paths              []ScopePathCost
 	Denials            ScopeDenials
 	Narrowings         int64
+	LockingOff         bool
 }
 
 type interval struct{ start, end time.Time }
@@ -202,7 +206,7 @@ func median(v []float64) *float64 {
 // ComputeScopeCost works the report out of rows. It is a function of its
 // input alone, so the arithmetic is tested over fixed rows.
 func ComputeScopeCost(in *ScopeCostInput) *ScopeCost {
-	out := &ScopeCost{From: in.From, To: in.To, Narrowings: in.Narrowings,
+	out := &ScopeCost{From: in.From, To: in.To, Narrowings: in.Narrowings, LockingOff: in.LockingOff,
 		Tickets: []ScopeWait{}, Blockers: []ScopeBlockerCost{}, Paths: []ScopePathCost{}}
 
 	type group struct {

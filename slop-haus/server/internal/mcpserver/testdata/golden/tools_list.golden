@@ -631,7 +631,7 @@
           "type": "string"
         },
         "paths": {
-          "description": "the narrowest repo-relative paths you expect the work to write, end a directory with /. Prefer leaf directories or files over shared roots: a broad scope stops every overlapping ticket from being claimed while this one is held. Whoever takes the ticket extends it with ticket_scope_extend as it finds it needs more",
+          "description": "the narrowest repo-relative paths you expect the work to write, end a directory with /. Prefer leaf directories or files over shared roots: where the tenant locks path scopes, a broad scope stops every overlapping ticket from being claimed while this one is held. Whoever takes the ticket extends it with ticket_scope_extend as it finds it needs more",
           "items": {
             "type": "string"
           },
@@ -764,6 +764,9 @@
             "properties": {
               "id": {
                 "type": "integer"
+              },
+              "locking_off": {
+                "type": "boolean"
               },
               "other": {
                 "type": "string"
@@ -1400,6 +1403,28 @@
         "human_message": {
           "type": "string"
         },
+        "locking_off_overlaps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "ticket_id": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ticket_id",
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
         "message": {
           "type": "string"
         },
@@ -1668,6 +1693,28 @@
         "human_message": {
           "type": "string"
         },
+        "locking_off_overlaps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "ticket_id": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ticket_id",
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
         "notice": {
           "type": "string"
         },
@@ -1706,7 +1753,7 @@
     }
   },
   {
-    "description": "Give up paths of the ticket you hold, so other agents can claim work on them. Remove only paths the ticket has; keep[] may name narrower paths inside removed ones (drop a directory, keep the sub-directory you still need). It never adds scope -- use ticket_scope_extend for that -- and refuses to leave the ticket with no paths. Never drop a path your branch has already changed. The server also narrows directories to the files your change touches when you ticket_finish, ticket_discuss or ticket_release; call this earlier to free paths sooner, since a ticket in review holds all its paths until a human acts.",
+    "description": "Give up paths of the ticket you hold, so other agents can claim work on them. Remove only paths the ticket has; keep[] may name narrower paths inside removed ones (drop a directory, keep the sub-directory you still need). It never adds scope -- use ticket_scope_extend for that -- and refuses to leave the ticket with no paths. Never drop a path your branch has already changed. The server also narrows directories to the files your change touches when you ticket_finish, ticket_discuss or ticket_release; call this earlier to free paths sooner, since where the tenant locks path scopes, a ticket in review holds all its paths until a human acts.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

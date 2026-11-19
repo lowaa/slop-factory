@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiClient, type QueueBlockage } from "@/api";
+import { apiClient, type QueueBlockage, type QueueBlockageState } from "@/api";
 import TicketLink from "@/shared/ticket_link/ticket_link";
 import "./queue_blockage_panel.scss";
 
@@ -15,7 +15,7 @@ interface QueueBlockagePanelProps {
 // queue waiting its turn on a scope is normal, and a full fleet is not
 // blocked, so the server answers nothing for either.
 export default function QueueBlockagePanel({ refreshToken }: QueueBlockagePanelProps) {
-  const [blockage, setBlockage] = useState<QueueBlockage | null>(null);
+  const [state, setBlockage] = useState<QueueBlockageState | null>(null);
   const latest = useRef(0);
 
   const load = useCallback(() => {
@@ -35,9 +35,35 @@ export default function QueueBlockagePanel({ refreshToken }: QueueBlockagePanelP
     void load();
   }, [load, refreshToken]);
 
-  if (!blockage) return null;
+  if (!state) return null;
+  const { blockage } = state;
+  if (!state.lockingOff && !blockage) return null;
   return (
-    <section className="queue-blockage" role="status" aria-label="Queue blocked">
+    <section
+      className="queue-blockage"
+      role="status"
+      aria-label={state.lockingOff ? "Scope locking off" : "Queue blocked"}
+    >
+      {state.lockingOff ? <LockingOffNotice /> : blockage && <BlockedNotice blockage={blockage} />}
+    </section>
+  );
+}
+
+function LockingOffNotice() {
+  return (
+    <>
+      <h2 className="queue-blockage__title">Scope locking is off</h2>
+      <p className="queue-blockage__text">
+        Overlapping path scopes block nothing, so the queue is never held back by one. Tickets that overlap can be worked
+        in parallel and meet their clashes when the base branch is merged. An owner can turn it back on in Tenant Settings.
+      </p>
+    </>
+  );
+}
+
+function BlockedNotice({ blockage }: { blockage: QueueBlockage }) {
+  return (
+    <>
       <h2 className="queue-blockage__title">Queue blocked on a scope</h2>
       <p className="queue-blockage__text">
         Agents are idle, but{" "}
@@ -54,6 +80,6 @@ export default function QueueBlockagePanel({ refreshToken }: QueueBlockagePanelP
           ? "It is waiting on a person to approve it."
           : "It frees when that ticket finishes or its lease runs out."}
       </p>
-    </section>
+    </>
   );
 }

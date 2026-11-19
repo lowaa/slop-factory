@@ -43,7 +43,7 @@ func (s *PostgresStore) onDiscussion(f func(ctx context.Context, entries []*Disc
 
 // WithStoreWorkspace tells the store where the shared paths come from, which
 // its claims and extensions read in their own transactions. Without it no
-// path is shared and every overlap blocks.
+// path is shared and every overlap blocks (while scope locking is on).
 func WithStoreWorkspace(w Workspace) StoreOption {
 	return func(s *PostgresStore) { s.workspace = w }
 }

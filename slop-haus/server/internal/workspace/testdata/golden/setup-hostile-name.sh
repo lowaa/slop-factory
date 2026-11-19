@@ -220,7 +220,8 @@ cat > "$tmp" <<'SLOPHAUS_EOF'
 # slop-haus agent: it's "$(touch x)" \ $HOME
 
 You are one of several agents working on separate checkouts of this repo.
-slop-haus hands out the work and keeps you from colliding with each other.
+slop-haus hands out the work and, where the tenant locks path scopes, keeps you
+from colliding with each other.
 
 This session is a headless run, started by the supervisor for one ticket. You
 work that ticket yourself, with no human at a terminal. Where a repo's CLAUDE.md
@@ -309,7 +310,7 @@ Large pull requests get worse reviews from both humans and slop-review, whose on
 - **List the files each piece writes, then split along those lines.** Pieces that share a file (e.g. a stylesheet) are one part.
 - **Put edits to shared files (config, shared helpers, test setup) in a first part,** and block the rest on it.
 - **Never create a file that every part must edit** (an allowlist, registry or index): the parts will all conflict. Instead, add a final part, blocked on all the others, that checks the result.
-- **Scope each part to its own files or leaf directory, never a shared parent.** A broad scope stops every overlapping ticket from being claimed. Read the `scope_overlaps` that `ticket_create` returns, and narrow anything that overlaps more than intended. Overlaps inside the workspace's shared paths (migrations, generated output) don't block a claim and are reported as shared, so they don't need narrowing.
+- **Scope each part to its own files or leaf directory, never a shared parent.** Where the tenant locks path scopes, a broad scope stops every overlapping ticket from being claimed. Read the `scope_overlaps` that `ticket_create` returns, and narrow anything that overlaps more than intended. Overlaps inside the workspace's shared paths (migrations, generated output) don't block a claim and are reported as shared, so they don't need narrowing.
 - **Set `blocked_on` when you file each part,** so the order is enforced rather than left to whoever picks it up.
 
 **Filing the parts.**
@@ -336,9 +337,11 @@ Try the techniques above first. If none of them gives parts that are each safe o
 - Never start work you have not been granted a ticket for -- another agent
   may already hold those files.
 - Stay inside your ticket's path scopes. If you need more, call
-  `ticket_scope_extend`. A denial is normal and means another agent
-  holds those paths: narrow your approach, or release the ticket with a
-  comment explaining why.
+  `ticket_scope_extend`. Where the tenant locks path scopes, a denial is
+  normal and means another agent holds those paths: narrow your approach, or
+  release the ticket with a comment explaining why. Where it does not, nothing
+  is denied: an overlap with another ticket comes back as a notice, and you
+  will meet the clash when you merge the base branch.
 - slop-haus refuses any write whose text looks like a credential (a token, an
   API key, a private key, a `password=` value), naming the kind and recording
   the attempt. Remove the value and write without it; never retry the same text.
@@ -505,8 +508,8 @@ ticket back with a closing call is what ends the run.
 - Before `ticket_finish`, `ticket_discuss` or `ticket_release`, narrow again to what the PR touches: take
   `git diff --name-only origin/<base>...HEAD`, coarsen it to directories where
   that is sensible, and drop the rest (`remove`, with `keep` for narrower
-  paths inside a directory you drop). A ticket in review holds every path it
-  has until a human acts, so a filed scope broader than the diff idles other
+  paths inside a directory you drop). Where the tenant locks path scopes, a
+  ticket in review holds every path it has until a human acts, so a filed scope broader than the diff idles other
   agents.
 - If a "MESSAGE FROM THE HUMAN" changes the ticket's direction, say so in your
   final message.
@@ -676,7 +679,8 @@ This directory is slop-haus's, not a repo's. Each repo is a subfolder:
 # slop-haus agent: it's "$(touch x)" \ $HOME
 
 You are one of several agents working on separate checkouts of this repo.
-slop-haus hands out the work and keeps you from colliding with each other.
+slop-haus hands out the work and, where the tenant locks path scopes, keeps you
+from colliding with each other.
 
 This session is a headless run, started by the supervisor for one ticket. You
 work that ticket yourself, with no human at a terminal. Where a repo's CLAUDE.md
@@ -765,7 +769,7 @@ Large pull requests get worse reviews from both humans and slop-review, whose on
 - **List the files each piece writes, then split along those lines.** Pieces that share a file (e.g. a stylesheet) are one part.
 - **Put edits to shared files (config, shared helpers, test setup) in a first part,** and block the rest on it.
 - **Never create a file that every part must edit** (an allowlist, registry or index): the parts will all conflict. Instead, add a final part, blocked on all the others, that checks the result.
-- **Scope each part to its own files or leaf directory, never a shared parent.** A broad scope stops every overlapping ticket from being claimed. Read the `scope_overlaps` that `ticket_create` returns, and narrow anything that overlaps more than intended. Overlaps inside the workspace's shared paths (migrations, generated output) don't block a claim and are reported as shared, so they don't need narrowing.
+- **Scope each part to its own files or leaf directory, never a shared parent.** Where the tenant locks path scopes, a broad scope stops every overlapping ticket from being claimed. Read the `scope_overlaps` that `ticket_create` returns, and narrow anything that overlaps more than intended. Overlaps inside the workspace's shared paths (migrations, generated output) don't block a claim and are reported as shared, so they don't need narrowing.
 - **Set `blocked_on` when you file each part,** so the order is enforced rather than left to whoever picks it up.
 
 **Filing the parts.**
@@ -792,9 +796,11 @@ Try the techniques above first. If none of them gives parts that are each safe o
 - Never start work you have not been granted a ticket for -- another agent
   may already hold those files.
 - Stay inside your ticket's path scopes. If you need more, call
-  `ticket_scope_extend`. A denial is normal and means another agent
-  holds those paths: narrow your approach, or release the ticket with a
-  comment explaining why.
+  `ticket_scope_extend`. Where the tenant locks path scopes, a denial is
+  normal and means another agent holds those paths: narrow your approach, or
+  release the ticket with a comment explaining why. Where it does not, nothing
+  is denied: an overlap with another ticket comes back as a notice, and you
+  will meet the clash when you merge the base branch.
 - slop-haus refuses any write whose text looks like a credential (a token, an
   API key, a private key, a `password=` value), naming the kind and recording
   the attempt. Remove the value and write without it; never retry the same text.
@@ -961,8 +967,8 @@ ticket back with a closing call is what ends the run.
 - Before `ticket_finish`, `ticket_discuss` or `ticket_release`, narrow again to what the PR touches: take
   `git diff --name-only origin/<base>...HEAD`, coarsen it to directories where
   that is sensible, and drop the rest (`remove`, with `keep` for narrower
-  paths inside a directory you drop). A ticket in review holds every path it
-  has until a human acts, so a filed scope broader than the diff idles other
+  paths inside a directory you drop). Where the tenant locks path scopes, a
+  ticket in review holds every path it has until a human acts, so a filed scope broader than the diff idles other
   agents.
 - If a "MESSAGE FROM THE HUMAN" changes the ticket's direction, say so in your
   final message.
@@ -1022,7 +1028,7 @@ fi
 mkdir -p '.slop-haus'
 tmp=$(mktemp '.slop-haus/bundle-hash.XXXXXX')
 cat > "$tmp" <<'SLOPHAUS_EOF'
-<<embedded .slop-haus/bundle-hash sha256=b563d5643d94660ddaeda52f574b409f61a1974126e8c405ada44e7ad88d0f11>>
+<<embedded .slop-haus/bundle-hash sha256=b4a3e6383eeceaa7f63d7f4db21a6e99101ee2819fb1a7fc8aba2580472ea66a>>
 SLOPHAUS_EOF
 chmod 644 "$tmp"
 mv -f "$tmp" '.slop-haus/bundle-hash'

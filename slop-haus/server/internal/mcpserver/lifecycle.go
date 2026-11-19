@@ -97,6 +97,22 @@ type ticketNextOutput struct {
 	// SharedOverlaps are held scopes the granted ticket overlaps only inside
 	// shared paths: nothing blocked, but a clash there is resolved as each says.
 	SharedOverlaps []sharedOverlapRef `json:"shared_overlaps,omitempty"`
+	// LockingOffOverlaps are held scopes the granted ticket overlaps that
+	// would have blocked it, with the tenant's scope locking off.
+	LockingOffOverlaps []lockingOffOverlapRef `json:"locking_off_overlaps,omitempty"`
+}
+
+type lockingOffOverlapRef struct {
+	TicketID int64  `json:"ticket_id"`
+	Path     string `json:"path"`
+}
+
+func toLockingOffOverlapRefs(overlaps []ticket.LockingOffOverlap) []lockingOffOverlapRef {
+	out := make([]lockingOffOverlapRef, len(overlaps))
+	for i, o := range overlaps {
+		out[i] = lockingOffOverlapRef{TicketID: o.TicketID, Path: o.Path}
+	}
+	return out
 }
 
 type sharedOverlapRef struct {
@@ -180,6 +196,10 @@ func (h *Handler) ticketNext(ctx context.Context, agentID uuid.UUID, in ticketNe
 			granted += "\n" + notice
 			out.SharedOverlaps = toSharedOverlapRefs(result.SharedOverlaps)
 		}
+		if notice := ticket.LockingOffNotice(result.LockingOffOverlaps); notice != "" {
+			granted += "\n" + notice
+			out.LockingOffOverlaps = toLockingOffOverlapRefs(result.LockingOffOverlaps)
+		}
 		if h.workspace != nil {
 			if notice := h.workspace.ClaimNotice(ctx, agentID, ref.Paths); notice != "" {
 				// Last, and in capitals: it outranks everything above.
@@ -245,8 +265,9 @@ type scopeExtendOutput struct {
 	toolNotes
 	Granted bool   `json:"granted"`
 	Denied  string `json:"denied,omitempty"`
-	// SharedOverlaps: see ticketNextOutput.
-	SharedOverlaps []sharedOverlapRef `json:"shared_overlaps,omitempty"`
+	// SharedOverlaps, LockingOffOverlaps: see ticketNextOutput.
+	SharedOverlaps     []sharedOverlapRef     `json:"shared_overlaps,omitempty"`
+	LockingOffOverlaps []lockingOffOverlapRef `json:"locking_off_overlaps,omitempty"`
 }
 
 func (h *Handler) scopeExtend(ctx context.Context, agentID uuid.UUID, in scopeExtendInput) (*mcp.CallToolResult, scopeExtendOutput, error) {
@@ -272,6 +293,10 @@ func (h *Handler) scopeExtend(ctx context.Context, agentID uuid.UUID, in scopeEx
 	if notice := ticket.SharedOverlapNotice(result.SharedOverlaps); notice != "" {
 		msg += "\n" + notice
 		out.SharedOverlaps = toSharedOverlapRefs(result.SharedOverlaps)
+	}
+	if notice := ticket.LockingOffNotice(result.LockingOffOverlaps); notice != "" {
+		msg += "\n" + notice
+		out.LockingOffOverlaps = toLockingOffOverlapRefs(result.LockingOffOverlaps)
 	}
 	return text("%s", msg), out, nil
 }

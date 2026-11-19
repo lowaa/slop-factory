@@ -23,6 +23,9 @@ type ScopeOverlap struct {
 	// path: the overlap is only a notice, and Resolve says how a clash there
 	// is settled when the base branch is merged. Empty for a real conflict.
 	Resolve string
+	// LockingOff is set on a real conflict when the tenant has scope locking
+	// off: it would have blocked a claim, and now blocks nothing.
+	LockingOff bool
 }
 
 // liveStatuses are the statuses whose scopes can keep another ticket from
@@ -57,6 +60,10 @@ func (s *Service) ScopeOverlapsWith(ctx context.Context, id int64, paths []model
 	if err != nil {
 		return nil, err
 	}
+	locking, err := s.store.ScopeLocking(ctx)
+	if err != nil {
+		return nil, err
+	}
 	overlaps := []ScopeOverlap{}
 	for i := range live {
 		other := &live[i]
@@ -65,7 +72,7 @@ func (s *Service) ScopeOverlapsWith(ctx context.Context, id int64, paths []model
 		}
 		if mine, theirs, resolve, ok := firstScopeConflict(paths, other.Paths, shared); ok {
 			overlaps = append(overlaps, ScopeOverlap{
-				TicketID: other.ID, Title: other.Title, Status: other.Status, Path: mine, Other: theirs, Resolve: resolve,
+				TicketID: other.ID, Title: other.Title, Status: other.Status, Path: mine, Other: theirs, Resolve: resolve, LockingOff: !locking && resolve == "",
 			})
 		}
 	}
@@ -98,6 +105,11 @@ func firstScopeConflict(mine, theirs []model.Path, shared *scope.SharedPaths) (s
 // path: there is nothing to narrow.
 const SharedOverlapsHint = "Every overlap lies inside a shared path of the workspace: none blocks a claim, " +
 	"and a clash there is resolved when the base branch is merged (see the resolve kind)."
+
+// LockingOffOverlapsHint is said instead when the tenant has scope locking
+// off: nothing blocks, whatever the overlaps.
+const LockingOffOverlapsHint = "Scope locking is off for this tenant: these overlaps block nothing, " +
+	"and the clashes are met when the base branch is merged."
 
 // ScopeOverlapsHint is said to whoever sees overlaps, so the cost of a broad
 // scope is in front of them at the moment they can narrow it.

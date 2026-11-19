@@ -376,6 +376,10 @@ func pickCandidate(ctx context.Context, q db.Querier, agentID uuid.UUID, only *i
 	if err != nil {
 		return err
 	}
+	locking, err := scopeLocking(ctx, q)
+	if err != nil {
+		return err
+	}
 	candidates, err := candidateTickets(ctx, q, agentID, only, false)
 	if err != nil {
 		return err
@@ -400,13 +404,13 @@ func pickCandidate(ctx context.Context, q db.Querier, agentID uuid.UUID, only *i
 		}
 
 		evaluated = append(evaluated, candidateID)
-		blocked, sharedOverlaps := scanConflicts(candidateID, paths, held, shared)
-		if blocked != nil {
-			blockedBy[candidateID] = blocked
+		scan := scanConflicts(candidateID, paths, held, shared, locking)
+		if scan.Blocked != nil {
+			blockedBy[candidateID] = scan.Blocked
 			// Remember the first blockage, but keep looking: a later
 			// candidate may be free. Only report it if nothing is.
 			if result.Blocked == nil {
-				result.Blocked = blocked
+				result.Blocked = scan.Blocked
 			}
 			continue
 		}
@@ -417,7 +421,8 @@ func pickCandidate(ctx context.Context, q db.Querier, agentID uuid.UUID, only *i
 		}
 		result.Ticket = granted
 		result.Attempt = attempt
-		result.SharedOverlaps = sharedOverlaps
+		result.SharedOverlaps = scan.Shared
+		result.LockingOffOverlaps = scan.LockingOff
 		result.Blocked = nil
 		return finishGrant(ctx, q, candidateID, evaluated, blockedBy, result)
 	}
@@ -498,6 +503,10 @@ func holdingScope(ctx context.Context, q db.Querier, ids []int64) (map[int64]boo
 // not in review -- is skipped: it takes no files from anyone, and a claim
 // checks it when it is taken.
 func scopeConflicts(ctx context.Context, q db.Querier, ids []int64, shared *scope.SharedPaths) ([]Blocked, error) {
+	locking, err := scopeLocking(ctx, q)
+	if err != nil || !locking {
+		return nil, err
+	}
 	holding, err := holdingScope(ctx, q, ids)
 	if err != nil || len(holding) == 0 {
 		return nil, err
@@ -512,7 +521,7 @@ func scopeConflicts(ctx context.Context, q db.Querier, ids []int64, shared *scop
 		if err != nil {
 			return nil, err
 		}
-		if blocked := firstConflict(id, paths, heldByOthers(held, id), shared); blocked != nil {
+		if blocked := firstConflict(id, paths, heldByOthers(held, id), shared, true); blocked != nil {
 			conflicts = append(conflicts, *blocked)
 		}
 	}
@@ -532,22 +541,51 @@ func heldByOthers(held []heldScope, ticketID int64) []heldScope {
 	return others
 }
 
+// scopeLocking reads whether overlapping scopes block, inside the caller's
+// transaction so a toggle cannot land between a decision and its grant.
+func scopeLocking(ctx context.Context, q db.Querier) (bool, error) {
+	return settings.EnabledIn(ctx, q, settings.TicketScopeLocking)
+}
+
+// ScopeLocking reads the setting outside a claim, for display and feedback.
+func (s *PostgresStore) ScopeLocking(ctx context.Context) (bool, error) {
+	var locking bool
+	err := s.db.InReadTx(ctx, func(q db.Querier) error {
+		var err error
+		locking, err = scopeLocking(ctx, q)
+		return err
+	})
+	return locking, err
+}
+
 // firstConflict reports the first held scope any of paths collides with,
-// leaving out collisions wholly inside a shared path.
+// leaving out collisions wholly inside a shared path, and nil whatever
+// collides when locking is off.
 // A ticket with no declared scope conflicts with nothing -- it is the
 // filer's statement that the work touches nothing exclusive. Neither does a
 // ticket conflict with its own held scopes: sibling attempts share the
 // ticket's paths, so attempt 2 must not be blocked by attempt 1's lease.
-func firstConflict(candidateID int64, paths []string, held []heldScope, shared *scope.SharedPaths) *Blocked {
-	blocked, _ := scanConflicts(candidateID, paths, held, shared)
-	return blocked
+func firstConflict(candidateID int64, paths []string, held []heldScope, shared *scope.SharedPaths, locking bool) *Blocked {
+	return scanConflicts(candidateID, paths, held, shared, locking).Blocked
 }
 
-// scanConflicts is firstConflict, and the collisions it let through because
-// they lie inside a shared path: still worth telling whoever is granted the
-// scope, since they will meet the clash when they merge main.
-func scanConflicts(candidateID int64, paths []string, held []heldScope, shared *scope.SharedPaths) (*Blocked, []SharedOverlap) {
-	var overlaps []SharedOverlap
+// conflictScan is what scanConflicts found: the collision that blocks, if
+// any, and the ones that were let through.
+type conflictScan struct {
+	Blocked *Blocked
+	// Shared are collisions inside a shared path.
+	Shared []SharedOverlap
+	// LockingOff are collisions that would have blocked, with locking off.
+	LockingOff []LockingOffOverlap
+}
+
+// scanConflicts is firstConflict, and the collisions it let through: those
+// inside a shared path, which whoever is granted the scope will meet when
+// they merge main, and, with locking off, the ones that would have blocked.
+// It is the one place that decides a collision blocks, so a call site cannot
+// keep blocking by forgetting the setting.
+func scanConflicts(candidateID int64, paths []string, held []heldScope, shared *scope.SharedPaths, locking bool) *conflictScan {
+	var scan conflictScan
 	for _, p := range paths {
 		for _, h := range held {
 			if h.ticketID == candidateID {
@@ -556,22 +594,27 @@ func scanConflicts(candidateID int64, paths []string, held []heldScope, shared *
 			conflict, resolve := scope.SharedClash(p, h.path, shared)
 			switch {
 			case !conflict:
-			case resolve == "":
-				return &Blocked{
+			case resolve == "" && locking:
+				return &conflictScan{Blocked: &Blocked{
 					TicketID:            candidateID,
 					ConflictingTicketID: h.ticketID,
 					ConflictingPath:     h.path,
 					HolderAgentID:       h.agentID,
-				}, nil
+				}}
+			case resolve == "":
+				o := LockingOffOverlap{TicketID: h.ticketID, Path: scope.OverlapOf(p, h.path)}
+				if !slices.Contains(scan.LockingOff, o) {
+					scan.LockingOff = append(scan.LockingOff, o)
+				}
 			default:
 				o := SharedOverlap{TicketID: h.ticketID, Path: scope.OverlapOf(p, h.path), Resolve: resolve}
-				if !slices.Contains(overlaps, o) {
-					overlaps = append(overlaps, o)
+				if !slices.Contains(scan.Shared, o) {
+					scan.Shared = append(scan.Shared, o)
 				}
 			}
 		}
 	}
-	return nil, overlaps
+	return &scan
 }
 
 // grant stamps acquired_at with the wall clock, not the column's now()
@@ -665,6 +708,10 @@ func (s *PostgresStore) Peek(ctx context.Context, agentID uuid.UUID, only *int64
 		if err != nil {
 			return err
 		}
+		locking, err := scopeLocking(ctx, q)
+		if err != nil {
+			return err
+		}
 		// Scopes held by this agent's own lease are not an obstacle to it.
 		// Those of a ticket it has in review are: Claim would refuse them.
 		mine := held[:0:0]
@@ -683,7 +730,7 @@ func (s *PostgresStore) Peek(ctx context.Context, agentID uuid.UUID, only *int64
 			if err != nil {
 				return err
 			}
-			if blocked := firstConflict(candidateID, paths, mine, shared); blocked != nil {
+			if blocked := firstConflict(candidateID, paths, mine, shared, locking); blocked != nil {
 				if result.Blocked == nil {
 					result.Blocked = blocked
 				}

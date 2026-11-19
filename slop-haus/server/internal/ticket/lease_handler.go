@@ -80,6 +80,9 @@ type ClaimResponseBody struct {
 	// shared paths: nothing was blocked, but a clash there is resolved as
 	// each says when the base branch is merged.
 	SharedOverlaps []SharedOverlapBody `json:"shared_overlaps,omitempty"`
+	// LockingOffOverlaps are held scopes the granted ticket overlaps that
+	// would have blocked it, with the tenant's scope locking off.
+	LockingOffOverlaps []LockingOffOverlapBody `json:"locking_off_overlaps,omitempty"`
 	// Attempt and Guidance are what MCP's ticket_next returns beside the
 	// ticket, for a client that claims over REST: which attempt the lease is
 	// on and where its work goes. Set with Ticket.
@@ -92,6 +95,20 @@ type SharedOverlapBody struct {
 	TicketID int64  `json:"ticket_id" doc:"the ticket holding the other scope"`
 	Path     string `json:"path" doc:"what the two scopes share"`
 	Resolve  string `json:"resolve" enum:"migration,regenerate,merge" doc:"how a clash there is settled when the base branch is merged"`
+}
+
+// LockingOffOverlapBody is LockingOffOverlap on the wire.
+type LockingOffOverlapBody struct {
+	TicketID int64  `json:"ticket_id" doc:"the ticket holding the other scope"`
+	Path     string `json:"path" doc:"what the two scopes share"`
+}
+
+func lockingOffOverlapBodies(overlaps []LockingOffOverlap) []LockingOffOverlapBody {
+	out := make([]LockingOffOverlapBody, len(overlaps))
+	for i, o := range overlaps {
+		out[i] = LockingOffOverlapBody(o)
+	}
+	return out
 }
 
 func sharedOverlapBodies(overlaps []SharedOverlap) []SharedOverlapBody {
@@ -125,6 +142,7 @@ func (h *Handler) ClaimNext(ctx context.Context, input *ClaimRequest) (*ClaimRes
 		body := ticketToBody(*result.Ticket)
 		resp.Body.Ticket = &body
 		resp.Body.SharedOverlaps = sharedOverlapBodies(result.SharedOverlaps)
+		resp.Body.LockingOffOverlaps = lockingOffOverlapBodies(result.LockingOffOverlaps)
 		branch := ClaimBranch(result)
 		number := 1
 		if result.Attempt != nil {

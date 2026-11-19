@@ -62,6 +62,12 @@ const ProvisionFromBoard = "provision_from_board"
 // the workspace manifest. Off, the supervisor leaves them alone.
 const WorkspaceReconcile = "workspace_reconcile"
 
+// TicketScopeLocking makes a ticket's path scopes exclusive: a claim, scope
+// extension or move into review is refused while another ticket holds an
+// overlapping scope. Off, the same clashes are reported as notices and nothing
+// is refused, and a ticket in review stops holding its files too.
+const TicketScopeLocking = "ticket_scope_locking"
+
 // IntegrationLockDeadHolderAfter is how many minutes the integration lock's
 // holder may go without a heartbeat before the board flags it as dead. Only a
 // flag: freeing the lock stays a person's call.
@@ -170,6 +176,7 @@ var known = newKnown(
 	Spec{Definition: gosettings.Definition{Name: TicketProcessingEnabled, Default: BoolValue(true)}},
 	Spec{Definition: gosettings.Definition{Name: ProvisionFromBoard, Default: BoolValue(false)}, OwnerOnly: true},
 	Spec{Definition: gosettings.Definition{Name: WorkspaceReconcile, Default: BoolValue(false)}, OwnerOnly: true},
+	Spec{Definition: gosettings.Definition{Name: TicketScopeLocking, Default: BoolValue(true)}, OwnerOnly: true},
 	Spec{Definition: gosettings.Definition{Name: IntegrationLockDeadHolderAfter, Default: IntValue(DefaultDeadHolderAfterMinutes)},
 		Validate: validateDeadHolderAfter},
 	Spec{Definition: gosettings.Definition{Name: IntegrationLockPriorityAgingMinutes, Default: IntValue(DefaultPriorityAgingMinutes)},

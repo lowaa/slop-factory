@@ -25,7 +25,7 @@ type ticketCreateInput struct {
 	Title     string   `json:"title"`
 	Body      string   `json:"body,omitempty"`
 	Priority  string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
-	Paths     []string `json:"paths,omitempty" jsonschema:"the narrowest repo-relative paths you expect the work to write, end a directory with /. Prefer leaf directories or files over shared roots: a broad scope stops every overlapping ticket from being claimed while this one is held. Whoever takes the ticket extends it with ticket_scope_extend as it finds it needs more"`
+	Paths     []string `json:"paths,omitempty" jsonschema:"the narrowest repo-relative paths you expect the work to write, end a directory with /. Prefer leaf directories or files over shared roots: where the tenant locks path scopes, a broad scope stops every overlapping ticket from being claimed while this one is held. Whoever takes the ticket extends it with ticket_scope_extend as it finds it needs more"`
 	Status    string   `json:"status,omitempty" jsonschema:"preparing (the default) or open. Only open if you were specifically asked to file it as open"`
 	BlockedOn []int64  `json:"blocked_on,omitempty" jsonschema:"ticket numbers the new ticket waits on"`
 	Roles     []string `json:"roles,omitempty" jsonschema:"role names, exactly as spelled; only an agent with them may claim it"`
@@ -80,6 +80,9 @@ func (h *Handler) ticketCreate(ctx context.Context, agentID uuid.UUID, in ticket
 		hint := ticket.SharedOverlapsHint
 		if slices.ContainsFunc(overlaps, func(o ticket.ScopeOverlap) bool { return o.Resolve == "" }) {
 			hint = ticket.ScopeOverlapsHint
+			if slices.ContainsFunc(overlaps, func(o ticket.ScopeOverlap) bool { return o.LockingOff }) {
+				hint = ticket.LockingOffOverlapsHint
+			}
 		}
 		message += "\n\nIts scopes overlap live tickets:\n" + overlapLines(overlaps) + "\n" + hint +
 			" A human sees this list when opening the ticket and can narrow its paths on the board."
@@ -108,12 +111,14 @@ type overlapRef struct {
 	Other string `json:"other"`
 	// Resolve is set for an overlap inside a shared path, which blocks nothing.
 	Resolve string `json:"resolve,omitempty"`
+	// LockingOff is set when the tenant's scope locking is off: it blocks nothing.
+	LockingOff bool `json:"locking_off,omitempty"`
 }
 
 func toOverlapRefs(overlaps []ticket.ScopeOverlap) []overlapRef {
 	out := make([]overlapRef, len(overlaps))
 	for i, o := range overlaps {
-		out[i] = overlapRef{ID: o.TicketID, Title: o.Title, Status: string(o.Status), Path: o.Path, Other: o.Other, Resolve: o.Resolve}
+		out[i] = overlapRef{ID: o.TicketID, Title: o.Title, Status: string(o.Status), Path: o.Path, Other: o.Other, Resolve: o.Resolve, LockingOff: o.LockingOff}
 	}
 	return out
 }
@@ -124,6 +129,9 @@ func overlapLines(overlaps []ticket.ScopeOverlap) string {
 		lines[i] = fmt.Sprintf("- #%d %q (%s): %s overlaps %s", o.TicketID, o.Title, o.Status, o.Path, o.Other)
 		if o.Resolve != "" {
 			lines[i] += fmt.Sprintf(" [shared, %s: blocks nothing]", o.Resolve)
+		}
+		if o.LockingOff {
+			lines[i] += " [scope locking is off: blocks nothing]"
 		}
 	}
 	return strings.Join(lines, "\n")

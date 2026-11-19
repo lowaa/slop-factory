@@ -79,6 +79,19 @@ type ClaimResult struct {
 	// SharedOverlaps are the held scopes the granted ticket overlaps only
 	// inside shared paths, which did not keep it from being granted.
 	SharedOverlaps []SharedOverlap
+	// LockingOffOverlaps are the held scopes the granted ticket overlaps
+	// that would have blocked it, were the tenant's scope locking on.
+	LockingOffOverlaps []LockingOffOverlap
+}
+
+// LockingOffOverlap is a held scope that overlaps another ticket's while the
+// tenant has scope locking off: it blocks nothing, and is told so the worker
+// knows it shares files with that ticket and will meet the clash at merge.
+type LockingOffOverlap struct {
+	// TicketID is the ticket holding the other scope.
+	TicketID int64
+	// Path is what the two scopes share: the narrower of them.
+	Path string
 }
 
 // SharedOverlap is a held scope that overlaps another ticket's only inside a
@@ -110,6 +123,8 @@ type ExtendResult struct {
 	// SharedOverlaps are the held scopes the extension overlaps only inside
 	// shared paths, which did not stop it.
 	SharedOverlaps []SharedOverlap
+	// LockingOffOverlaps: see ClaimResult.
+	LockingOffOverlaps []LockingOffOverlap
 }
 
 // NarrowResult is what a scope narrowing left the ticket with.

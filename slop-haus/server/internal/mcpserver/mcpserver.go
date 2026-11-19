@@ -3,7 +3,7 @@
 //
 // Every tool is a thin caller of the same services the REST handlers use.
 // A rule reimplemented slightly differently here is how "two agents can't
-// hold overlapping paths" stops being a property of the system and becomes
+// hold overlapping paths" (where the tenant locks scopes) stops being a property of the system and becomes
 // a property of whichever door the agent came through.
 //
 // Two constraints shape the surface:

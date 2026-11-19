@@ -14,6 +14,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/db"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/db/dbtest"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/pendingaction"
+	"github.com/lowaa/slop-factory/slop-haus/server/internal/settings"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/ticket"
 	"github.com/lowaa/slop-factory/slop-haus/server/internal/ticket/model"
 )
@@ -401,4 +402,24 @@ func TestApprovingAnEditWhoseNewPathsAreRefusedBeforeTheTransactionIsRecordedAsF
 	got, err := d.tickets.Get(d.ctx, target.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "old title", got.Title)
+}
+
+// With the tenant's scope locking off a real overlap blocks nothing, and the
+// approval card says so rather than showing a plain conflict.
+func TestAPendingEditCardMarksOverlapsAsBlockingNothingWhenLockingIsOff(t *testing.T) {
+	d := newDecider(t)
+	target := d.editTarget(t, ticket.StatusPreparing, "a/old/")
+	d.editTarget(t, ticket.StatusOpen, "a/new/deep.go")
+	p := d.mustProposeEdit(t, target.ID, &pendingaction.EditPayload{BaseRevision: target.Revision, Paths: []string{"a/new/"}})
+	_, err := d.database.Exec(d.ctx, `
+		INSERT INTO tenant_settings (setting_name, setting_type, bool_value) VALUES ($1, 'bool', false)`,
+		settings.TicketScopeLocking)
+	require.NoError(t, err)
+
+	v, err := d.svc.ViewOf(d.ctx, testPerson(), p.ID)
+	require.NoError(t, err)
+
+	got := pendingaction.ToBody(v).Edit.Overlaps
+	require.Len(t, got, 1)
+	assert.True(t, got[0].LockingOff)
 }

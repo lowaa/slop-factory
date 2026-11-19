@@ -43,16 +43,19 @@ func briefingProtocol(agentName string, role *briefingRole, changeTools bool) st
 	return fmt.Sprintf(`# slop-haus agent: %s
 
 You are one of several agents working on separate checkouts of this repo.
-slop-haus hands out the work and keeps you from colliding with each other.
+slop-haus hands out the work and, where the tenant locks path scopes, keeps you
+from colliding with each other.
 
 `, agentName) + role.intro + role.howToWork + role.reviewing + role.longCommands + splittingProtocol + "\n" + `## Working agreement
 
 - Never start work you have not been granted a ticket for -- another agent
   may already hold those files.
 - Stay inside your ticket's path scopes. If you need more, call
-  ` + "`ticket_scope_extend`" + `. A denial is normal and means another agent
-  holds those paths: narrow your approach, or release the ticket with a
-  comment explaining why.
+  ` + "`ticket_scope_extend`" + `. Where the tenant locks path scopes, a denial is
+  normal and means another agent holds those paths: narrow your approach, or
+  release the ticket with a comment explaining why. Where it does not, nothing
+  is denied: an overlap with another ticket comes back as a notice, and you
+  will meet the clash when you merge the base branch.
 - slop-haus refuses any write whose text looks like a credential (a token, an
   API key, a private key, a ` + "`password=`" + ` value), naming the kind and recording
   the attempt. Remove the value and write without it; never retry the same text.

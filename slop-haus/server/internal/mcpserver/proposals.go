@@ -89,7 +89,7 @@ func registerConsoleTools(server *mcp.Server, h *Handler) {
 			"ticket in preparing to open in the same approval: use that instead of a separate propose_ready when a preparing ticket needs both, " +
 			"because a ready proposed beside a pending edit on the same ticket cannot be approved until the edit is decided. It cannot touch " +
 			"a done or cancelled ticket, or edit one an agent holds: that agent owns it then, so comment on it instead. Paths that " +
-			"overlap another ticket are shown on the approval card; they are refused only where the board refuses them too, when the " +
+			"overlap another ticket are shown on the approval card; where the tenant locks path scopes, they are refused only where the board refuses them too, when the " +
 			"ticket or the one it overlaps holds its scope. Nothing changes until the person approves it on the board. " + cannotApprove + " " + autoApproveDoc,
 	}, h.proposeTicketEdit)
 

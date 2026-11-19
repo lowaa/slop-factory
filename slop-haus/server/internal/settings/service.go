@@ -294,6 +294,15 @@ func (s *Service) WorkspaceReconcileEnabled(ctx context.Context) (bool, error) {
 	return found.Value.Bool, nil
 }
 
+// ScopeLockingEnabled reports whether overlapping ticket scopes block.
+func (s *Service) ScopeLockingEnabled(ctx context.Context) (bool, error) {
+	found, err := s.Get(ctx, TicketScopeLocking)
+	if err != nil {
+		return false, err
+	}
+	return found.Value.Bool, nil
+}
+
 // requireOwner refuses a non-owner's write to an owner-only setting, and any
 // such write when no owner check is configured: failing open would hand an
 // ordinary member the steward's switches.

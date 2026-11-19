@@ -435,7 +435,7 @@ func TestServe_SignedInUserAndAgentRoutes(t *testing.T) {
 
 	resp = do(t, &request{method: http.MethodGet, url: b.base + "/api/queue/blockage", token: userToken})
 	require.Equal(t, http.StatusOK, resp.code, resp.body)
-	assert.JSONEq(t, `{"blockage":null}`, resp.body)
+	assert.JSONEq(t, `{"blockage":null,"locking_off":false}`, resp.body)
 
 	agentToken := b.agentToken(t)
 	resp = do(t, &request{method: http.MethodPost, url: b.base + "/api/claims", body: `{}`, token: agentToken})

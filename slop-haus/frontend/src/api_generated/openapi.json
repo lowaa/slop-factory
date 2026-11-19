@@ -1829,6 +1829,12 @@
           "guidance": {
             "$ref": "#/components/schemas/Guidance"
           },
+          "locking_off_overlaps": {
+            "items": {
+              "$ref": "#/components/schemas/LockingOffOverlapBody"
+            },
+            "type": "array"
+          },
           "shared_overlaps": {
             "items": {
               "$ref": "#/components/schemas/SharedOverlapBody"
@@ -6515,6 +6521,25 @@
         ],
         "type": "object"
       },
+      "LockingOffOverlapBody": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "what the two scopes share",
+            "type": "string"
+          },
+          "ticket_id": {
+            "description": "the ticket holding the other scope",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "path"
+        ],
+        "type": "object"
+      },
       "LoginRequestBody": {
         "additionalProperties": false,
         "properties": {
@@ -7952,10 +7977,14 @@
                 "type": "null"
               }
             ]
+          },
+          "locking_off": {
+            "type": "boolean"
           }
         },
         "required": [
-          "blockage"
+          "blockage",
+          "locking_off"
         ],
         "type": "object"
       },
@@ -9630,6 +9659,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "locking_off": {
+            "type": "boolean"
+          },
           "narrowings": {
             "format": "int64",
             "type": "integer"
@@ -9665,7 +9697,8 @@
           "blockers",
           "paths",
           "denials",
-          "narrowings"
+          "narrowings",
+          "locking_off"
         ],
         "type": "object"
       },
@@ -9720,6 +9753,10 @@
       "ScopeOverlapBody": {
         "additionalProperties": false,
         "properties": {
+          "locking_off": {
+            "description": "set when the tenant has scope locking off: this overlap would have blocked a claim, and now blocks nothing",
+            "type": "boolean"
+          },
           "other": {
             "type": "string"
           },

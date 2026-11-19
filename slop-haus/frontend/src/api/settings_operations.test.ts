@@ -17,8 +17,8 @@ const operations: Record<string, Operation> = {
     call: (c) => c.getQueueBlockage(),
     method: "GET",
     url: "/api/queue/blockage",
-    response: { blockage },
-    result: blockage,
+    response: { blockage, locking_off: false },
+    result: { blockage, lockingOff: false },
   },
   listIntegrationLocks: { call: (c) => c.listIntegrationLocks(), method: "GET", url: "/api/integration_locks", response: { locks: [] }, result: [] },
   forceUnlockIntegration: {

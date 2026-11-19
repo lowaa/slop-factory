@@ -80,13 +80,15 @@ export default function EditChanges({ edit, ticketId }: { edit: EditChange; tick
       {edit.open && <p className="edit-changes__opens">and moves it to open</p>}
       {edit.overlaps && edit.overlaps.length > 0 && (
         <div role="note" className="edit-changes__overlaps">
-          <strong>These paths overlap live tickets</strong>, so they can't be claimed in parallel, unless marked shared. A real
-          conflict is fine.
+          <strong>These paths overlap live tickets</strong>
+          {edit.overlaps.some((o) => o.locking_off)
+            ? ", but scope locking is off for this tenant, so none of them blocks a claim."
+            : ", so they can't be claimed in parallel, unless marked shared. A real conflict is fine."}
           <ul>
             {edit.overlaps.map((o) => (
               <li key={o.ticket_id}>
                 #{o.ticket_id} {o.title} ({o.status}): {o.path} overlaps {o.other}
-                <SharedOverlapTag resolve={o.resolve} />
+                <SharedOverlapTag resolve={o.resolve} lockingOff={o.locking_off} />
               </li>
             ))}
           </ul>

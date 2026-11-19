@@ -51,6 +51,12 @@ function ScopeCostView({ days }: { days: 7 | 30 }) {
 function ScopeCostBody({ report }: { report: ScopeCostReport }) {
   return (
     <>
+      {report.locking_off && (
+        <p className="scope-cost__note" data-testid="scope-cost-locking-off">
+          Scope locking is off: no ticket is held back or denied by a scope now, so an empty report here does not mean
+          scopes do not overlap.
+        </p>
+      )}
       <p className="scope-cost__note" data-testid="scope-cost-rules">
         A ticket is held back when a claim finds it ready but its paths overlap a scope another ticket holds. A wait still
         going counts up to the end of the period. Idle capacity is time a worker had no ticket while one was held back; it

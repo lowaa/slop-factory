@@ -7,7 +7,16 @@ const HOW_RESOLVED: Record<string, string> = {
 // SharedOverlapTag marks an overlap that lies inside a shared path of the
 // workspace: it blocks nothing, and the kind says how a clash there is
 // settled when main is merged.
-export default function SharedOverlapTag({ resolve }: { resolve?: string }) {
+// With lockingOff, a real conflict is marked too: the tenant does not block on it.
+export default function SharedOverlapTag({ resolve, lockingOff }: { resolve?: string; lockingOff?: boolean }) {
+  if (!resolve && lockingOff) {
+    return (
+      <>
+        {" "}
+        <em>(scope locking is off, blocks nothing)</em>
+      </>
+    );
+  }
   if (!resolve) return null;
   return (
     <>

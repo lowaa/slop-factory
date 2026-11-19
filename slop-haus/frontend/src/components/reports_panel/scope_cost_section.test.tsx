@@ -57,6 +57,14 @@ describe("ScopeCostSection", () => {
     expect(screen.getByTestId("scope-cost-narrowings")).toHaveTextContent("narrowed their scope 1 time ");
   });
 
+  it("says scope locking is off, so an empty report is not a clean one", async () => {
+    vi.spyOn(apiClient, "getScopeCostReport").mockResolvedValue(makeScopeCostReport({ locking_off: true }));
+
+    await render();
+
+    expect(await screen.findByTestId("scope-cost-locking-off")).toHaveTextContent("Scope locking is off");
+  });
+
   it("says nothing was held back rather than showing zeros", async () => {
     vi.spyOn(apiClient, "getScopeCostReport").mockResolvedValue(makeScopeCostReport());
 

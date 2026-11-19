@@ -5146,6 +5146,7 @@ export interface components {
             attempt?: components["schemas"]["AttemptView"];
             blocked: components["schemas"]["BlockedBody"] | null;
             guidance?: components["schemas"]["Guidance"];
+            locking_off_overlaps?: components["schemas"]["LockingOffOverlapBody"][];
             shared_overlaps?: components["schemas"]["SharedOverlapBody"][];
             ticket: components["schemas"]["TicketBody"] | null;
         };
@@ -6553,6 +6554,15 @@ export interface components {
              */
             waited_seconds: number;
         };
+        LockingOffOverlapBody: {
+            /** @description what the two scopes share */
+            path: string;
+            /**
+             * Format: int64
+             * @description the ticket holding the other scope
+             */
+            ticket_id: number;
+        };
         LoginRequestBody: {
             email: string;
             password: string;
@@ -6979,6 +6989,7 @@ export interface components {
         };
         QueueBlockageResponseBody: {
             blockage: components["schemas"]["QueueBlockageBody"] | null;
+            locking_off: boolean;
         };
         ReasonBody: {
             reason?: string;
@@ -7445,6 +7456,7 @@ export interface components {
             idle_blocked_seconds: number;
             /** Format: int64 */
             intervals: number;
+            locking_off: boolean;
             /** Format: int64 */
             narrowings: number;
             paths: components["schemas"]["ScopePathBody"][];
@@ -7469,6 +7481,8 @@ export interface components {
             total: number;
         };
         ScopeOverlapBody: {
+            /** @description set when the tenant has scope locking off: this overlap would have blocked a claim, and now blocks nothing */
+            locking_off?: boolean;
             other: string;
             path: string;
             /**

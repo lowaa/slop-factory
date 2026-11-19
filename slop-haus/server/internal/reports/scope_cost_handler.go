@@ -73,6 +73,9 @@ type ScopeCostBody struct {
 	Paths              []ScopePathBody    `json:"paths"`
 	Denials            ScopeDenialsBody   `json:"denials"`
 	Narrowings         int64              `json:"narrowings"`
+	// LockingOff is set when the tenant has scope locking off: nothing is
+	// held back or denied while it is, so an empty report says little.
+	LockingOff bool `json:"locking_off"`
 }
 
 func scopeCostBody(c *ScopeCost) *ScopeCostBody {
@@ -87,7 +90,7 @@ func scopeCostBody(c *ScopeCost) *ScopeCostBody {
 		Denials: ScopeDenialsBody{Total: c.Denials.Total, Granted: c.Denials.Granted, Narrowed: c.Denials.Narrowed,
 			GaveUp: c.Denials.GaveUp, Open: c.Denials.Open, MedianSecondsToResolve: c.Denials.MedianSecondsToResolve,
 			Paths: make([]ScopePathCountBody, 0, len(c.Denials.Paths))},
-		Narrowings: c.Narrowings,
+		Narrowings: c.Narrowings, LockingOff: c.LockingOff,
 	}
 	for _, t := range c.Tickets {
 		b.Tickets = append(b.Tickets, ScopeWaitBody{ID: t.TicketID, Title: t.Title, Seconds: t.Seconds,

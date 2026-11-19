@@ -19,6 +19,9 @@ type queueBlockageResponse struct {
 	Body struct {
 		// Blockage is null when nothing is waiting on scopes.
 		Blockage *QueueBlockageBody `json:"blockage"`
+		// LockingOff is set when the tenant has turned scope locking off: a
+		// null blockage then means nothing can block, not that nothing does.
+		LockingOff bool `json:"locking_off"`
 	}
 }
 
@@ -28,6 +31,11 @@ func (h *Handler) GetQueueBlockage(ctx context.Context, _ *struct{}) (*queueBloc
 		return nil, h.mapError(err)
 	}
 	resp := &queueBlockageResponse{}
+	locking, err := h.svc.ScopeLocking(ctx)
+	if err != nil {
+		return nil, h.mapError(err)
+	}
+	resp.Body.LockingOff = !locking
 	if found != nil {
 		resp.Body.Blockage = &QueueBlockageBody{
 			TicketID: found.Blocked.TicketID, TicketTitle: found.TicketTitle,
