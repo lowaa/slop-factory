@@ -8,3 +8,4 @@ internal/landing/states.go EntryState.Valid #1697
 internal/landing/states.go From #1697
 internal/landing/states.go Transition.String #1697
 internal/landing/states.go Transitions #1697
+internal/codehost/binding/ package #5
