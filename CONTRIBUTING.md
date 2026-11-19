@@ -54,8 +54,9 @@ and breaks here.
 The supervisor runs on macOS, with one gap Linux does not have: macOS hides
 the environment of Apple's own binaries (`/bin/bash`, `/bin/sleep`, ...)
 from `ps -E`, so a run's processes are found through the token in their
-environment and through their parents. A command that left the run (its shell
-exited) before the supervisor looked is not found when the run is stopped;
+environment and through their parents, when the run is stopped. A
+background job whose shell had already exited by then (an Apple binary such
+as `sleep` left running by an earlier command) is not found;
 see `RunProcesses` in `slop-haus/supervisor/src/slop_haus_supervisor/harness/run_processes.py`.
 
 ## Images

@@ -30,10 +30,10 @@ class RunProcesses:
     binaries (/bin/bash, /bin/sleep, /usr/bin/*), so a run's processes there are those whose
     environment carries the token plus all their descendants by parent pid, and the re-check before a
     signal applies the same rule. What has once been found stays the run's while its start time is
-    unchanged, so stopping the harness first does not lose what it started. The limit: a
-    platform-binary command that was reparented away from the run before anything looked (its shell
-    exited, and it is in a session of its own) has neither the token on show nor a marked ancestor, so
-    it is not found. Linux reads /proc/<pid>/environ and has no such gap.
+    unchanged, so stopping the harness first does not lose what it started. The limit: the look happens
+    when the run is stopped, not during it, so a platform-binary command already reparented away by then
+    (a background job whose shell exited, in a session of its own) has neither the token on show nor a
+    marked ancestor, and is not found. Linux reads /proc/<pid>/environ and has no such gap.
     """
 
     def __init__(self, token: str) -> None:

@@ -34,3 +34,13 @@ setup() {
   assert_equal "$(ls -A "${DIR}")" ".built
 tool"
 }
+
+@test "install_dir with a trailing slash on the build still keeps another run's copy" {
+  mkdir "${DIR}"
+  touch "${DIR}/.built"
+  echo theirs > "${DIR}/tool"
+  install_dir "${TMP}/" "${DIR}"
+  assert_equal "$(cat "${DIR}/tool")" theirs
+  assert [ -f "${DIR}/.built" ]
+  assert [ ! -e "${TMP}" ]
+}

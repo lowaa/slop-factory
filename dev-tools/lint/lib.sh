@@ -23,8 +23,10 @@ normalise() {
 # move into an existing DIR, but BSD mv has no -T and nests TMP inside it, so
 # that nested copy is removed after. Never fails: callers check for DIR/.built.
 install_dir() {
-  mv "$1" "$2" 2> /dev/null || rm -rf "$1"
-  rm -rf "${2:?}/${1##*/}"
+  # Without its trailing slash, or the basename below is empty and DIR goes.
+  local tmp="${1%/}"
+  mv "${tmp}" "$2" 2> /dev/null || rm -rf "${tmp}"
+  rm -rf "${2:?}/${tmp##*/}"
 }
 
 # lint_files DIR: the files under DIR a linter should see, relative to it:
