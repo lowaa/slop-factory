@@ -18,6 +18,8 @@
 # too. README.md says how to triage.
 set -euo pipefail
 
+# shellcheck source=SCRIPTDIR/../../require_bash.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../../require_bash.sh"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TOP="$(cd -- "${HERE}/../../.." && pwd)"
 CONFIG="${HERE}/config.json"

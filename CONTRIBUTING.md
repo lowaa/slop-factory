@@ -25,6 +25,38 @@ Most need Docker.
 The soak test, the lists-at-scale e2e run and the harnesses at their latest
 releases run nightly (`.github/workflows/nightly.yml`), not on pull requests.
 
+A fresh checkout needs the root `npm ci` first: bats and the frontend's
+stylelint ratchet come from it.
+
+## macOS (Apple silicon)
+
+The suites run on an arm64 Mac as well as on CI's Linux. The images they
+build are arm64 there; the one exception pulled is `mailhog/mailhog`, which
+has no arm64 build and runs emulated (Docker Desktop's Rosetta or QEMU must
+stay on). What differs is the host:
+
+- **Docker Desktop** (or another daemon reachable at `/var/run/docker.sock`).
+  The first run of each suite builds its images cold, so expect it to take
+  several times longer than the next.
+- **bash 5**, first on `PATH`: `brew install bash`. macOS's `/bin/bash` is
+  3.2, and the host-side scripts stop with a message saying so
+  (`dev-tools/require_bash.sh`).
+- Go, Node 22 and uv on the host for the suites that run outside Docker
+  (`slop-haus/supervisor`, `slop-haus/token`, `slop-review`, the Go
+  libraries' lint), as on Linux.
+
+The host-side scripts stick to what BSD and GNU tools share. CI only runs
+Linux, so a script change that reaches for a GNU-only flag (`find -printf`,
+`mv -T`, `stat -c`, `date -r FILE`, `realpath --relative-to`) passes there
+and breaks here.
+
+The supervisor runs on macOS, with one gap Linux does not have: macOS hides
+the environment of Apple's own binaries (`/bin/bash`, `/bin/sleep`, ...)
+from `ps -E`, so a run's processes are found through the token in their
+environment and through their parents. A command that left the run (its shell
+exited) before the supervisor looked is not found when the run is stopped;
+see `RunProcesses` in `slop-haus/supervisor/src/slop_haus_supervisor/harness/run_processes.py`.
+
 ## Images
 
 Once ci passes on `main`, its last job pushes `ghcr.io/<owner>/slop-haus-api`

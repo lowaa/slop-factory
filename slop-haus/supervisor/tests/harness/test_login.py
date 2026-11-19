@@ -20,12 +20,12 @@ UID = 1000
 
 # Each fake records how it was run in $FAKE_DIR/<name>.log; FAKE_OK makes it log in.
 CODEX = """#!/bin/sh
-{ echo "home=$CODEX_HOME"; echo "mode=$(stat -c %a "$CODEX_HOME")"; echo "argv=$*"; } > "$FAKE_DIR/codex.log"
+{ echo "home=$CODEX_HOME"; echo "mode=$(stat -c %a "$CODEX_HOME" 2>/dev/null || stat -f %Lp "$CODEX_HOME")"; echo "argv=$*"; } > "$FAKE_DIR/codex.log"
 [ -n "$FAKE_OK" ] && printf '{"auth_mode":"chatgpt","tokens":{"id_token":"x"}}' > "$CODEX_HOME/auth.json"
 exit 0
 """
 PI = """#!/bin/sh
-{ echo "dir=$PI_CODING_AGENT_DIR"; echo "mode=$(stat -c %a "$PI_CODING_AGENT_DIR")"; } > "$FAKE_DIR/pi.log"
+{ echo "dir=$PI_CODING_AGENT_DIR"; echo "mode=$(stat -c %a "$PI_CODING_AGENT_DIR" 2>/dev/null || stat -f %Lp "$PI_CODING_AGENT_DIR")"; } > "$FAKE_DIR/pi.log"
 [ -n "$FAKE_OK" ] && printf '{"anthropic":{}}' > "$PI_CODING_AGENT_DIR/auth.json"
 exit 0
 """

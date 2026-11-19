@@ -15,6 +15,8 @@
 # keyed by go.mod and go.sum.
 set -euo pipefail
 export LC_ALL=C
+# shellcheck source=SCRIPTDIR/../require_bash.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../require_bash.sh"
 shopt -s inherit_errexit
 
 LINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -81,8 +83,7 @@ build_tools() {
     echo "go.sh: building the lint tools into ${dir}" >&2
     (cd "${LINT_DIR}" && GOWORK=off GOTOOLCHAIN=auto go build -o "${tmp}/" tool)
     touch "${tmp}/.built"
-    # Another run may have built it meanwhile; theirs is the same, keep it.
-    mv -T "${tmp}" "${dir}" 2> /dev/null || rm -rf "${tmp}"
+    install_dir "${tmp}" "${dir}"
     [[ -f "${dir}/.built" ]] || {
       echo "go.sh: could not put the lint tools in ${dir}" >&2
       exit 1
@@ -214,7 +215,7 @@ cd "${MODULE}"
 # artifact-store has no go.sum of its own, and the apps import siblings.
 # (LINT_GOWORK: the tests lint scratch modules outside it.)
 export GOWORK="${LINT_GOWORK:-${REPO}/go.work}"
-NESTED="$(find . -mindepth 2 -name go.mod -not -path '*/node_modules/*' -printf '%h/\n' | sed 's|^\./||')"
+NESTED="$(find . -mindepth 2 -name go.mod -not -path '*/node_modules/*' | sed -e 's|^\./||' -e 's|[^/]*$||')"
 
 failed=()
 for tool in "${tools[@]}"; do

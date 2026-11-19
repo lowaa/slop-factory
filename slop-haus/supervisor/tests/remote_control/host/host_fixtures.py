@@ -24,6 +24,7 @@ from typing import Any
 from unittest import mock
 
 from fakes import FakeClock
+from process_state import process_running
 from slop_haus_supervisor.remote_control.host.claude import RemoteControlClaude
 from slop_haus_supervisor.remote_control.host.conversation import WorkItem
 from slop_haus_supervisor.remote_control.host.host import Host, SessionHarness
@@ -133,15 +134,6 @@ def git(cwd: str, *args: str) -> str:
     if out.returncode != 0:
         raise AssertionError(f"git {' '.join(args)}: {out.stderr}")
     return out.stdout.strip()
-
-
-def process_running(pid: int) -> bool:
-    """Whether the process is there and not a zombie waiting to be reaped."""
-    try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
-            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
-    except OSError:
-        return False
 
 
 def process_gone(pid: int) -> bool:

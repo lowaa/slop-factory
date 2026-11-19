@@ -11,6 +11,13 @@
 # resolves through this script's BATS_LIB_PATH.
 set -euo pipefail
 
+# Inline rather than dev-tools/require_bash.sh: the server's test image copies
+# bats/ without dev-tools/. bats and lib/repo_test use bash 4 (mapfile).
+if ((BASH_VERSINFO[0] < 4)); then
+  echo "run.sh: needs bash >= 4 (this is ${BASH_VERSION}); on macOS \`brew install bash\` and make sure it is first on PATH" >&2
+  exit 1
+fi
+
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &> /dev/null && pwd)
 BATS="${ROOT}/node_modules/.bin/bats"
 

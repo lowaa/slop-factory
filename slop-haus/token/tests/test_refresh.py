@@ -8,6 +8,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -104,9 +105,24 @@ class StoreTest(StoreCase):
         self.assertEqual(stat.S_IMODE(os.stat(self.store.lock_path).st_mode), 0o600)
 
     def test_lock_is_not_inherited_by_children(self) -> None:
+        # The child compares each open fd with the lock file by device and inode, which needs no /proc (macOS).
+        # close_fds=False, or subprocess would close the fd itself and the test would pass without O_CLOEXEC.
+        child = (
+            "import os, sys\n"
+            "lock = os.stat(sys.argv[1])\n"
+            "for fd in range(min(os.sysconf('SC_OPEN_MAX'), 4096)):\n"
+            "    try:\n"
+            "        st = os.fstat(fd)\n"
+            "    except OSError:\n"
+            "        continue\n"
+            "    if (st.st_dev, st.st_ino) == (lock.st_dev, lock.st_ino):\n"
+            "        print('inherited', fd)\n"
+        )
         with self.store.locked():
-            out = subprocess.run(["ls", "-l", "/proc/self/fd"], capture_output=True, text=True, check=True).stdout
-        self.assertNotIn("credentials.lock", out)
+            out = subprocess.run(
+                [sys.executable, "-c", child, self.store.lock_path], capture_output=True, text=True, check=True, close_fds=False
+            ).stdout
+        self.assertEqual(out, "")
 
     def test_leftover_temp_files_are_removed_but_not_the_credentials(self) -> None:
         self.seed()

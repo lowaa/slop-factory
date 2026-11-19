@@ -8,6 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
+from process_state import process_running as alive
 from slop_haus_supervisor.fleet.child_process import SubprocessSpawner
 
 # Ignores TERM, starts a descendant in the same group that also ignores it, and says both pids.
@@ -19,15 +20,6 @@ with open(sys.argv[1], "w") as report:
     report.write(f"{os.getpid()} {kid.pid}")
 import time; time.sleep(60)
 """
-
-
-def alive(pid: int) -> bool:
-    """Running, not merely waiting to be reaped by whatever adopted it."""
-    try:
-        state = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0]
-    except OSError:
-        return False
-    return state != "Z"
 
 
 class SubprocessSpawnerTest(unittest.TestCase):
@@ -47,8 +39,10 @@ class SubprocessSpawnerTest(unittest.TestCase):
         child = SubprocessSpawner().spawn([sys.executable, "-c", code, str(self.report)], self.tmp, {"ONLY": "1"})
         self.addCleanup(child.terminate, 1)
 
-        # The interpreter adds LC_CTYPE itself.
-        self.assertEqual("['ONLY']", self.heard().replace("'LC_CTYPE', ", ""))
+        # What the host adds to every new process, not what the spawner passed on: the interpreter's LC_CTYPE, and
+        # macOS's __CF_USER_TEXT_ENCODING, which it sets in a child's environment whatever the parent gave it.
+        heard = self.heard().replace("'LC_CTYPE', ", "").replace(", '__CF_USER_TEXT_ENCODING'", "")
+        self.assertEqual("['ONLY']", heard)
 
     def test_terminate_ends_a_child_that_ignores_term_and_what_it_started(self) -> None:
         child = SubprocessSpawner().spawn([sys.executable, "-c", STUBBORN, str(self.report)], self.tmp, {})

@@ -31,6 +31,8 @@
 # only with the root's full `npm ci` (npm_complete.mjs checks).
 set -euo pipefail
 export LC_ALL=C
+# shellcheck source=SCRIPTDIR/../require_bash.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../require_bash.sh"
 shopt -s inherit_errexit
 
 LINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,10 +104,40 @@ while read -r runner dir _; do
   PROJECTS+=("${runner} ${dir}")
 done < "${REGISTRY}"
 
+# relative_to_repo PATH: PATH relative to the repo root, whether or not it
+# exists, with a leading .. if it is outside. Stands in for GNU's
+# `realpath -m --relative-to`, which BSD realpath lacks.
+relative_to_repo() {
+  local p="$1" part root parent out=() parts
+  [[ "${p}" == /* ]] || p="$(pwd -P)/${p}"
+  IFS=/ read -r -a parts <<< "${p}"
+  for part in "${parts[@]}"; do
+    case "${part}" in
+      '' | .) ;;
+      ..) ((${#out[@]} == 0)) || unset "out[${#out[@]}-1]" ;;
+      *) out+=("${part}") ;;
+    esac
+  done
+  p="$(IFS=/ && echo "/${out[*]}")"
+  # The directory part is resolved as a real path would be (macOS's /tmp is a
+  # link); the last part may not exist.
+  if parent="$(cd -P "${p%/*}/" 2> /dev/null && pwd -P)"; then
+    p="${parent%/}/${p##*/}"
+  fi
+  root="$(cd -P "${REPO}" && pwd -P)"
+  if [[ "${p}" == "${root}" ]]; then
+    echo .
+  elif [[ "${p}" == "${root}/"* ]]; then
+    echo "${p#"${root}"/}"
+  else
+    echo "../${p#/}"
+  fi
+}
+
 # The paths are the caller's, relative to where it ran; from here on they
 # are the repo's.
 for i in "${!paths[@]}"; do
-  rel="$(realpath -m --relative-to="${REPO}" "${paths[i]}")"
+  rel="$(relative_to_repo "${paths[i]}")"
   [[ "${rel}" != .. && "${rel}" != ../* ]] || {
     echo "lint.sh: ${paths[i]} is outside ${REPO}" >&2
     exit 2

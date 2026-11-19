@@ -24,6 +24,7 @@ from slop_haus_supervisor.review.result import PERSONA, ReviewOutcome, ReviewRes
 from slop_haus_supervisor.review.reviewer import ReviewRun, Reviewer, ReviewJob, ReviewSettings, review_environment
 from slop_haus_supervisor.slophaus.client import ReviewRequest
 from fakes import FakeClock
+from process_state import process_running
 
 BRANCH = "ticket-7-a1"
 WAIT = 120.0
@@ -154,7 +155,8 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual("Makes it two.", self.recorded("intent"))
         self.assertEqual("OPENROUTER_API_KEY=k\n", self.recorded("dotenv"))
         self.assertEqual("", self.recorded("status"), "the installed .env is not part of the change")
-        self.assertTrue(self.recorded("cwd").startswith(str(self.state / "agent-1")), "never the agent's checkout")
+        # The script records its physical cwd; macOS temp dirs sit under a /var symlink.
+        self.assertTrue(os.path.realpath(self.recorded("cwd").strip()).startswith(os.path.realpath(self.state / "agent-1")), "never the agent's checkout")
         self.assertEqual(
             f"https://slop.example\n{self.token}\nunset\n", self.recorded("reporting"),
             "posted to the server with the supervisor's token command; an inherited token would win over it",
@@ -382,7 +384,9 @@ class ReviewerTest(unittest.TestCase):
             time.sleep(0.01)
 
     def _sleepers(self) -> list[int]:
-        """This test's `sleep 600` processes, found through /proc: the image the tests run in has no pgrep."""
+        """This test's `sleep 600` processes, whose cwd is in the root: the image the tests run in has no pgrep."""
+        if not Path("/proc/self").is_dir():
+            return self._sleepers_without_proc()
         mine: list[int] = []
         for proc in Path("/proc").iterdir():
             if not proc.name.isdigit():
@@ -396,13 +400,23 @@ class ReviewerTest(unittest.TestCase):
                 continue
         return mine
 
+    def _sleepers_without_proc(self) -> list[int]:
+        """macOS: ps for the command, lsof for the cwd."""
+        listing = subprocess.run(["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True, check=True).stdout
+        mine: list[int] = []
+        for line in listing.splitlines():
+            pid, _, command = line.strip().partition(" ")
+            if command.split()[:2] not in (["sleep", "600"], ["/bin/sleep", "600"]):
+                continue
+            # The sandbox-less lsof prints `n<cwd>` for the process, and nothing when it has gone since the listing.
+            cwd = subprocess.run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"], capture_output=True, text=True, check=False).stdout
+            if any(Path(n[1:]).is_relative_to(self.root.resolve()) for n in cwd.splitlines() if n.startswith("n/")):
+                mine.append(int(pid))
+        return mine
+
     @staticmethod
     def _alive(pid: int) -> bool:
-        try:
-            status = Path(f"/proc/{pid}/status").read_text()
-        except OSError:
-            return False
-        return "State:\tZ" not in status
+        return process_running(pid)
 
 
 class CanonicalRemoteTest(unittest.TestCase):

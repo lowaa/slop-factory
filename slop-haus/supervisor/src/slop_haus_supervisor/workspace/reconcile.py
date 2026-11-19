@@ -139,25 +139,50 @@ Busy = Callable[[Path], bool]
 def process_in_workspace(workspace: Path) -> bool:
     """Whether another process has its working directory inside `workspace`: an agent's leftover background job.
 
-    Reading /proc can fail per process (it ended, or is not ours); an unreadable one is skipped, and a host with
-    no /proc finds nothing, so the advisory lock is then the only guard.
+    Reading a process's cwd can fail (it ended, or is not ours); an unreadable one is skipped, and a host where
+    neither /proc nor lsof can be read finds nothing, so the advisory lock is then the only guard.
     """
     root = workspace.resolve()
+    return any(cwd == root or root in cwd.parents for cwd in _other_process_cwds())
+
+
+def _other_process_cwds() -> list[Path]:
     me = os.getpid()
     try:
         entries = os.listdir("/proc")
     except OSError:
-        return False
+        return _lsof_cwds(me)
+    cwds: list[Path] = []
     for entry in entries:
         if not entry.isdigit() or int(entry) == me:
             continue
         try:
-            cwd = Path(os.readlink(f"/proc/{entry}/cwd"))
+            cwds.append(Path(os.readlink(f"/proc/{entry}/cwd")))
         except OSError:
             continue
-        if cwd == root or root in cwd.parents:
-            return True
-    return False
+    return cwds
+
+
+def _lsof_cwds(me: int) -> list[Path]:
+    """macOS has no /proc: lsof lists the working directories of the user's own processes (about 0.3s). It runs from `/` so
+    that it does not itself count as a process inside the workspace when this one is."""
+    try:
+        out = subprocess.run(["lsof", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fpn"], capture_output=True, text=True, check=False, timeout=30, cwd="/").stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return parse_lsof_cwds(out, me)
+
+
+def parse_lsof_cwds(out: str, me: int) -> list[Path]:
+    """The cwds in `lsof -Fpn` output, which is a `p<pid>` line then `n<path>` for each of that process's matches."""
+    cwds: list[Path] = []
+    pid = -1
+    for line in out.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n/") and pid != me:
+            cwds.append(Path(line[1:]))
+    return cwds
 
 
 def _deferred(actions: list[Action], reason: str) -> list[Action]:

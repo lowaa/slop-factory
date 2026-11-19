@@ -11,7 +11,8 @@ from support import TempDirTestCase
 class WrapperTest(TempDirTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.home = self.tmp / "home"
+        # The script finds the root by comparing $HOME with the physical cwd, which macOS reports under /private/var.
+        self.home = self.tmp.resolve() / "home"
         self.root = self.home / "slop-haus" / "acme"
         (self.root / "app").mkdir(parents=True)
         (self.root / "supervisor.toml").write_text("")

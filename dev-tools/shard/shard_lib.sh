@@ -34,6 +34,15 @@
 # Each shard's output goes to a log of its own and is printed whole, shard
 # by shard, rather than N streams interleaved.
 
+# shellcheck source=SCRIPTDIR/../require_bash.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../require_bash.sh"
+
+# file_mtime <file> -- its modification time in epoch seconds: GNU stat, then
+# BSD stat. (`date -r <file>` is GNU only; BSD's -r takes epoch seconds.)
+file_mtime() {
+  stat -c %Y "$1" 2> /dev/null || stat -f %m "$1"
+}
+
 # shard_check_count <n>
 shard_check_count() {
   if [[ ! "$1" =~ ^[1-9][0-9]*$ ]]; then
@@ -95,7 +104,7 @@ shard_run_each() {
     wait "${pids[i]}" || shard_status=$?
     # When its log was last written, not now: printed in shard order, a shard
     # that finished early is printed late.
-    echo "::group::${names[i - 1]} (exit ${shard_status}, done after $(($(date -r "${logs}/${i}.log" +%s) - start))s)"
+    echo "::group::${names[i - 1]} (exit ${shard_status}, done after $(($(file_mtime "${logs}/${i}.log") - start))s)"
     cat "${logs}/${i}.log"
     echo "::endgroup::"
     summary+=("${names[i - 1]}: ${shard_status}")

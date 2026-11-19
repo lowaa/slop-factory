@@ -31,6 +31,13 @@
 # leading block of them is kept when the file is rewritten.
 set -euo pipefail
 export LC_ALL=C
+# Inline rather than dev-tools/require_bash.sh: the frontend and js-components
+# images copy this script without it. macOS's /bin/bash 3.2 has no
+# inherit_errexit.
+if ((BASH_VERSINFO[0] < 5)); then
+  echo "ratchet.sh: needs bash >= 5 (this is ${BASH_VERSION}); on macOS \`brew install bash\` and make sure it is first on PATH" >&2
+  exit 1
+fi
 shopt -s inherit_errexit
 
 usage() {

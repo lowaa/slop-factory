@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+from process_state import process_running as alive
 from slop_haus_supervisor.harness.base import RunSpec
 from slop_haus_supervisor.harness.claude import ClaudeHarness
 from slop_haus_supervisor.harness.pi import PiHarness
@@ -28,14 +29,6 @@ for n, line in enumerate(sys.stdin, 1):
     print(json.dumps({"type": "result", "n": n, "is_error": False}), flush=True)
 '''
 WAIT = 30.0
-
-
-def alive(pid: int) -> bool:
-    try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
-            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
-    except OSError:
-        return False
 
 
 class SessionCase(unittest.TestCase):

@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,9 @@ CONTROL = "control-ok"
 # Variables a command's environment must not carry whatever their names' owner: credentials and Codex's login.
 SECRET_ENV = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD|CODEX_HOME|CODEX_API|OPENAI)", re.IGNORECASE)
 NETWORK_TARGET = "1.1.1.1/53"
+# macOS has no /usr/bin/bash. On Linux the path is kept as it was: the sandbox there binds /usr, and whether it
+# also exposes the /bin usrmerge symlink is not something the probe should depend on.
+BASH = "/bin/bash" if sys.platform == "darwin" else "/usr/bin/bash"
 EXEC_TIMEOUT = 30.0
 
 
@@ -131,7 +135,7 @@ class SandboxProbe:
 
     def _exec(self, what: str, script: str, cwd: Path) -> tuple[ExecResult | None, list[str]]:
         try:
-            return self._sandbox.run(["/usr/bin/bash", "-c", script], cwd), []
+            return self._sandbox.run([BASH, "-c", script], cwd), []
         except Exception as err:  # noqa: BLE001 -- any failure to ask the sandbox means it is unproven
             return None, [f"{what}: the sandbox could not be asked ({type(err).__name__}: {err})"]
 
@@ -167,7 +171,9 @@ class SandboxProbe:
         return problems
 
     def _no_network(self, scratch: Path) -> list[str]:
-        script = f"timeout 5 bash -c 'exec 3<>/dev/tcp/{NETWORK_TARGET}' && echo connected"
+        connect = f"bash -c 'exec 3<>/dev/tcp/{NETWORK_TARGET}'"
+        # macOS ships no `timeout`; the exec's own timeout still bounds the attempt there.
+        script = f"if command -v timeout >/dev/null; then timeout 5 {connect}; else {connect}; fi && echo connected"
         result, problems = self._exec("network", script, scratch)
         if result is not None and "connected" in result.stdout:
             problems.append("the steward's shell can open network connections")
