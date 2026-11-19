@@ -240,10 +240,13 @@ jobs:
             go: "true"
             uv: "true"
             npm-ci: tools
+            # An empty list fails rather than passing with no tests run.
             run: >-
               find dev-tools -name '*.bats'
-              ! -name shell.bats ! -name reap_lib.bats ! -name ts.bats ! -name coverage.bats -print0
-              | sort -z | xargs -0 bats/run.sh
+              ! -name shell.bats ! -name reap_lib.bats ! -name ts.bats ! -name coverage.bats
+              | sort > "${RUNNER_TEMP}/bats_files"
+              && test -s "${RUNNER_TEMP}/bats_files"
+              && tr '\n' '\0' < "${RUNNER_TEMP}/bats_files" | xargs -0 bats/run.sh
     name: macos (${{ matrix.suite }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

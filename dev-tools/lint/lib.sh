@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# Helpers the runners share (go.sh, ruff.sh, shell.sh). Sourced, not run.
+# Helpers the runners share (go.sh, repo.sh, ruff.sh, shell.sh). Sourced, not run.
 
 # normalise SED_EXPR: rewrite each line of a tool's output with the pattern,
 # failing if a line does not match it, so a change in the tool's format

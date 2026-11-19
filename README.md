@@ -41,7 +41,7 @@ CI publishes two linux/amd64 images to ghcr.io
 
 | Tag | Published for | Kept |
 | --- | --- | --- |
-| `sha-<12 hex>` | each commit on `main` that passed CI | 14 days, and always the newest 20 |
+| `sha-<12 hex>` | each commit on `main` that passed CI (every job but the advisory `macos` one) | 14 days, and always the newest 20 |
 | `main` | the latest of those (it moves) | always |
 | `v*` | each release tag | always |
 
