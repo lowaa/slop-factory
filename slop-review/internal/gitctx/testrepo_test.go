@@ -15,7 +15,10 @@ import (
 // with a merge-base to diff against.
 func newTestRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	// git reports paths with symlinks resolved, and macOS's temp dir is
+	// under /var, a link to /private/var.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 
 	run := func(args ...string) string {
 		t.Helper()

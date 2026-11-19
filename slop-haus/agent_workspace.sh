@@ -278,7 +278,7 @@ case "${1:-}" in
     cmd_list "$@"
     ;;
   *)
-    sed -n '2,20p' "$0" | sed 's/^# \?//'
+    sed -n '2,20p' "$0" | sed -E 's/^# ?//'
     exit 1
     ;;
 esac

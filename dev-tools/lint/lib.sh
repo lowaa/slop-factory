@@ -18,6 +18,17 @@ normalise() {
   printf '%s\n' "${out}"
 }
 
+# install_dir TMP DIR: move the freshly built TMP to DIR unless another run
+# got there first, whose copy is the same and is kept. GNU `mv -T` refuses to
+# move into an existing DIR, but BSD mv has no -T and nests TMP inside it, so
+# that nested copy is removed after. Never fails: callers check for DIR/.built.
+install_dir() {
+  # Without its trailing slash, or the basename below is empty and DIR goes.
+  local tmp="${1%/}"
+  mv "${tmp}" "$2" 2> /dev/null || rm -rf "${tmp}"
+  rm -rf "${2:?}/${tmp##*/}"
+}
+
 # lint_files DIR: the files under DIR a linter should see, relative to it:
 # tracked, and untracked but not ignored (so work not yet added is linted
 # too), less what .gitattributes marks linguist-generated (vendored copies,

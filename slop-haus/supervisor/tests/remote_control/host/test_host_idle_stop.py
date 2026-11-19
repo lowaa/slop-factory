@@ -17,11 +17,11 @@ from host_fixtures import (
     item,
     make_harness,
     process_gone,
-    process_running,
     read_file,
     start_item,
     wait_for_file,
 )
+from process_state import process_running
 from slop_haus_supervisor.remote_control.host.conversation import Conversation, ConversationState
 from slop_haus_supervisor.remote_control.host.host import Host
 from slop_haus_supervisor.remote_control.host.live_harness import HarnessEvent

@@ -225,6 +225,8 @@ def test_each_hole_makes_the_probe_refuse(tmp_path: Path, hole: str, mentions: s
 # ---- the probe, against the real Codex sandbox -------------------------------------------------------------------
 
 CODEX = shutil.which("codex")
+# macOS has no /usr/bin/cat; on Linux the sandbox binds /usr.
+CAT = "/bin/cat" if sys.platform == "darwin" else "/usr/bin/cat"
 
 
 class Real:
@@ -248,9 +250,9 @@ def test_the_real_sandbox_passes_and_hides_the_host(tmp_path: Path) -> None:
     forbidden = [tmp_path / "home", tmp_path / "codex_home"]
     forbidden[0].mkdir()
     SandboxProbe(r.exec, r.policy, forbidden).check()
-    ok = r.exec.run(["/usr/bin/cat", str(repo / "f.txt")], tmp_path)
+    ok = r.exec.run([CAT, str(repo / "f.txt")], tmp_path)
     assert ok.stdout == "code", "the review checkout is readable"
-    assert r.exec.run(["/usr/bin/cat", str(repo / ".env")], tmp_path).exit_code != 0, "its key file is not"
+    assert r.exec.run([CAT, str(repo / ".env")], tmp_path).exit_code != 0, "its key file is not"
 
 
 @pytest.mark.skipif(CODEX is None, reason="codex is not installed")

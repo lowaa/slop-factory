@@ -60,7 +60,7 @@ changed_test_files() {
 }
 
 module_path() {
-  sed -n 's/^module[[:space:]]\+//p' "${MODULE_DIR}/go.mod"
+  sed -nE 's/^module[[:space:]]+//p' "${MODULE_DIR}/go.mod"
 }
 
 # manifest <module> <file>...: {path, pkg, tests[]} per file, the tests being

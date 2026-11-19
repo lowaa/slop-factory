@@ -126,7 +126,8 @@ class CodexConversationTest(CodexHostCase):
         (invocation,) = self.invocations(1)
         self.assertEqual(["app-server"], invocation["argv"])
         self.assertEqual(str(self.codex_home), invocation["env"]["CODEX_HOME"])
-        self.assertEqual(self.root, invocation["cwd"])
+        # The fake reports its physical cwd, and macOS temp dirs sit under a /var symlink.
+        self.assertEqual(os.path.realpath(self.root), os.path.realpath(invocation["cwd"]))
 
     def test_a_conversation_id_that_is_no_uuid_is_refused_before_it_names_a_file(self) -> None:
         harness = self.host.harness

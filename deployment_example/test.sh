@@ -6,6 +6,8 @@
 # Static only: nothing is deployed. Needs docker; helm and kubeconform run
 # from pinned images, so a local run and CI's are the same.
 set -euo pipefail
+# shellcheck source=SCRIPTDIR/../dev-tools/require_bash.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../dev-tools/require_bash.sh"
 shopt -s inherit_errexit
 
 # shellcheck source=SCRIPTDIR/lib.sh

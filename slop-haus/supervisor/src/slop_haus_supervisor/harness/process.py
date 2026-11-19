@@ -105,6 +105,10 @@ class HarnessProcess:
                 self.terminate(WRITE_FAILURE_GRACE)
 
     def terminate(self, grace: float) -> None:
+        # Before closing stdin (which can end the harness) and before signalling the group: where the run's
+        # processes are found through their parents (macOS), the group's death would otherwise orphan what it
+        # started before it was ever seen.
+        self._tree.look_before_stopping()
         try:
             if self._proc.stdin:
                 self._proc.stdin.close()

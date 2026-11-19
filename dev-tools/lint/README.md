@@ -264,7 +264,8 @@ accepting debt.
 ## Tests
 
 `bats/run.sh dev-tools/lint` (Go, uv, docker and the root `npm ci`
-needed): the ratchet itself (`ratchet.bats`), `go.sh` against scratch
+needed): the ratchet itself (`ratchet.bats`), the helpers the
+runners share (`lib.bats`), `go.sh` against scratch
 modules with the real tools (`go.bats`), `oxlint.sh` and the report
 adapters (`ts.bats`), `ruff.sh` and `shell.sh` against scratch projects
 with the pinned tools (`ruff.bats`, `shell.bats`), and `lint.sh`'s routing,

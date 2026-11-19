@@ -95,7 +95,8 @@ class AddSlotTest(TempDirTestCase):
         lay.add_slot(self.layout, "w1", self.script, self.runner())
 
         slot = self.layout.slot("w1")
-        self.assertEqual([(["bash", str(self.script)], slot)], self.calls)
+        # The product resolves the script path, and macOS temp dirs sit under a /var symlink.
+        self.assertEqual([(["bash", str(self.script.resolve())], slot)], self.calls)
         self.assertEqual(("w1",), cfg.load(self.layout.config_file).slots)
         self.assertTrue((slot / "setup-ran").is_file())
 

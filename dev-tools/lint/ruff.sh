@@ -13,6 +13,8 @@
 # the Python projects run their own tools.
 set -euo pipefail
 export LC_ALL=C
+# shellcheck source=SCRIPTDIR/../require_bash.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../require_bash.sh"
 shopt -s inherit_errexit
 
 LINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +47,7 @@ if [[ -f pyproject.toml ]]; then
   [[ -z "${minor}" ]] || target="py3${minor}"
 fi
 
-nested="$(find . -mindepth 2 -name pyproject.toml -not -path '*/node_modules/*' -printf '%h/\n' | sed 's|^\./||')"
+nested="$(find . -mindepth 2 -name pyproject.toml -not -path '*/node_modules/*' | sed -e 's|^\./||' -e 's|[^/]*$||')"
 files=()
 while IFS= read -r f; do
   [[ "${f}" == *.py ]] || continue

@@ -14,6 +14,8 @@
 # configs. CI's lint job runs it; see README.md.
 set -euo pipefail
 export LC_ALL=C
+# shellcheck source=SCRIPTDIR/../require_bash.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../require_bash.sh"
 shopt -s inherit_errexit
 
 LINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
