@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -213,7 +214,9 @@ func TestScopeLockingOff_QueueBlockageClears(t *testing.T) {
 
 // The flag is read inside the claim transaction and settings writes take the
 // claim lock, so a toggle waits for a claim already deciding and cannot flip
-// the rule between its scan and its grant.
+// the rule between its scan and its grant. The claim is parked inside its
+// transaction; the toggle must be seen queued on the advisory lock, and not
+// committed, before the claim is let go.
 func TestScopeLockingOff_ATogglePendingBehindAClaimDoesNotChangeItsDecision(t *testing.T) {
 	f := newPolicyFixture(t)
 	_, _, waiting := stuckBehind(t, f)
@@ -227,9 +230,22 @@ func TestScopeLockingOff_ATogglePendingBehindAClaimDoesNotChangeItsDecision(t *t
 	<-parked.reached
 
 	toggled := make(chan error, 1)
-	go func() {
-		toggled <- f.setLocking(false)
-	}()
+	go func() { toggled <- f.setLocking(false) }()
+
+	require.Eventually(t, func() bool {
+		var queued int
+		err := f.database.QueryRow(f.ctx,
+			`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&queued)
+		return err == nil && queued > 0
+	}, 10*time.Second, 10*time.Millisecond, "the toggle never queued on the claim lock")
+	select {
+	case err := <-toggled:
+		t.Fatalf("the toggle committed while a claim was mid-transaction (err=%v)", err)
+	default:
+	}
+	locking, err := f.svc.ScopeLocking(f.ctx)
+	require.NoError(t, err)
+	assert.True(t, locking, "an uncommitted toggle is not visible")
 
 	parked.Release()
 	res := <-claimDone
@@ -237,7 +253,7 @@ func TestScopeLockingOff_ATogglePendingBehindAClaimDoesNotChangeItsDecision(t *t
 	assert.NotNil(t, res.Blocked, "the claim that began under locking on is decided under it")
 	require.NoError(t, <-toggled)
 
-	res, err := f.svc.Claim(f.ctx, f.agentID, &waiting.ID)
+	res, err = f.svc.Claim(f.ctx, f.agentID, &waiting.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, res.Ticket, "the next claim sees locking off")
 }

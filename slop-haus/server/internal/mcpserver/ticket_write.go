@@ -25,7 +25,7 @@ type ticketCreateInput struct {
 	Title     string   `json:"title"`
 	Body      string   `json:"body,omitempty"`
 	Priority  string   `json:"priority,omitempty" jsonschema:"low, normal, high or urgent"`
-	Paths     []string `json:"paths,omitempty" jsonschema:"the narrowest repo-relative paths you expect the work to write, end a directory with /. Prefer leaf directories or files over shared roots: a broad scope stops every overlapping ticket from being claimed while this one is held. Whoever takes the ticket extends it with ticket_scope_extend as it finds it needs more"`
+	Paths     []string `json:"paths,omitempty" jsonschema:"the narrowest repo-relative paths you expect the work to write, end a directory with /. Prefer leaf directories or files over shared roots: where the tenant locks path scopes, a broad scope stops every overlapping ticket from being claimed while this one is held. Whoever takes the ticket extends it with ticket_scope_extend as it finds it needs more"`
 	Status    string   `json:"status,omitempty" jsonschema:"preparing (the default) or open. Only open if you were specifically asked to file it as open"`
 	BlockedOn []int64  `json:"blocked_on,omitempty" jsonschema:"ticket numbers the new ticket waits on"`
 	Roles     []string `json:"roles,omitempty" jsonschema:"role names, exactly as spelled; only an agent with them may claim it"`

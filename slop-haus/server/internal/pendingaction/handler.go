@@ -225,7 +225,7 @@ func toEditBody(e *EditView) *EditBody {
 	}
 	for _, o := range e.Overlaps {
 		b.Overlaps = append(b.Overlaps, ticket.ScopeOverlapBody{
-			TicketID: o.TicketID, Title: o.Title, Status: o.Status, Path: o.Path, Other: o.Other, Resolve: o.Resolve,
+			TicketID: o.TicketID, Title: o.Title, Status: o.Status, Path: o.Path, Other: o.Other, Resolve: o.Resolve, LockingOff: o.LockingOff,
 		})
 	}
 	return b

@@ -144,8 +144,9 @@ func ticketPathRows(ctx context.Context, q db.Querier, repos []Repo, req MoveReq
 
 // noNewOverlap refuses a move that would make a scope overlap another
 // repo's ticket's. Scopes keep their relative order within the repo, so only
-// a name another repo's tickets already use at the destination can do it,
-// and the claim guard would never have let two agents hold both.
+// a name another repo's tickets already use at the destination can do it.
+// It is refused whatever the tenant's scope locking: a move colliding with
+// another repo's paths is a namespace collision, not a claim rule.
 func noNewOverlap(moving, staying []pathRow) error {
 	for _, m := range moving {
 		for _, o := range staying {

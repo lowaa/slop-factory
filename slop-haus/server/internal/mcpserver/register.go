@@ -72,7 +72,7 @@ func Register(server *mcp.Server, h *Handler) {
 			"(drop a directory, keep the sub-directory you still need). It never adds scope -- use " +
 			"ticket_scope_extend for that -- and refuses to leave the ticket with no paths. " +
 			"Never drop a path your branch has already changed. The server also narrows directories to the files your change touches when you ticket_finish, " +
-			"ticket_discuss or ticket_release; call this earlier to free paths sooner, since a ticket in review holds all its paths until a human acts.",
+			"ticket_discuss or ticket_release; call this earlier to free paths sooner, since where the tenant locks path scopes, a ticket in review holds all its paths until a human acts.",
 	}, leaseHeld, h.scopeNarrow)
 
 	addTool(server, h, &mcp.Tool{

@@ -550,7 +550,7 @@ func scopeLocking(ctx context.Context, q db.Querier) (bool, error) {
 // ScopeLocking reads the setting outside a claim, for display and feedback.
 func (s *PostgresStore) ScopeLocking(ctx context.Context) (bool, error) {
 	var locking bool
-	err := s.db.InTx(ctx, func(q db.Querier) error {
+	err := s.db.InReadTx(ctx, func(q db.Querier) error {
 		var err error
 		locking, err = scopeLocking(ctx, q)
 		return err

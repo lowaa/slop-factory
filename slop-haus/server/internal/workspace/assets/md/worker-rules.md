@@ -35,8 +35,8 @@
 - Before `ticket_finish`, `ticket_discuss` or `ticket_release`, narrow again to what the PR touches: take
   `git diff --name-only origin/<base>...HEAD`, coarsen it to directories where
   that is sensible, and drop the rest (`remove`, with `keep` for narrower
-  paths inside a directory you drop). A ticket in review holds every path it
-  has until a human acts, so a filed scope broader than the diff idles other
+  paths inside a directory you drop). Where the tenant locks path scopes, a
+  ticket in review holds every path it has until a human acts, so a filed scope broader than the diff idles other
   agents.
 - If a "MESSAGE FROM THE HUMAN" changes the ticket's direction, say so in your
   final message.

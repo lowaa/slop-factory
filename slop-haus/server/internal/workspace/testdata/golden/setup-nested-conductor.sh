@@ -310,7 +310,7 @@ Large pull requests get worse reviews from both humans and slop-review, whose on
 - **List the files each piece writes, then split along those lines.** Pieces that share a file (e.g. a stylesheet) are one part.
 - **Put edits to shared files (config, shared helpers, test setup) in a first part,** and block the rest on it.
 - **Never create a file that every part must edit** (an allowlist, registry or index): the parts will all conflict. Instead, add a final part, blocked on all the others, that checks the result.
-- **Scope each part to its own files or leaf directory, never a shared parent.** A broad scope stops every overlapping ticket from being claimed. Read the `scope_overlaps` that `ticket_create` returns, and narrow anything that overlaps more than intended. Overlaps inside the workspace's shared paths (migrations, generated output) don't block a claim and are reported as shared, so they don't need narrowing.
+- **Scope each part to its own files or leaf directory, never a shared parent.** Where the tenant locks path scopes, a broad scope stops every overlapping ticket from being claimed. Read the `scope_overlaps` that `ticket_create` returns, and narrow anything that overlaps more than intended. Overlaps inside the workspace's shared paths (migrations, generated output) don't block a claim and are reported as shared, so they don't need narrowing.
 - **Set `blocked_on` when you file each part,** so the order is enforced rather than left to whoever picks it up.
 
 **Filing the parts.**
@@ -508,8 +508,8 @@ ticket back with a closing call is what ends the run.
 - Before `ticket_finish`, `ticket_discuss` or `ticket_release`, narrow again to what the PR touches: take
   `git diff --name-only origin/<base>...HEAD`, coarsen it to directories where
   that is sensible, and drop the rest (`remove`, with `keep` for narrower
-  paths inside a directory you drop). A ticket in review holds every path it
-  has until a human acts, so a filed scope broader than the diff idles other
+  paths inside a directory you drop). Where the tenant locks path scopes, a
+  ticket in review holds every path it has until a human acts, so a filed scope broader than the diff idles other
   agents.
 - If a "MESSAGE FROM THE HUMAN" changes the ticket's direction, say so in your
   final message.
@@ -646,7 +646,7 @@ fi
 mkdir -p '.slop-haus'
 tmp=$(mktemp '.slop-haus/bundle-hash.XXXXXX')
 cat > "$tmp" <<'SLOPHAUS_EOF'
-<<embedded .slop-haus/bundle-hash sha256=4773684fe0bb0b95671ff8c4fd98bfce025d7dbe56207f158e73e7a2b052d56a>>
+<<embedded .slop-haus/bundle-hash sha256=b4a3e6383eeceaa7f63d7f4db21a6e99101ee2819fb1a7fc8aba2580472ea66a>>
 SLOPHAUS_EOF
 chmod 644 "$tmp"
 mv -f "$tmp" '.slop-haus/bundle-hash'

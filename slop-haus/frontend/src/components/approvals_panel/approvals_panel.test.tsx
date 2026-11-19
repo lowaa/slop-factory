@@ -296,6 +296,20 @@ describe("ApprovalsPanel", () => {
     expect(changes.getByRole("note")).toHaveTextContent("shared path, blocks nothing; on a clash: migration");
   });
 
+  it("says an overlap blocks nothing on an edit's card when the tenant has scope locking off", async () => {
+    const proposal = makeEditProposal();
+    proposal.edit!.overlaps = [
+      { ticket_id: 31, title: "Real", status: "in_progress", path: "db/", other: "db/x.go", locking_off: true },
+    ];
+    serverList([proposal]);
+    await panel();
+
+    const note = within(await screen.findByRole("region", { name: /^Changes to #/ })).getByRole("note");
+    expect(note).toHaveTextContent("scope locking is off for this tenant");
+    expect(note).toHaveTextContent("scope locking is off, blocks nothing");
+    expect(note).not.toHaveTextContent("can't be claimed in parallel");
+  });
+
   it("says an edit that opens the ticket also moves it to open", async () => {
     serverList([makeEditProposal({ edit: { ...makeEditProposal().edit, open: true } })]);
     await panel();
