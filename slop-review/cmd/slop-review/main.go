@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -24,9 +25,23 @@ import (
 	"github.com/lowaa/slop-factory/slop-review/internal/providers"
 	"github.com/lowaa/slop-factory/slop-review/internal/review"
 	"github.com/lowaa/slop-factory/slop-review/internal/runreport"
+	"github.com/lowaa/slop-factory/slop-review/personas"
 	"github.com/lowaa/slop-factory/slop-review/report"
 	"github.com/lowaa/slop-factory/slop-review/report/reporter"
 )
+
+// buildVersion is set at build time (-ldflags "-X main.buildVersion=<sha>")
+// when the binary is shipped without a checkout; --tool-version overrides it.
+var buildVersion string
+
+// libraryFor is the persona library a run uses: --persona-dir when given,
+// else the one embedded in the binary.
+func libraryFor(cfg *config.Config) fs.FS {
+	if cfg.PersonaDir != "" {
+		return os.DirFS(cfg.PersonaDir)
+	}
+	return personas.FS
+}
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -103,6 +118,15 @@ func runWith(args []string, stdout, stderr io.Writer, factory *providers.Factory
 		return inv.fail(ctx, err, report.FailureConfig)
 	}
 
+	// The CLI providers insist on an absolute repo root, and the default
+	// is the cwd.
+	if abs, err := filepath.Abs(cfg.RepoRoot); err == nil {
+		cfg.RepoRoot = abs
+	}
+	if cfg.ToolVersion == "" {
+		cfg.ToolVersion = buildVersion
+	}
+
 	scope, err := gitctx.ResolveScope(cfg.RepoRoot, gitctx.ScopeOptions{
 		FromCommitHash: cfg.FromCommitHash,
 		AllowSecrets:   cfg.AllowSecrets,
@@ -113,12 +137,12 @@ func runWith(args []string, stdout, stderr io.Writer, factory *providers.Factory
 	}
 	inv.scope = &scope
 
-	personas, err := persona.LoadMany(cfg.PersonaDir, cfg.Persona)
+	selected, err := persona.LoadMany(libraryFor(cfg), cfg.Persona)
 	if err != nil {
 		return inv.fail(ctx, err, report.FailureConfig)
 	}
-	names := make([]string, len(personas))
-	for i, p := range personas {
+	names := make([]string, len(selected))
+	for i, p := range selected {
 		names[i] = p.Name
 	}
 	inv.personas = names
@@ -160,7 +184,7 @@ func runWith(args []string, stdout, stderr io.Writer, factory *providers.Factory
 		Intent:             cfg.Intent,
 	}, inv.logHandler)
 
-	result, err := orch.Run(ctx, &scope, personas)
+	result, err := orch.Run(ctx, &scope, selected)
 	if err != nil {
 		if result != nil {
 			inv.fellBack = result.FellBack
@@ -215,7 +239,7 @@ func runWith(args []string, stdout, stderr io.Writer, factory *providers.Factory
 // overviewInputs loads the library's overview-stage personas and, when the
 // review is scoped to a subdirectory, the whole change they must look at.
 func overviewInputs(cfg *config.Config, scope *gitctx.Scope) ([]*persona.Persona, *gitctx.Scope, error) {
-	overviews, err := persona.LoadOverviews(cfg.PersonaDir)
+	overviews, err := persona.LoadOverviews(libraryFor(cfg))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -267,7 +291,13 @@ func computeFingerprint(cfg *config.Config, stderr io.Writer) *fingerprint.Resul
 	if cfg.ReportURL == "" {
 		return nil
 	}
-	fp, err := fingerprint.Compute(cfg.SourceDir, cfg.PersonaDir)
+	var fp *fingerprint.Result
+	var err error
+	if cfg.SourceDir == "" && buildVersion != "" {
+		fp, err = fingerprint.ComputeBundled(buildVersion, libraryFor(cfg))
+	} else {
+		fp, err = fingerprint.Compute(cfg.SourceDir, libraryFor(cfg))
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "slop-review: the run is reported without a content fingerprint: %v\n", err)
 		return nil

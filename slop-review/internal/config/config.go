@@ -195,6 +195,7 @@ type Config struct {
 
 	// Persona is a filename stem under PersonaDir (e.g. "standard" ->
 	// PersonaDir/standard.md), a comma-separated list of them, or "all".
+	// An empty PersonaDir means the library embedded in the binary.
 	Persona    string
 	PersonaDir string
 
@@ -312,7 +313,7 @@ var flagSpecs = []flagSpec{
 	{"model", "SLOP_REVIEW_MODEL", ""},
 	{"reasoning-effort", "SLOP_REVIEW_REASONING_EFFORT", ""},
 	{"persona", "SLOP_REVIEW_PERSONA", "standard"},
-	{"persona-dir", "SLOP_REVIEW_PERSONA_DIR", "personas"},
+	{"persona-dir", "SLOP_REVIEW_PERSONA_DIR", ""},
 	{"repo-root", "SLOP_REVIEW_REPO_ROOT", "."},
 	{"from-commit-hash", "SLOP_REVIEW_FROM_COMMIT_HASH", ""},
 	{"intent", "SLOP_REVIEW_INTENT", ""},
@@ -600,6 +601,10 @@ const MaxIntentBytes = 32 * 1024
 func (cfg *Config) loadIntent(path string) error {
 	if path == "" {
 		return nil
+	}
+	// Absolute so an error names the file the process really looked for.
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

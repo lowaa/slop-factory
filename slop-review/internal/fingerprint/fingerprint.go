@@ -45,21 +45,11 @@ type Result struct {
 }
 
 // Compute fingerprints the reviewer whose source is under sourceDir (empty:
-// skip Source and Run) and whose personas are the .md files in personaDir.
-func Compute(sourceDir, personaDir string) (*Result, error) {
-	res := &Result{Personas: map[string]Persona{}}
-	names, err := persona.List(personaDir)
+// skip Source and Run) and whose personas are the .md files in personas.
+func Compute(sourceDir string, personas fs.FS) (*Result, error) {
+	res, names, err := hashPersonas(personas)
 	if err != nil {
 		return nil, err
-	}
-	slices.Sort(names)
-	for _, name := range names {
-		raw, err := os.ReadFile(filepath.Join(personaDir, name+".md"))
-		if err != nil {
-			return nil, fmt.Errorf("fingerprint: %w", err)
-		}
-		text := normalize(string(raw))
-		res.Personas[name] = Persona{Hash: report.HashText(text), Text: text}
 	}
 	if sourceDir == "" {
 		return res, nil
@@ -67,13 +57,48 @@ func Compute(sourceDir, personaDir string) (*Result, error) {
 	if res.Source, err = hashSource(sourceDir); err != nil {
 		return nil, err
 	}
+	res.Run = runHash(res, names)
+	return res, nil
+}
+
+// ComputeBundled fingerprints a reviewer shipped as a prebuilt binary,
+// which has no source tree to hash: the build version stands for its source,
+// since one version is one build of the code and the personas it embeds.
+func ComputeBundled(buildVersion string, personas fs.FS) (*Result, error) {
+	res, names, err := hashPersonas(personas)
+	if err != nil {
+		return nil, err
+	}
+	res.Source = report.HashText("bundled:" + buildVersion)
+	res.Run = runHash(res, names)
+	return res, nil
+}
+
+func hashPersonas(personas fs.FS) (*Result, []string, error) {
+	res := &Result{Personas: map[string]Persona{}}
+	names, err := persona.List(personas)
+	if err != nil {
+		return nil, nil, err
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		raw, err := fs.ReadFile(personas, name+".md")
+		if err != nil {
+			return nil, nil, fmt.Errorf("fingerprint: %w", err)
+		}
+		text := normalize(string(raw))
+		res.Personas[name] = Persona{Hash: report.HashText(text), Text: text}
+	}
+	return res, names, nil
+}
+
+func runHash(res *Result, names []string) string {
 	h := sha256.New()
 	writeField(h, "source", res.Source)
 	for _, name := range names {
 		writeField(h, name, res.Personas[name].Hash)
 	}
-	res.Run = hex.EncodeToString(h.Sum(nil))
-	return res, nil
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // normalize makes line endings irrelevant, as persona loading does: a

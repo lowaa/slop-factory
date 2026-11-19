@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lowaa/slop-factory/slop-review/report"
 )
 
 func write(t *testing.T, root, rel, content string) {
@@ -34,7 +36,7 @@ func checkout(t *testing.T) (src, personas string) {
 
 func compute(t *testing.T, src, personas string) *Result {
 	t.Helper()
-	res, err := Compute(src, personas)
+	res, err := Compute(src, os.DirFS(personas))
 	require.NoError(t, err)
 	return res
 }
@@ -122,6 +124,26 @@ func TestNoSourceDirSkipsSourceAndRun(t *testing.T) {
 
 func TestEmptySourceIsAnError(t *testing.T) {
 	_, personas := checkout(t)
-	_, err := Compute(t.TempDir(), personas)
+	_, err := Compute(t.TempDir(), os.DirFS(personas))
 	assert.Error(t, err)
+}
+
+func TestComputeBundledDependsOnVersionAndPersonas(t *testing.T) {
+	_, personas := checkout(t)
+	fsys := os.DirFS(personas)
+
+	a, err := ComputeBundled("v1", fsys)
+	require.NoError(t, err)
+	b, err := ComputeBundled("v1", fsys)
+	require.NoError(t, err)
+	assert.Equal(t, a, b)
+	assert.True(t, report.IsHash(a.Run))
+	assert.True(t, report.IsHash(a.Source))
+	assert.Len(t, a.Personas, 2)
+
+	c, err := ComputeBundled("v2", fsys)
+	require.NoError(t, err)
+	assert.NotEqual(t, a.Source, c.Source)
+	assert.NotEqual(t, a.Run, c.Run)
+	assert.Equal(t, a.Personas, c.Personas)
 }

@@ -37,7 +37,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-5-5", cfg.Model)
 	assert.Equal(t, "xhigh", cfg.ReasoningEffort, "claude takes xhigh, the single pass's effort")
 	assert.Equal(t, "standard", cfg.Persona)
-	assert.Equal(t, "personas", cfg.PersonaDir)
+	assert.Empty(t, cfg.PersonaDir, "empty means the embedded library")
 	assert.Equal(t, ".", cfg.RepoRoot)
 	assert.Equal(t, "", cfg.FromCommitHash)
 	assert.Equal(t, 40, cfg.MaxTurns)

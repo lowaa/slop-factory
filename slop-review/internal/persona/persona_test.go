@@ -14,7 +14,7 @@ func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "standard.md"), []byte("You are a standard reviewer.\n"), 0o644))
 
-	p, err := Load(dir, "standard")
+	p, err := Load(os.DirFS(dir), "standard")
 	require.NoError(t, err)
 	assert.Equal(t, "standard", p.Name)
 	assert.Equal(t, "You are a standard reviewer.\n", p.Prompt)
@@ -25,7 +25,7 @@ func TestLoad_FrontMatterSetsChunkingAndIsStripped(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "security.md"), []byte("---\nchunking: whole\n---\n\nYou are a security reviewer.\n"), 0o644))
 
-	p, err := Load(dir, "security")
+	p, err := Load(os.DirFS(dir), "security")
 	require.NoError(t, err)
 	assert.Equal(t, ChunkWhole, p.Chunking)
 	assert.Equal(t, "You are a security reviewer.\n", p.Prompt)
@@ -37,11 +37,11 @@ func TestLoad_FrontMatterRejectsUnknownKeysAndValues(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.md"), []byte("---\nmodel: gpt\n---\nx"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.md"), []byte("---\nchunking: whole\nx"), 0o644))
 
-	_, err := Load(dir, "a")
+	_, err := Load(os.DirFS(dir), "a")
 	assert.ErrorContains(t, err, "chunking")
-	_, err = Load(dir, "b")
+	_, err = Load(os.DirFS(dir), "b")
 	assert.ErrorContains(t, err, "unknown front matter key")
-	_, err = Load(dir, "c")
+	_, err = Load(os.DirFS(dir), "c")
 	assert.ErrorContains(t, err, "not closed")
 }
 
@@ -51,17 +51,17 @@ func TestLoadMany(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, n+".md"), []byte(n), 0o644))
 	}
 
-	all, err := LoadMany(dir, "all")
+	all, err := LoadMany(os.DirFS(dir), "all")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"security", "standard", "test-efficacy"}, names(all))
 
-	some, err := LoadMany(dir, "standard, security,standard")
+	some, err := LoadMany(os.DirFS(dir), "standard, security,standard")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"standard", "security"}, names(some), "listed order, duplicates dropped")
 
-	_, err = LoadMany(dir, " , ")
+	_, err = LoadMany(os.DirFS(dir), " , ")
 	assert.Error(t, err)
-	_, err = LoadMany(dir, "standard,missing")
+	_, err = LoadMany(os.DirFS(dir), "standard,missing")
 	assert.Error(t, err)
 }
 
@@ -76,7 +76,7 @@ func names(ps []*Persona) []string {
 func TestLoad_UnknownPersona(t *testing.T) {
 	dir := t.TempDir()
 
-	_, err := Load(dir, "does-not-exist")
+	_, err := Load(os.DirFS(dir), "does-not-exist")
 	assert.Error(t, err)
 }
 
@@ -85,7 +85,7 @@ func TestLoad_RejectsPathTraversal(t *testing.T) {
 	outside := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.md"), []byte("leaked"), 0o644))
 
-	_, err := Load(dir, "../"+filepath.Base(outside)+"/secret")
+	_, err := Load(os.DirFS(dir), "../"+filepath.Base(outside)+"/secret")
 	assert.ErrorContains(t, err, "invalid persona name")
 }
 
@@ -97,7 +97,7 @@ func TestLoad_RejectsPathTraversal(t *testing.T) {
 func TestLoadMany_ShippedLibrary(t *testing.T) {
 	dir := "../../personas"
 
-	all, err := LoadMany(dir, AllPersonas)
+	all, err := LoadMany(os.DirFS(dir), AllPersonas)
 	require.NoError(t, err)
 	require.Equal(t, []string{"blast-radius", "concurrency", "security", "standard", "test-efficacy"}, names(all))
 
@@ -133,7 +133,7 @@ func TestList(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "strict.md"), []byte("b"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("c"), 0o644))
 
-	names, err := List(dir)
+	names, err := List(os.DirFS(dir))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"standard", "strict"}, names)
 }
@@ -142,7 +142,7 @@ func TestLoad_FrontMatterWithCRLFLineEndings(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "security.md"), []byte("---\r\nchunking: whole\r\n---\r\n\r\nYou are a security reviewer.\r\n"), 0o644))
 
-	p, err := Load(dir, "security")
+	p, err := Load(os.DirFS(dir), "security")
 	require.NoError(t, err)
 	assert.Equal(t, ChunkWhole, p.Chunking)
 	assert.Equal(t, "You are a security reviewer.\n", p.Prompt)
@@ -154,14 +154,14 @@ func TestLoad_FrontMatterSetsStage(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "d.md"), []byte("x"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.md"), []byte("---\nstage: later\n---\nx"), 0o644))
 
-	o, err := Load(dir, "o")
+	o, err := Load(os.DirFS(dir), "o")
 	require.NoError(t, err)
 	assert.Equal(t, StageOverview, o.Stage)
 	assert.Equal(t, ChunkByPackage, o.Chunking, "stage and chunking are independent")
-	d, err := Load(dir, "d")
+	d, err := Load(os.DirFS(dir), "d")
 	require.NoError(t, err)
 	assert.Equal(t, StageReview, d.Stage, "review is the default")
-	_, err = Load(dir, "bad")
+	_, err = Load(os.DirFS(dir), "bad")
 	assert.ErrorContains(t, err, "stage")
 }
 
@@ -170,7 +170,7 @@ func TestLoadOverviews(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("---\nstage: overview\n---\nx"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.md"), []byte("x"), 0o644))
 
-	got, err := LoadOverviews(dir)
+	got, err := LoadOverviews(os.DirFS(dir))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a"}, names(got))
 }

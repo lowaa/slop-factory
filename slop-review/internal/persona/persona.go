@@ -5,8 +5,8 @@ package persona
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -54,15 +54,14 @@ type Persona struct {
 // library.
 const AllPersonas = "all"
 
-// Load reads <dir>/<name>.md. The file may open with front matter --
+// Load reads <name>.md from the library fsys. The file may open with front matter --
 // "key: value" lines between two "---" lines -- which is stripped from
 // the prompt; the keys are "chunking" and "stage".
-func Load(dir, name string) (*Persona, error) {
+func Load(fsys fs.FS, name string) (*Persona, error) {
 	if !nameRe.MatchString(name) {
 		return nil, fmt.Errorf("persona: invalid persona name %q", name)
 	}
-	path := filepath.Join(dir, name+".md")
-	content, err := os.ReadFile(path)
+	content, err := fs.ReadFile(fsys, name+".md")
 	if err != nil {
 		return nil, fmt.Errorf("persona: load %q: %w", name, err)
 	}
@@ -75,11 +74,11 @@ func Load(dir, name string) (*Persona, error) {
 
 // LoadMany resolves a --persona value: one name, a comma-separated list,
 // or AllPersonas.
-func LoadMany(dir, spec string) ([]*Persona, error) {
+func LoadMany(fsys fs.FS, spec string) ([]*Persona, error) {
 	var names []string
 	if spec == AllPersonas {
 		var err error
-		if names, err = List(dir); err != nil {
+		if names, err = List(fsys); err != nil {
 			return nil, err
 		}
 	} else {
@@ -100,7 +99,7 @@ func LoadMany(dir, spec string) ([]*Persona, error) {
 			continue
 		}
 		seen[n] = true
-		p, err := Load(dir, n)
+		p, err := Load(fsys, n)
 		if err != nil {
 			return nil, err
 		}
@@ -109,9 +108,9 @@ func LoadMany(dir, spec string) ([]*Persona, error) {
 	return out, nil
 }
 
-// LoadOverviews loads every overview-stage persona in dir.
-func LoadOverviews(dir string) ([]*Persona, error) {
-	all, err := LoadMany(dir, AllPersonas)
+// LoadOverviews loads every overview-stage persona in the library.
+func LoadOverviews(fsys fs.FS) ([]*Persona, error) {
+	all, err := LoadMany(fsys, AllPersonas)
 	if err != nil {
 		return nil, err
 	}
@@ -169,19 +168,19 @@ func (p *Persona) applyFrontMatter() error {
 	return nil
 }
 
-// List returns the persona names available under dir (filename stems of
-// every *.md file), sorted.
-func List(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+// List returns the persona names available in the library (filename stems
+// of every *.md file), sorted.
+func List(fsys fs.FS) ([]string, error) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
-		return nil, fmt.Errorf("persona: list %q: %w", dir, err)
+		return nil, fmt.Errorf("persona: list: %w", err)
 	}
 	var names []string
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		if ext := filepath.Ext(e.Name()); ext == ".md" {
+		if ext := path.Ext(e.Name()); ext == ".md" {
 			names = append(names, e.Name()[:len(e.Name())-len(ext)])
 		}
 	}

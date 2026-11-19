@@ -18,12 +18,10 @@ internal/config/config.go G101
 internal/config/config.go G101
 internal/config/config.go G304
 internal/fingerprint/fingerprint.go G304
-internal/fingerprint/fingerprint.go G304
 internal/gitctx/diff.go G204
 internal/orchestrator/merge.go G304
 internal/orchestrator/overview.go G301
 internal/orchestrator/overview.go G304
-internal/persona/persona.go G304
 internal/piauth/piauth.go G204
 internal/providers/providers.go G204
 internal/providers/providers.go G204
