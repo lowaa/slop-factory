@@ -106,6 +106,17 @@ class RealProcessesTest(unittest.TestCase):
     """Against real processes, whichever way this host finds them (/proc on Linux, `ps` on macOS)."""
 
     def test_a_background_command_of_a_shell_the_run_started_is_found_and_killed(self) -> None:
+        self._find_and_kill_a_background_command()
+
+    def test_without_pidfd_as_on_uvs_standalone_linux_pythons_it_still_kills(self) -> None:
+        # The supervisor runs on uv's Python, whose Linux builds have neither function; a host Python usually has both.
+        for module, name in ((os, "pidfd_open"), (signal, "pidfd_send_signal")):
+            if hasattr(module, name):
+                self.addCleanup(setattr, module, name, getattr(module, name))
+                delattr(module, name)
+        self._find_and_kill_a_background_command()
+
+    def _find_and_kill_a_background_command(self) -> None:
         run = RunProcesses(TOKEN)
         env = {**os.environ, RUN_TOKEN_ENV: TOKEN}
         # The root is Python, as the harness's real child (claude, pi, codex) is: an Apple platform binary such as

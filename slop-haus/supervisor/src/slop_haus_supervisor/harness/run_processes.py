@@ -21,8 +21,8 @@ class RunProcesses:
 
     A pid is never signalled on the strength of an earlier look. The token is checked again just
     before the signal. On Linux that is through a pidfd opened first, so a pid reused by an
-    unrelated process cannot be hit. Elsewhere (macOS has no pidfd) the check and the kill are two
-    steps, which leaves a window of microseconds in which a process that exited and whose pid was
+    unrelated process cannot be hit. Elsewhere (macOS has no pidfd, nor do uv's standalone Linux
+    Pythons, which the supervisor runs on) the check and the kill are two steps, which leaves a window of microseconds in which a process that exited and whose pid was
     reused could be hit. A command that clears its own environment escapes: this finds what the
     model started in the ordinary way, not what hides from it.
 
@@ -116,7 +116,7 @@ class RunProcesses:
         return len(pids)
 
     def _send(self, pid: int, sig: int) -> bool:
-        if sys.platform == "linux":
+        if _has_pidfd():
             return self._send_by_pidfd(pid, sig)
         try:
             if not self.carries(pid):
@@ -148,6 +148,11 @@ class RunProcesses:
         for _ in range(10):
             if not self.signal(signal.SIGKILL):
                 return
+
+
+def _has_pidfd() -> bool:
+    # Not every Linux Python has them: uv's python-build-standalone builds omit both.
+    return hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")
 
 
 def _ps(argv: list[str]) -> bytes:
