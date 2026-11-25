@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/lowaa/slop-factory/go-llm-usage v0.0.0-20261118092800-d0d2e684048f
 	github.com/lowaa/slop-factory/slop-review/report v0.0.0-20261118092800-d0d2e684048f
-	github.com/openai/openai-go/v3 v3.94.0
+	github.com/openai/openai-go/v3 v3.98.0
 	github.com/spf13/pflag v1.1.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
