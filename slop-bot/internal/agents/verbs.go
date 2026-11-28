@@ -224,6 +224,27 @@ func (m *Manager) end(ctx context.Context, r *runner, force bool, reason string)
 	})
 }
 
+// removalAdvice is how to remove a worktree Cleanup kept, by hand, once the
+// person has looked: a plain forced remove fails on a locked worktree, and
+// deletes the files of any worktree nested in it.
+func removalAdvice(res *worktree.CleanupResult) string {
+	repo, path := res.Worktree.RepoPath, res.Worktree.Path
+	remove := fmt.Sprintf("git -C %s worktree remove --force %s", repo, path)
+	var first []string
+	for _, r := range res.Reasons {
+		switch r.Kind {
+		case worktree.Nested:
+			first = append(first, "deal with the worktrees inside it ("+r.Detail+")")
+		case worktree.Locked:
+			first = append(first, fmt.Sprintf("git -C %s worktree unlock %s", repo, path))
+		}
+	}
+	if len(first) == 0 {
+		return remove
+	}
+	return "first " + strings.Join(first, ", then ") + ", then " + remove
+}
+
 // cleanup removes an agent's recorded worktrees.
 func (m *Manager) cleanup(ctx context.Context, id ident.AgentID, ticket ident.TicketID) {
 	a, err := m.opts.State.Agents.Get(ctx, id)
@@ -249,8 +270,8 @@ func (m *Manager) reportCleanup(ctx context.Context, id ident.AgentID, ticket id
 			for _, reason := range res.Reasons {
 				why = append(why, fmt.Sprintf("%s %s", reason.Kind, reason.Detail))
 			}
-			m.tellUser(ctx, id, fmt.Sprintf("kept %s (ticket %s), which holds work: %s. Once you've looked, remove it by hand: "+
-				"git -C %s worktree remove --force %s", res.Worktree.Path, ticket, strings.Join(why, "; "), res.Worktree.RepoPath, res.Worktree.Path))
+			m.tellUser(ctx, id, fmt.Sprintf("kept %s (ticket %s), which holds work: %s. Once you've looked, remove it by hand: %s",
+				res.Worktree.Path, ticket, strings.Join(why, "; "), removalAdvice(res)))
 		}
 	}
 }

@@ -180,7 +180,14 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 		return nil, err
 	}
 	for _, p := range nested {
-		reasons = append(reasons, Reason{Kind: Nested, Detail: "holds the worktree at " + p})
+		detail := "holds the worktree at " + p
+		if _, err := os.Lstat(p); errors.Is(err, fs.ErrNotExist) {
+			// Deleted by hand, its registration left: nothing is lost with
+			// it, but the parent stays kept until the registration goes.
+			detail = fmt.Sprintf("holds a registration for the worktree at %s, which is gone: "+
+				"`git -C %s worktree prune` clears it", p, repoPath)
+		}
+		reasons = append(reasons, Reason{Kind: Nested, Detail: detail})
 	}
 	if st.reg != nil && st.present {
 		dirty, err := m.dirty(ctx, repoPath, st.path)
@@ -424,7 +431,9 @@ type headTip struct{ oid, what string }
 // itself (outside slop-bot/t<ticket>/), which Cleanup leaves in the repo but
 // whose unpushed commits the user should still hear about.
 func checkedOutTip(st *state) (headTip, bool) {
-	if st.reg == nil || !st.present || st.reg.head == "" {
+	// An unborn branch (`git switch --orphan`) is listed with an all-zero
+	// HEAD: it has no commits to lose.
+	if st.reg == nil || !st.present || st.reg.head == "" || strings.Trim(st.reg.head, "0") == "" {
 		return headTip{}, false
 	}
 	if st.reg.detached {
