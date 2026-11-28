@@ -3,8 +3,8 @@
 ./cmd/quality 96.4
 ./internal/complexity 93.8
 ./internal/coverage 98.7
-./internal/gosrc 97.6
+./internal/gosrc 97.9
 ./internal/ratchet 85.9
 ./internal/testmod 100.0
 ./internal/testtime 95.6
-total 95.2
+total 95.3

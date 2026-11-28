@@ -118,3 +118,25 @@ func TestIsGenerated(t *testing.T) {
 		assert.Equal(t, want, got, file)
 	}
 }
+
+func TestHasCode(t *testing.T) {
+	t.Parallel()
+	m, err := gosrc.LoadModule(testmod.Write(t, map[string]string{
+		"decl/d.go":   "package decl\n\ntype T struct{}\n\nconst C = 1\n\nfunc F()\n",
+		"body/b.go":   "package body\n\nfunc F() {}\n",
+		"lit/l.go":    "package lit\n\nvar V = func() int { return 1 }\n",
+		"broken/x.go": "package broken\n\nfunc {",
+	}))
+	require.NoError(t, err)
+	cases := map[string]bool{"decl/d.go": false, "body/b.go": true, "lit/l.go": true}
+	for file, want := range cases {
+		got, err := m.HasCode([]string{file})
+		require.NoError(t, err, file)
+		assert.Equal(t, want, got, file)
+	}
+	got, err := m.HasCode([]string{"decl/d.go", "body/b.go"})
+	require.NoError(t, err)
+	assert.True(t, got, "any file with code is enough")
+	_, err = m.HasCode([]string{"broken/x.go"})
+	assert.Error(t, err)
+}
