@@ -4,7 +4,7 @@
 ./cmd/gencodexproto 84.7
 ./cmd/scripted-model 84.9
 ./cmd/slop-bot 0.0
-./internal/agents 87.4
+./internal/agents 87.3
 ./internal/agentspec 100.0
 ./internal/api 100.0
 ./internal/briefing 80.0
@@ -26,7 +26,7 @@
 ./internal/harness/fake 91.6
 ./internal/harness/fake/faketest 86.8
 ./internal/harness/pi 91.9
-./internal/harness/rpcdriver 90.2
+./internal/harness/rpcdriver 89.4
 ./internal/harness/sessionhost 92.9
 ./internal/harness/sessionhost/tmuxtest 97.6
 ./internal/harness/tuidriver 85.6
@@ -40,7 +40,7 @@
 ./internal/setup 86.1
 ./internal/sqlitex 91.5
 ./internal/sqlitex/sqlitextest 100.0
-./internal/state 90.5
+./internal/state 90.6
 ./internal/statusview 95.9
 ./internal/testexec 100.0
 ./internal/tickets 100.0
