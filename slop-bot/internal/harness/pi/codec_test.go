@@ -426,6 +426,13 @@ func TestOpen(t *testing.T) {
 		_, err := c.Open(context.Background(), rpcdriver.NewWire(&bytes.Buffer{}), lines(handshakeReply(t)))
 		assert.ErrorContains(t, err, `not "other"`)
 	})
+	t.Run("a resume that opens an empty session is an error", func(t *testing.T) {
+		t.Parallel()
+		// The recorded answer is a fresh session's: no messages.
+		c := newCodec("probe-0001", true, slog.New(slog.DiscardHandler))
+		_, err := c.Open(context.Background(), rpcdriver.NewWire(&bytes.Buffer{}), lines(handshakeReply(t)))
+		assert.ErrorIs(t, err, ErrEmptySession)
+	})
 	t.Run("no model is an error", func(t *testing.T) {
 		t.Parallel()
 		reply := `{"id":"` + handshakeID + `","type":"response","command":"get_state","success":true,"data":{"sessionId":"probe-0001"}}`

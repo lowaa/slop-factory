@@ -2,8 +2,11 @@ package pi
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -32,7 +35,9 @@ func TestMain(m *testing.M) {
 
 // fakePi answers get_state with the --session-id it was given and the
 // --model, and answers each prompt with a run whose reply echoes the
-// message and the PI_CODING_AGENT_DIR it sees. Closing stdin exits 0.
+// message and the PI_CODING_AGENT_DIR it sees. Closing stdin exits 0. Like
+// pi, it keeps a session by the cwd: each prompt adds a line to a file
+// there, whose length get_state reports as the message count.
 func fakePi(args []string) int {
 	flag := func(name string) string {
 		if i := slices.Index(args, name); i >= 0 && i+1 < len(args) {
@@ -47,11 +52,16 @@ func fakePi(args []string) int {
 		if err := json.Unmarshal(sc.Bytes(), &cmd); err != nil {
 			return 2
 		}
+		session := fakeSessionFile(flag("--session-id"))
 		switch cmd.Type {
 		case "get_state":
 			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "get_state", "success": true,
-				"data": map[string]any{"sessionId": flag("--session-id"), "model": map[string]string{"provider": "p", "id": flag("--model")}}})
+				"data": map[string]any{"sessionId": flag("--session-id"), "messageCount": fakeMessageCount(session),
+					"model": map[string]string{"provider": "p", "id": flag("--model")}}})
 		case "prompt":
+			if err := appendLine(session, cmd.Message); err != nil {
+				return 3
+			}
 			_ = out.Encode(map[string]any{"id": cmd.ID, "type": "response", "command": "prompt", "success": true, "data": map[string]string{"disposition": "started"}})
 			_ = out.Encode(map[string]any{"type": "agent_start"})
 			_ = out.Encode(map[string]any{"type": "message_end", "message": map[string]any{
@@ -62,6 +72,26 @@ func fakePi(args []string) int {
 		}
 	}
 	return 0
+}
+
+// fakeSessionFile is where fakePi keeps a session, in the cwd as pi does.
+func fakeSessionFile(id string) string { return ".fake-pi-session-" + id }
+
+func fakeMessageCount(path string) int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return bytes.Count(b, []byte("\n"))
+}
+
+func appendLine(path, line string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(f, line)
+	return errors.Join(err, f.Close())
 }
 
 func fakeHarness(t *testing.T) *Harness {
@@ -127,10 +157,22 @@ func TestResumeReopensTheSameID(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	conv, err := fakeHarness(t).Start(ctx, &harness.Workspace{Dir: t.TempDir()}, &harness.ConversationRef{Harness: Name, Driver: Driver, ID: "kept-id"})
+	dir := t.TempDir()
+	require.NoError(t, appendLine(filepath.Join(dir, fakeSessionFile("kept-id")), "kick-off"))
+	conv, err := fakeHarness(t).Start(ctx, &harness.Workspace{Dir: dir}, &harness.ConversationRef{Harness: Name, Driver: Driver, ID: "kept-id"})
 	require.NoError(t, err)
 	defer func() { _ = conv.Stop(context.Background(), true) }()
 	assert.Equal(t, "kept-id", conv.Ref().ID)
+}
+
+// pi finds a session by the cwd's project, and --session-id makes a missing
+// one: resumed anywhere else, the conversation would carry on empty.
+func TestAResumeThatFindsNoSessionFails(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := fakeHarness(t).Start(ctx, &harness.Workspace{Dir: t.TempDir()}, &harness.ConversationRef{Harness: Name, Driver: Driver, ID: "kept-id"})
+	assert.ErrorIs(t, err, ErrEmptySession)
 }
 
 func TestCommonFlags(t *testing.T) {

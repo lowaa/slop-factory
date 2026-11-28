@@ -70,7 +70,7 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 	}); err != nil {
 		return err
 	}
-	ws, err := m.workspace(id, t, spec, wts, token)
+	ws, err := m.workspace(&workspaceArgs{id: id, ticket: t, spec: spec, wts: wts, token: token})
 	if err != nil {
 		m.failStart(ctx, id, t, err)
 		return err
@@ -80,7 +80,8 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 		m.failStart(ctx, id, t, err)
 		return fmt.Errorf("agents: starting %s for ticket %s: %w", h.Name(), t.ID, err)
 	}
-	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
+	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool,
+		started: &started{conv: conv, caps: h.Capabilities(), dir: ws.Dir}, st: state.StateStarting})
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
 	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: kickoff(t)}); err != nil {
 		m.abortStart(ctx, r, t, err)
@@ -218,9 +219,8 @@ type adoption struct {
 	// harness is the configured name, whose plan limits the agent reports.
 	harness string
 	pool    state.Pool
-	conv    harness.Conversation
-	caps    harness.Capabilities
-	st      state.AgentState
+	*started
+	st state.AgentState
 	// decl and summary carry what the agent declared from inside a TUI
 	// across the hand-back.
 	decl      declared
@@ -237,16 +237,38 @@ func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 	r.stopping = m.stopping
 	m.runners[id] = r
 	m.mu.Unlock()
-	if err := m.opts.State.Agents.SetConversationID(ctx, id, conv.Ref().ID); err != nil {
+	if err := m.opts.State.Agents.SetConversation(ctx, id, conv.Ref().ID, a.dir); err != nil {
 		m.opts.Logger.Warn("agents: recording the conversation id", "agent", id, "err", err)
 	}
 	go r.run(context.WithoutCancel(ctx))
 	return r
 }
 
-// workspace is everything the harness needs: the primary worktree as cwd,
-// the briefing rendered outside the worktree, and the agent's token.
-func (m *Manager) workspace(id ident.AgentID, t *tickets.Ticket, spec tickets.AgentSpec, wts []*worktree.Worktree, token string) (*harness.Workspace, error) {
+// started is a harness session the Manager started, new or resumed.
+type started struct {
+	conv harness.Conversation
+	caps harness.Capabilities
+	// dir is its cwd, recorded so a resume runs there too.
+	dir string
+}
+
+// workspaceArgs are what a workspace is made from.
+type workspaceArgs struct {
+	id     ident.AgentID
+	ticket *tickets.Ticket
+	spec   tickets.AgentSpec
+	wts    []*worktree.Worktree
+	token  string
+	// cwd is where the conversation started, for a resume; "" starts it in
+	// the primary worktree, or the agent's own directory without one.
+	cwd string
+}
+
+// workspace is everything the harness needs: the primary worktree as cwd
+// (or the one its conversation started in), the briefing rendered outside
+// the worktree, and the agent's token.
+func (m *Manager) workspace(args *workspaceArgs) (*harness.Workspace, error) {
+	id, t, spec, wts, token := args.id, args.ticket, args.spec, args.wts, args.token
 	dir := m.opts.Paths.AgentDir(string(id))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -272,11 +294,17 @@ func (m *Manager) workspace(id ident.AgentID, t *tickets.Ticket, spec tickets.Ag
 	}
 	for _, w := range wts {
 		data.Worktrees = append(data.Worktrees, briefing.Worktree{Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary})
-		if w.Primary {
+		if w.Primary && args.cwd == "" {
 			ws.Dir = w.Path
-		} else {
+		} else if w.Path != args.cwd {
 			ws.ExtraDirs = append(ws.ExtraDirs, w.Path)
 		}
+	}
+	if args.cwd != "" {
+		// Claude Code and pi find a session by its cwd's project: an agent
+		// that gained its first worktree after it started is resumed where it
+		// started, with that worktree as another directory.
+		ws.Dir = args.cwd
 	}
 	path, text, err := briefing.Write(dir, data, m.opts.Config.BriefingPath)
 	if err != nil {
@@ -408,11 +436,11 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error
 		}
 		a.State = state.StateStarting
 	}
-	conv, caps, err := m.startConversation(ctx, a)
+	s, err := m.startConversation(ctx, a)
 	if err != nil {
 		return err
 	}
-	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps, st: a.State})
+	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s, st: a.State})
 	st, cutShort := resumedState(a.State)
 	r.setState(ctx, st, "resumed")
 	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
@@ -439,30 +467,34 @@ func resumedState(was state.AgentState) (state.AgentState, bool) {
 	return was, true
 }
 
-// startConversation resumes a's conversation by id, with a fresh token:
-// state.db holds only token hashes, so the old one can't be handed on.
-func (m *Manager) startConversation(ctx context.Context, a *state.Agent) (harness.Conversation, harness.Capabilities, error) {
+// startConversation resumes a's conversation by id, in the directory it
+// started in, with a fresh token: state.db holds only token hashes, so the
+// old one can't be handed on.
+func (m *Manager) startConversation(ctx context.Context, a *state.Agent) (*started, error) {
 	h, ok := m.opts.Harnesses.Harness(a.Harness)
 	if !ok {
-		return nil, harness.Capabilities{}, fmt.Errorf("harness %q isn't available", a.Harness)
+		return nil, fmt.Errorf("harness %q isn't available", a.Harness)
 	}
 	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
 	if err != nil {
-		return nil, harness.Capabilities{}, err
+		return nil, err
 	}
 	token, err := m.rotateToken(ctx, a.ID)
 	if err != nil {
-		return nil, harness.Capabilities{}, err
+		return nil, err
 	}
-	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, m.worktreesOf(a), token)
+	ws, err := m.workspace(&workspaceArgs{
+		id: a.ID, ticket: t, spec: tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort},
+		wts: m.worktreesOf(a), token: token, cwd: a.ConversationDir,
+	})
 	if err != nil {
-		return nil, harness.Capabilities{}, err
+		return nil, err
 	}
 	conv, err := h.Start(ctx, ws, &harness.ConversationRef{Harness: a.Harness, Driver: a.Driver, ID: a.ConversationID})
 	if err != nil {
-		return nil, harness.Capabilities{}, err
+		return nil, err
 	}
-	return conv, h.Capabilities(), nil
+	return &started{conv: conv, caps: h.Capabilities(), dir: ws.Dir}, nil
 }
 
 // rotateToken gives the agent a new token, retiring the old one.

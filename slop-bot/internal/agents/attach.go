@@ -369,7 +369,7 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 	if err != nil {
 		return "", err
 	}
-	conv, caps, err := m.startConversation(ctx, a)
+	s, err := m.startConversation(ctx, a)
 	if err != nil {
 		r.setState(ctx, state.StateCrashed, "couldn't resume after an attach: "+err.Error())
 		m.tellUser(ctx, id, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after its attach: %v; slop-bot is retrying", id, a.Ticket, err))
@@ -382,11 +382,11 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 	payload := map[string]string{"why": why, "outcome": string(Resumed)}
 	// A harness whose protocol reports the id (Codex, pi) could hand back a
 	// different one; the next restart must resume the one now running.
-	if got := conv.Ref().ID; got != a.ConversationID {
+	if got := s.conv.Ref().ID; got != a.ConversationID {
 		m.opts.Logger.Warn("agents: the conversation id changed across an attach", "agent", id, "was", a.ConversationID, "now", got)
 		payload["conversation_was"] = a.ConversationID
 	}
-	nr := m.adopt(ctx, &adoption{id: id, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps,
+	nr := m.adopt(ctx, &adoption{id: id, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s,
 		st: state.StateAttached, decl: decl, summary: summary, holdsSlot: true})
 	m.event(ctx, EventHandedBack, id, a.Ticket, payload)
 	if _, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{

@@ -275,7 +275,37 @@ func TestARepoAddedToALiveTicketGetsAWorktree(t *testing.T) {
 	wts := f.agentFor(tk.ID).Worktrees
 	require.Len(t, wts, 1)
 	assert.Contains(t, got.Text, wts[0].Path)
-	assert.True(t, wts[0].Primary, "it had none, so a resume starts it there")
+	assert.True(t, wts[0].Primary, "it had none, so it is the agent's main worktree")
+}
+
+// Claude Code and pi find a session by its cwd, so an agent that gained its
+// first worktree mid-conversation is resumed where it started, with the
+// worktree as another directory: started there, it would lose its session.
+func TestAResumeRunsWhereTheConversationStarted(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	dirs := make(chan *harness.Workspace, 2)
+	f.hooks.set(func(h *harnessHooks) {
+		h.start = func(_ context.Context, ws *harness.Workspace, _ *harness.ConversationRef) error {
+			dirs <- ws
+			return nil
+		}
+	})
+	s, tk, _ := f.startedAgent("t", func(nt *tickets.NewTicket) { nt.Repos = nil })
+	first := <-dirs
+	repos := []string{"app"}
+	_, err := f.tickets.Update(context.Background(), ident.UserPrincipal(), tk.ID, &tickets.TicketChange{Repos: &repos})
+	require.NoError(t, err)
+	f.user(s)
+	wts := f.agentFor(tk.ID).Worktrees
+	require.Len(t, wts, 1)
+
+	f.do(s, fake.Command{Cmd: fake.CmdExit, Code: 3})
+	resumed := f.session()
+	require.True(t, resumed.Resumed)
+	again := <-dirs
+	assert.Equal(t, first.Dir, again.Dir, "resumed in the directory it started in")
+	assert.Contains(t, again.ExtraDirs, wts[0].Path, "and its new worktree is still in reach")
 }
 
 func TestTheLoopGuardTellsTheUserOnceAndLimitsMessagesToThem(t *testing.T) {

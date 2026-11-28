@@ -135,8 +135,8 @@ func (m *Manager) syncBlocked(ctx context.Context, r *runner, a *state.Agent, t 
 
 // syncWorktrees gives a running agent a worktree for each repo added to its
 // ticket since it started, and tells it where they are. Its cwd can't move,
-// so a new worktree is primary only for an agent that had none; a resume
-// then starts it there.
+// so a new worktree is primary only for an agent that had none, and even
+// then a resume runs where the conversation started (see workspace).
 func (m *Manager) syncWorktrees(ctx context.Context, r *runner, a *state.Agent, t *tickets.Ticket) {
 	have := map[string]bool{}
 	primary := false

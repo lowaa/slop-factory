@@ -320,7 +320,7 @@ func TestAnEndedAgentIsFrozenAndNoLongerLive(t *testing.T) {
 			_, err = f.Agents.SetState(ctx, &state.Transition{Agent: "a1", To: state.StateWorking})
 			assert.ErrorIs(t, err, state.ErrEnded)
 			assert.ErrorIs(t, f.Agents.SetProgressNote(ctx, "a1", "x"), state.ErrEnded)
-			assert.ErrorIs(t, f.Agents.SetConversationID(ctx, "a1", "x"), state.ErrEnded)
+			assert.ErrorIs(t, f.Agents.SetConversation(ctx, "a1", "x", "/ws"), state.ErrEnded)
 			assert.ErrorIs(t, f.Agents.ResetNudges(ctx, "a1"), state.ErrEnded)
 			_, err = f.Agents.AddNudge(ctx, "a1")
 			assert.ErrorIs(t, err, state.ErrEnded)
@@ -375,7 +375,7 @@ func TestAgentFieldUpdates(t *testing.T) {
 	ctx := context.Background()
 	f.createAgent(t, "a1", "1")
 
-	require.NoError(t, f.Agents.SetConversationID(ctx, "a1", "conv-1"))
+	require.NoError(t, f.Agents.SetConversation(ctx, "a1", "conv-1", "/agents/a1"))
 	require.NoError(t, f.Agents.SetProgressNote(ctx, "a1", "running the e2e suite"))
 	for want := 1; want <= 3; want++ {
 		n, err := f.Agents.AddNudge(ctx, "a1")
@@ -385,6 +385,7 @@ func TestAgentFieldUpdates(t *testing.T) {
 	got, err := f.Agents.Get(ctx, "a1")
 	require.NoError(t, err)
 	assert.Equal(t, "conv-1", got.ConversationID)
+	assert.Equal(t, "/agents/a1", got.ConversationDir)
 	assert.Equal(t, "running the e2e suite", got.ProgressNote)
 	assert.Equal(t, 3, got.Nudges)
 
