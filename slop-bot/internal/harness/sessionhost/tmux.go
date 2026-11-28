@@ -312,21 +312,19 @@ func (t *Tmux) WaitExit(ctx context.Context, session string) error {
 	channel := diedChannel + session
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	waited := make(chan error, 1)
+	w := &wait{done: make(chan struct{})}
 	go func() {
-		_, err := t.run.do(wctx, &call{args: []string{"wait-for", channel}})
-		waited <- err
+		defer close(w.done)
+		_, w.err = t.run.do(wctx, &call{args: []string{"wait-for", channel}})
 	}()
-	returned, err := t.awaitWait(ctx, waited)
+	err := t.awaitWait(ctx, w)
 	if errors.Is(err, errBound) {
 		_ = t.signal(channel)
-		returned, err = t.awaitWait(ctx, waited)
+		err = t.awaitWait(ctx, w)
 	}
 	if errors.Is(err, errBound) || ctx.Err() != nil {
 		cancel()
-		if !returned {
-			<-waited
-		}
+		<-w.done
 		// The caller's Status check stands in for whatever this signal
 		// might have been.
 		_ = t.signal(channel)
@@ -338,21 +336,27 @@ func (t *Tmux) WaitExit(ctx context.Context, session string) error {
 	return err
 }
 
+// wait is a wait-for client's run: err is set once done is closed.
+type wait struct {
+	done chan struct{}
+	err  error
+}
+
 // errBound is a wait that outlasted the recheck interval.
 var errBound = errors.New("sessionhost: wait bound")
 
-// awaitWait is the wait client's result (returned), or else errBound at
-// the recheck interval, or ctx's error.
-func (t *Tmux) awaitWait(ctx context.Context, waited <-chan error) (returned bool, err error) {
+// awaitWait is the wait client's result, or else errBound at the recheck
+// interval, or ctx's error.
+func (t *Tmux) awaitWait(ctx context.Context, w *wait) error {
 	bound := time.NewTimer(t.recheck)
 	defer bound.Stop()
 	select {
-	case err := <-waited:
-		return true, err
+	case <-w.done:
+		return w.err
 	case <-bound.C:
-		return false, errBound
+		return errBound
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return ctx.Err()
 	}
 }
 
