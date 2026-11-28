@@ -440,23 +440,34 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 		call = &HookCall{}
 	}
 	call.Event = event
-	// One in flight as Close runs is waited for, and one after it has
-	// begun is only answered (the guard still decides a tool call): Close
-	// lets go of the session, so nothing may change or write to it after,
-	// a tag write's retry included.
-	c.mu.Lock()
-	closing := c.closing
-	if !closing {
-		c.hooks.Add(1)
-	}
-	c.mu.Unlock()
-	if closing {
-		if refusal, refused := c.guard(ctx, call); refused {
-			return refusal, nil
-		}
-		return c.p.Reply(call, nil)
+	if !c.enterHook() {
+		return c.answer(ctx, call, nil)
 	}
 	defer c.hooks.Done()
+	inject := c.takeHook(call)
+	// Also retries a tag that failed before.
+	c.recordID(ctx)
+	return c.answer(ctx, call, inject)
+}
+
+// enterHook counts a hook in flight, which Close waits for, unless Close
+// has begun: then the hook is only answered (the guard still decides a
+// tool call), as Close lets go of the session, so nothing may change or
+// write to it after, a tag write's retry included. On true, the caller
+// calls c.hooks.Done.
+func (c *Conversation) enterHook() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closing {
+		return false
+	}
+	c.hooks.Add(1)
+	return true
+}
+
+// takeHook applies a hook's news to the state, and returns the held
+// messages its reply is to inject.
+func (c *Conversation) takeHook(call *HookCall) []*harness.Message {
 	var inject []*harness.Message
 	c.apply(func() []harness.Event {
 		c.hookGen++
@@ -475,8 +486,12 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 		}
 		return c.hookEvents(call, len(inject) > 0)
 	})
-	// Also retries a tag that failed before.
-	c.recordID(ctx)
+	return inject
+}
+
+// answer is a hook's reply: the guard's refusal of a tool call, or the
+// profile's reply carrying inject.
+func (c *Conversation) answer(ctx context.Context, call *HookCall, inject []*harness.Message) ([]byte, error) {
 	if refusal, refused := c.guard(ctx, call); refused {
 		return refusal, nil // a pre-tool hook carries no messages
 	}
