@@ -103,7 +103,7 @@ func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Wor
 		return false, nil, err
 	}
 	defer unlock()
-	st, err := m.inspect(ctx, ticket, wt)
+	st, err := m.inspect(ctx, ticket, wt, true)
 	if err != nil {
 		return false, nil, err
 	}
@@ -158,7 +158,9 @@ func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *W
 		return err
 	}
 	defer unlock()
-	st, err := m.inspect(ctx, ticket, wt)
+	// No rescue: the ticket's branches are about to go whatever they hold,
+	// and a rescue branch someone moved would otherwise block this for good.
+	st, err := m.inspect(ctx, ticket, wt, false)
 	if err != nil {
 		return err
 	}
@@ -218,9 +220,10 @@ func (m *Manager) removeWorktree(ctx context.Context, repoPath, path string, for
 }
 
 // afterFailedRemove explains a failed removal. git drops the registration
-// before deleting the files, so a file it can't delete (read-only, or owned
-// by root from a container build) leaves a directory that is no longer a
-// worktree, and that every later call would take for someone else's. Say
+// even when it couldn't delete every file, so a file it can't delete
+// (read-only, or owned by root from a container build) leaves a directory
+// that is no longer a worktree, and that every later call would take for
+// someone else's. Say
 // so now, and finish with the branches, which were checked safe to delete.
 func (m *Manager) afterFailedRemove(ctx context.Context, repoPath string, st *state, removeErr error) error {
 	reg, err := m.registration(ctx, repoPath, st.path)
@@ -253,10 +256,11 @@ type state struct {
 
 // inspect finds wt's registration and the ticket's
 // branches. It errors on a path that exists but isn't this repo's worktree,
-// which is never touched. A deleted worktree's detached HEAD is saved to a
-// ticket branch, since its registration is all that holds those commits.
+// which is never touched. With rescue, a deleted worktree's detached HEAD is
+// saved to a ticket branch, since its registration is all that holds those
+// commits.
 // The caller has checked wt with owns and holds the repo's lock.
-func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktree) (*state, error) {
+func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktree, rescue bool) (*state, error) {
 	st := &state{path: m.path(ticket, wt.Repo)}
 	var err error
 	if st.reg, err = m.registration(ctx, wt.RepoPath, st.path); err != nil {
@@ -268,7 +272,7 @@ func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktr
 	if st.reg == nil && st.present {
 		return nil, fmt.Errorf("worktree: %w: %s isn't a worktree of %s", ErrCollision, st.path, wt.RepoPath)
 	}
-	if st.reg != nil && !st.present && st.reg.detached {
+	if rescue && st.reg != nil && !st.present && st.reg.detached {
 		if err := m.rescue(ctx, wt.RepoPath, ticket, st.reg.head); err != nil {
 			return nil, err
 		}
@@ -347,21 +351,15 @@ func (m *Manager) unpushed(ctx context.Context, repoPath string, st *state) ([]R
 }
 
 // deleteBranches deletes each branch only if it still points where inspect
-// saw it, and never one checked out in some worktree, which would leave that
+// saw it, and never one in use by some worktree, which would leave that
 // worktree on a branch that doesn't exist.
 func (m *Manager) deleteBranches(ctx context.Context, repoPath string, branches []branchRef) error {
 	if len(branches) == 0 {
 		return nil
 	}
-	regs, err := m.registrations(ctx, repoPath)
+	checkedOut, err := m.branchesInUse(ctx, repoPath)
 	if err != nil {
 		return err
-	}
-	checkedOut := map[string]string{}
-	for _, r := range regs {
-		if r.branch != "" {
-			checkedOut["refs/heads/"+r.branch] = r.path
-		}
 	}
 	var errs []error
 	for _, b := range branches {
@@ -383,6 +381,58 @@ func (m *Manager) deleteBranches(ctx context.Context, repoPath string, branches 
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// branchesInUse maps each branch a worktree of repoPath is on, or is in the
+// middle of rebasing or bisecting from, to that worktree. Mid-rebase and
+// mid-bisect, git lists the worktree as detached, but `rebase --continue` or
+// `bisect reset` still needs the branch.
+func (m *Manager) branchesInUse(ctx context.Context, repoPath string) (map[string]string, error) {
+	regs, err := m.registrations(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	inUse := map[string]string{}
+	for _, r := range regs {
+		if r.branch != "" {
+			inUse["refs/heads/"+r.branch] = r.path
+		}
+		if !r.detached {
+			continue
+		}
+		present, err := exists(r.path)
+		if err != nil || !present {
+			continue
+		}
+		gitDir, err := m.git.Run(ctx, r.path, "rev-parse", "--path-format=absolute", "--git-dir")
+		if err != nil {
+			continue
+		}
+		for _, ref := range pendingBranches(strings.TrimSpace(gitDir)) {
+			inUse[ref] = r.path
+		}
+	}
+	return inUse, nil
+}
+
+// pendingBranches are the branches a rebase or bisect in gitDir will return
+// to.
+func pendingBranches(gitDir string) []string {
+	var refs []string
+	for _, f := range []string{"rebase-merge/head-name", "rebase-apply/head-name", "BISECT_START"} {
+		raw, err := os.ReadFile(filepath.Join(gitDir, f)) // #nosec G304 -- git's own state files in a worktree's git dir
+		if err != nil {
+			continue
+		}
+		ref := strings.TrimSpace(string(raw))
+		if !strings.HasPrefix(ref, "refs/") {
+			// BISECT_START holds a short branch name, or a commit id when
+			// the bisect started detached.
+			ref = "refs/heads/" + ref
+		}
+		refs = append(refs, ref)
+	}
+	return refs
 }
 
 func plural(n int, noun string) string {

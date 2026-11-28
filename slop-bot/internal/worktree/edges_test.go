@@ -14,8 +14,8 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
-// git unregisters a worktree before deleting its files; one it can't delete
-// must be reported as left behind, not taken for someone else's next time.
+// git unregisters a worktree even when it couldn't delete all its files; the
+// rest must be reported as left behind, not taken for someone else's next time.
 func TestCleanupReportsAWorktreeGitCouldNotFullyDelete(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() == 0 {

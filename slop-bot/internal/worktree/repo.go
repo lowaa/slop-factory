@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -323,15 +322,32 @@ func resolve(p string) string {
 // so two tickets on the same repo race inside git otherwise. Keyed on the
 // common git dir, which all of a repo's checkouts share. git run by anyone
 // else (the user, an agent) can still race; a failure from that is returned.
+//
+// Waiting honours ctx: the lock is held across git calls that run hooks, and
+// one hung hook mustn't stall every other ticket on the repo past its
+// deadline.
 func (m *Manager) lockRepo(ctx context.Context, repoPath string) (func(), error) {
 	dir, err := m.commonDir(ctx, repoPath)
 	if err != nil {
 		return nil, err
 	}
-	mu, _ := m.locks.LoadOrStore(dir, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	return mu.(*sync.Mutex).Unlock, nil
+	return m.acquire(ctx, dir)
 }
+
+// acquire takes the lock keyed key, giving up when ctx is done.
+func (m *Manager) acquire(ctx context.Context, key string) (func(), error) {
+	l, _ := m.locks.LoadOrStore(key, make(repoLock, 1))
+	lock := l.(repoLock)
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("worktree: waiting for the lock on %s: %w", key, ctx.Err())
+	}
+}
+
+// repoLock is a one-slot semaphore: full while held.
+type repoLock chan struct{}
 
 // canon resolves symlinks in p's parent, as git does when it records a
 // worktree, but not in p itself: a symlink at t<ticket>-<repo> must not pass
