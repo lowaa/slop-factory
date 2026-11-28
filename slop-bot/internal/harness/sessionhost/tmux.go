@@ -306,8 +306,12 @@ func (t *Tmux) status(ctx context.Context, session string) (*Status, bool, error
 // The signal can miss: two signals with nobody waiting leave nothing kept
 // (tmux drops the channel), so a death signalled just before the bound's
 // would cancel it, and the client, registering after both, would wait on.
-// So that wait is bounded too, and only then is the client killed and its
-// registered wait released by a further signal.
+// So that wait is bounded too, by helperTimeout rather than the recheck
+// interval: a woken client on a loaded machine can take longer than that
+// to return, and killing one that has been woken would make the release
+// below a signal kept for nobody, which then cancels the next real one.
+// Only at that bound is the client killed and its registered wait
+// released by a further signal.
 func (t *Tmux) WaitExit(ctx context.Context, session string) error {
 	channel := diedChannel + session
 	wctx, cancel := context.WithCancel(ctx)
@@ -317,10 +321,10 @@ func (t *Tmux) WaitExit(ctx context.Context, session string) error {
 		defer close(w.done)
 		_, w.err = t.run.do(wctx, &call{args: []string{"wait-for", channel}})
 	}()
-	err := t.awaitWait(ctx, w)
+	err := awaitWait(ctx, w, t.recheck)
 	if errors.Is(err, errBound) {
 		_ = t.signal(channel)
-		err = t.awaitWait(ctx, w)
+		err = awaitWait(ctx, w, helperTimeout)
 	}
 	if errors.Is(err, errBound) || ctx.Err() != nil {
 		cancel()
@@ -342,18 +346,18 @@ type wait struct {
 	err  error
 }
 
-// errBound is a wait that outlasted the recheck interval.
+// errBound is a wait that outlasted its bound.
 var errBound = errors.New("sessionhost: wait bound")
 
-// awaitWait is the wait client's result, or else errBound at the recheck
-// interval, or ctx's error.
-func (t *Tmux) awaitWait(ctx context.Context, w *wait) error {
-	bound := time.NewTimer(t.recheck)
-	defer bound.Stop()
+// awaitWait is the wait client's result, or else errBound at bound, or
+// ctx's error.
+func awaitWait(ctx context.Context, w *wait, bound time.Duration) error {
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
 	select {
 	case <-w.done:
 		return w.err
-	case <-bound.C:
+	case <-timer.C:
 		return errBound
 	case <-ctx.Done():
 		return ctx.Err()
