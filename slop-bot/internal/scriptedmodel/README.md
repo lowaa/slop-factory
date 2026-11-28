@@ -154,8 +154,9 @@ or `~/.gemini` (checked by file times after a run; pi's launcher still reads its
   `~/.gemini/antigravity-cli/cache/onboarding.json` says `"onboardingComplete": true`, which the test writes.
 - **agy updates itself**: every start spawns a background updater that replaces the installed binary, unless
   `AGY_CLI_DISABLE_AUTO_UPDATE=true` (`1` is not enough). It also posts telemetry to `play.googleapis.com/log`,
-  in API-key mode too, and refuses unknown `--settings` keys; no switch for it was found. Tier 2's container
-  has no network; a native run sends it.
+  in API-key mode too, and no switch to turn that off was found (`--settings` refuses keys it doesn't know,
+  so guesses fail loudly). Tier 2's container has no network; a native run sends it. Nothing else reaches
+  Google in API-key mode: run offline, it completes its turns.
 - **agy resumes a conversation cut off mid-turn** the next time it starts with the same `~/.gemini`: a run killed
   while retrying replayed its turn against the next run's script (and ran its tool calls). Hence the test's own
   `HOME`, which works because the gateway needs no Google sign-in.

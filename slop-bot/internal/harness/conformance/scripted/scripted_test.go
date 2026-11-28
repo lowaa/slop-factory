@@ -301,3 +301,22 @@ func TestContainerHarnessVersions(t *testing.T) {
 		})
 	}
 }
+
+// The TUI harnesses run under the image's tmux, which must be one slop-bot
+// supports (doctor's minimum, internal/doctor/versions.go): Debian
+// bookworm's own is 3.3a, so the image takes backports'.
+func TestContainerTmuxIsSupported(t *testing.T) {
+	t.Parallel()
+	optIn(t)
+	if os.Getenv(containerEnv) != "1" {
+		t.Skipf("%s=1 is the container, which installs tmux", containerEnv)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), stepTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, binary(t, "tmux"), "-V").CombinedOutput() // #nosec G204 -- a fixed command
+	require.NoError(t, err, string(out))
+	var major, minor int
+	_, err = fmt.Sscanf(string(out), "tmux %d.%d", &major, &minor)
+	require.NoError(t, err, string(out))
+	assert.True(t, major > 3 || major == 3 && minor >= 4, "tmux %d.%d is below 3.4", major, minor)
+}

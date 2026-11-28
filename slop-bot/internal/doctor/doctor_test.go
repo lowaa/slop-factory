@@ -352,6 +352,27 @@ func TestAgyTermsWarnOnAGoogleSignIn(t *testing.T) {
 	assert.Contains(t, res.Fix, "systemctl --user import-environment GEMINI_API_KEY")
 }
 
+// With an opted-in key, agents run agy in API-key mode (agy.SubcommandArgs),
+// so the listing is asked for in it too: without it agy lists the Google
+// sign-in's models, or says to sign in (agy 1.5.19).
+func TestAgyListsModelsInAPIKeyModeWithAnOptedInKey(t *testing.T) {
+	t.Parallel()
+	const keyed = `agy --settings {"modelProvider":"gemini"} models`
+	f := agyFixture(t, "{api_key_opt_in: true, model: gemini-3.8-flash-low}")
+	f.vars["GEMINI_API_KEY"] = "k"
+	f.cmds.Answer("agy models", &service.Result{ExitCode: 1, Stderr: "Please sign in to view available models\n"})
+	f.cmds.Answer(keyed, &service.Result{Stdout: "gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n"})
+	r := f.run()
+	assert.Equal(t, doctor.Pass, f.result(r, "harness agy", "signed in").Level)
+	assert.Equal(t, doctor.Pass, f.result(r, "harness agy", "model").Level)
+	assert.Contains(t, f.cmds.Calls(), keyed)
+
+	f = agyFixture(t, "{model: gemini-3.8-flash-low}")
+	f.vars["GEMINI_API_KEY"] = "k"
+	f.run()
+	assert.NotContains(t, f.cmds.Calls(), keyed, "a key that isn't opted in never reaches agy")
+}
+
 func TestAgySignInAndModelShareOneListing(t *testing.T) {
 	t.Parallel()
 	f := agyFixture(t, "{model: gemini-3.8-flash-low}")

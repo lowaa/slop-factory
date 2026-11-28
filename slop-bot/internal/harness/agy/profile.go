@@ -111,11 +111,11 @@ func (h *Harness) command(ws *harness.Workspace, resume *harness.ConversationRef
 	// permissions or not; trusting it here skips it without writing it to
 	// agy's settings.json.
 	settings := map[string]any{"trustedWorkspaces": append(append([]string{ws.Dir}, ws.ExtraDirs...), side)}
-	if hasAPIKey(env) {
+	if HasAPIKey(env) {
 		// agy ignores GEMINI_API_KEY unless modelProvider is gemini, which
 		// its docs set in settings.json. Set here, it holds for this
 		// session alone, so the user's own agy keeps its Google sign-in.
-		settings["modelProvider"] = "gemini"
+		settings["modelProvider"] = apiKeyProvider
 	}
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
@@ -143,11 +143,26 @@ func (h *Harness) command(ws *harness.Workspace, resume *harness.ConversationRef
 // docs: not GOOGLE_API_KEY, nor a .env file).
 const apiKeyVar = "GEMINI_API_KEY" // #nosec G101 -- a variable's name, not a credential
 
-// hasAPIKey says the agent's environment carries a Gemini API key, which it
+// apiKeyProvider is the modelProvider that runs agy on apiKeyVar, the only
+// value agy takes.
+const apiKeyProvider = "gemini"
+
+// SubcommandArgs are the arguments for an agy subcommand (`agy models`, say)
+// run with env as a session would be: in API-key mode under the same
+// session-only modelProvider, so a probe checks the key the agents will use,
+// not the Google sign-in.
+func SubcommandArgs(env []string, args ...string) []string {
+	if !HasAPIKey(env) {
+		return args
+	}
+	return append([]string{"--settings", `{"modelProvider":"` + apiKeyProvider + `"}`}, args...)
+}
+
+// HasAPIKey says the agent's environment carries a Gemini API key, which it
 // does only when the workspace opted in (agentproc drops it otherwise). An
 // empty one doesn't count: agy refuses to start with modelProvider gemini
 // and no key.
-func hasAPIKey(env []string) bool {
+func HasAPIKey(env []string) bool {
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, apiKeyVar+"="); ok && v != "" {
 			return true

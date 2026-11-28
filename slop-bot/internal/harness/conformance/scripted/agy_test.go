@@ -29,6 +29,8 @@ func TestAgyConformance(t *testing.T) {
 	t.Parallel()
 	optIn(t)
 	target := binary(t, "agy")
+	// tmuxtest skips without tmux; in the container that must fail.
+	binary(t, "tmux")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
 		f := newFixture(t, "agy", target, &scripted.Options{
 			Shell: &scripted.Shell{Tool: "run_command", Input: func(cmd string) map[string]any {

@@ -7,14 +7,19 @@
 # go.work, not a tagged release, so its source has to be in the context.
 FROM golang:1.27.4-bookworm AS go
 
-# node for the harnesses that ship on npm (all three); pi needs >= 22.19.
+# node for the harnesses that ship on npm (Claude Code, Codex, pi); pi needs
+# >= 22.19.
 FROM node:22.23.3-bookworm-slim AS base
 
 # gcc and libc6-dev for -race (cgo); git and procps because the harnesses'
-# tools run them; tmux for the TUI harnesses (agy); ca-certificates for npm,
-# agy's download and the module download at build; curl for agy's.
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends gcc libc6-dev git procps tmux curl ca-certificates \
+# tools run them; ca-certificates for npm, agy's download and the module
+# download at build; curl for agy's. tmux for the TUI harnesses (agy), from
+# backports: bookworm's own is 3.3a, below slop-bot's 3.4
+# (TestContainerTmuxIsSupported).
+RUN echo "deb http://deb.debian.org/debian bookworm-backports main" > /etc/apt/sources.list.d/backports.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends gcc libc6-dev git procps curl ca-certificates \
+  && apt-get install -y --no-install-recommends -t bookworm-backports tmux \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=go /usr/local/go /usr/local/go
 

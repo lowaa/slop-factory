@@ -7,7 +7,7 @@
 // driving agy from another program is against Google's terms; that is the
 // user's call, for doctor to raise (see the design doc's terms caveat). With
 // the API key opted in (api_key_opt_in, GEMINI_API_KEY), the session runs on
-// the key instead, through a session-only modelProvider (see hasAPIKey).
+// the key instead, through a session-only modelProvider (see HasAPIKey).
 package agy
 
 import (
