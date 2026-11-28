@@ -149,6 +149,23 @@ func TestATicketGetsANewAgentOnceItsLastEnded(t *testing.T) {
 	assert.Equal(t, ident.AgentID("a2"), live.ID)
 }
 
+func TestReleasedForTicketSeesOnlyARelease(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	f.createAgent(t, "a1", "1")
+	f.setState(t, "a1", state.StateDone)
+	f.createAgent(t, "a2", "2")
+	f.setState(t, "a2", state.StateReleased)
+	f.createAgent(t, "a3", "3")
+
+	for ticket, want := range map[ident.TicketID]bool{"1": false, "2": true, "3": false, "4": false} {
+		got, err := f.Agents.ReleasedForTicket(ctx, ticket)
+		require.NoError(t, err)
+		assert.Equal(t, want, got, "ticket %s", ticket)
+	}
+}
+
 func TestLatestForTicketIsTheNewestLiveOrEnded(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -366,9 +383,12 @@ func TestAgentFieldUpdates(t *testing.T) {
 	assert.Equal(t, 3, got.Nudges)
 
 	require.NoError(t, f.Agents.ResetNudges(ctx, "a1"))
+	require.NoError(t, f.Agents.SetDeclared(ctx, "a1", "done", "finished by hand"))
 	got, err = f.Agents.Get(ctx, "a1")
 	require.NoError(t, err)
 	assert.Equal(t, 0, got.Nudges)
+	assert.Equal(t, "done", got.Declared)
+	assert.Equal(t, "finished by hand", got.DeclaredSummary)
 
 	assert.ErrorIs(t, f.Agents.SetProgressNote(ctx, "nope", "x"), state.ErrNotFound)
 	_, err = f.Agents.AddNudge(ctx, "nope")
@@ -487,11 +507,11 @@ func TestTheExpirySweepLosesToAHeartbeatThatBeatIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, expired, 1)
 
-	// Expired, so the heartbeat can't revive it: the CLI must re-acquire.
-	assert.ErrorIs(t, f.Agents.RenewLease(ctx, "a1", &state.Lease{Holder: "cli", ExpiresAt: sweptAt.Add(time.Minute)}), state.ErrConflict)
-	require.NoError(t, f.Agents.AcquireLease(ctx, "a1", &state.Lease{Holder: "cli", ExpiresAt: sweptAt.Add(time.Minute)}))
+	// Expired but not yet swept: its holder is still attached, so the
+	// heartbeat renews it (a machine waking from suspend).
+	require.NoError(t, f.Agents.RenewLease(ctx, "a1", &state.Lease{Holder: "cli", ExpiresAt: sweptAt.Add(time.Minute)}))
 
-	// The sweep, acting on what it read before the re-acquire, loses.
+	// The sweep, acting on what it read before the heartbeat, loses.
 	assert.ErrorIs(t, f.Agents.ReleaseExpiredLease(ctx, "a1", "cli", sweptAt), state.ErrConflict)
 	got, err := f.Agents.Get(ctx, "a1")
 	require.NoError(t, err)

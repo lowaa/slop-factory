@@ -35,7 +35,7 @@ func (m *Manager) Ask(ctx context.Context, p ident.Principal, question string, o
 	if err != nil {
 		return nil, err
 	}
-	r.declare(declAsk, "")
+	m.declare(ctx, r, declAsk, "")
 	m.event(ctx, "agent.asked", r.id, r.ticket, map[string]any{"question": question})
 	return ask, nil
 }
@@ -62,7 +62,7 @@ func (m *Manager) Discuss(ctx context.Context, p ident.Principal, decision strin
 	if _, err := m.opts.Tickets.Comment(ctx, p, r.ticket, b.String()); err != nil {
 		return err
 	}
-	r.declare(declDiscuss, "")
+	m.declare(ctx, r, declDiscuss, "")
 	m.tellUser(ctx, r.id, fmt.Sprintf("ticket %s needs a decision: `slop-bot discussions`", r.ticket))
 	return nil
 }
@@ -115,7 +115,7 @@ func (m *Manager) ReadyToMerge(ctx context.Context, p ident.Principal, pr string
 	if _, err := m.opts.Tickets.Comment(ctx, p, r.ticket, note); err != nil {
 		return err
 	}
-	r.declare(declMerge, "")
+	m.declare(ctx, r, declMerge, "")
 	m.tellUser(ctx, r.id, fmt.Sprintf("ticket %s is ready to merge%s: `slop-bot tell %s merge` when it should", r.ticket, prSuffix(pr), r.id))
 	return nil
 }
@@ -134,7 +134,7 @@ func (m *Manager) Done(ctx context.Context, p ident.Principal, summary string) e
 	if err != nil {
 		return err
 	}
-	r.declare(declDone, summary)
+	m.declare(ctx, r, declDone, summary)
 	return nil
 }
 
@@ -176,7 +176,7 @@ func (m *Manager) end(ctx context.Context, r *runner, summary string, force bool
 	}
 	go func() {
 		ctx := context.WithoutCancel(ctx)
-		_ = r.conv.Stop(ctx, force)
+		r.stopConv(ctx, force)
 		<-r.exited
 		m.cleanup(ctx, r)
 		reason := "the ticket is done"

@@ -69,7 +69,9 @@ func (m *Manager) Tell(ctx context.Context, from ident.Principal, to, text strin
 	}
 	m.event(ctx, EventQueued, a.ID, a.Ticket, map[string]string{"to": string(a.ID), "from": string(sender)})
 	if r, ok := m.runner(a.ID); ok {
-		if interrupt {
+		// An attached agent's conversation is the person's TUI: its messages
+		// wait for the hand-back.
+		if interrupt && r.state() != state.StateAttached {
 			if err := r.conv.Interrupt(ctx); err != nil {
 				m.opts.Logger.Warn("agents: interrupting", "agent", a.ID, "err", err)
 			}
@@ -144,7 +146,12 @@ func (m *Manager) deliverNow(ctx context.Context, r *runner) {
 // whether there were any to handle. An idle agent with messages but no
 // free slot waits for one, ahead of new work.
 func (m *Manager) deliverPending(ctx context.Context, r *runner) bool {
-	if r.state() == state.StateAttached {
+	// Attached, or stopping for an attach: the messages are held for the
+	// person to see, and delivered at the hand-back.
+	r.mu.Lock()
+	held := r.attaching || r.st == state.StateAttached
+	r.mu.Unlock()
+	if held {
 		return false
 	}
 	pending, err := m.opts.State.Messages.Pending(ctx, state.AgentParty(r.id))

@@ -32,6 +32,7 @@ func TestEmptyConfigGetsEveryDefault(t *testing.T) {
 	assert.Equal(t, 3, c.Agents.Nudges)
 	assert.Equal(t, 15*time.Minute, c.Agents.StallAfter.D())
 	assert.Equal(t, 24*time.Hour, c.Agents.AskReminderAfter.D())
+	assert.Equal(t, 30*time.Second, c.Agents.AttachLease.D())
 	require.Contains(t, c.Harnesses, ClaudeCode)
 	assert.Equal(t, "stream-json", c.Harnesses[ClaudeCode].Driver)
 	assert.True(t, *c.Harnesses[ClaudeCode].Permissive)
@@ -56,7 +57,7 @@ harnesses:
   codex: {limit_threshold: 80}
   agy: {driver: tui, permissive: false, model: gemini-x}
   pi:
-agents: {nudges: 5, stall_after: 30m, ask_reminder_after: 2h}
+agents: {nudges: 5, stall_after: 30m, ask_reminder_after: 2h, attach_lease: 1m}
 retention: {transcripts: 72h, events: 48h}
 doctor: {require: [gh, shellcheck]}
 `)
@@ -76,6 +77,7 @@ doctor: {require: [gh, shellcheck]}
 	assert.Empty(t, c.Harnesses[Pi].Model)
 	assert.Equal(t, []string{"gh", "shellcheck"}, c.Doctor.Require)
 	assert.Equal(t, 30*time.Minute, c.Agents.StallAfter.D())
+	assert.Equal(t, time.Minute, c.Agents.AttachLease.D())
 	assert.Equal(t, 48*time.Hour, c.Retention.Events.D())
 }
 
@@ -100,6 +102,7 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"limit over 100":        {"harnesses: {claude-code: {limit_threshold: 101}}\n", "harnesses.claude-code.limit_threshold: 101 isn't a percentage"},
 		"negative limit":        {"harnesses: {claude-code: {limit_threshold: -5}}\n", "limit_threshold: -5"},
 		"negative retention":    {"retention: {transcripts: -1h}\n", "retention: transcripts and events must be positive"},
+		"tiny attach lease":     {"agents: {attach_lease: 10ms}\n", "agents.attach_lease: 10ms is below 1s"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

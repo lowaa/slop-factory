@@ -89,8 +89,13 @@ type Agent struct {
 	StateSince   time.Time
 	ProgressNote string
 	Nudges       int
-	Worktrees    []Worktree
-	CreatedAt    time.Time
+	// Declared and DeclaredSummary are what the agent declared from inside
+	// an attached TUI (done, ask, ...), kept for the hand-back across a
+	// daemon restart.
+	Declared        string
+	DeclaredSummary string
+	Worktrees       []Worktree
+	CreatedAt       time.Time
 	// EndedAt is set once the agent entered a state that Ends.
 	EndedAt *time.Time
 }
@@ -169,6 +174,8 @@ type agentRow struct {
 	StateSince     int64  `bun:"state_since"`
 	ProgressNote   string `bun:"progress_note"`
 	NudgeCount     int    `bun:"nudge_count"`
+	Declared       string `bun:"declared"`
+	DeclaredSum    string `bun:"declared_summary"`
 	TokenHash      string `bun:"token_hash"`
 	CreatedAt      int64  `bun:"created_at"`
 	EndedAt        *int64 `bun:"ended_at"`
@@ -176,22 +183,24 @@ type agentRow struct {
 
 func (r *agentRow) agent() *Agent {
 	a := &Agent{
-		ID:             ident.AgentID(r.ID),
-		Ticket:         ident.TicketID(r.TicketID),
-		Harness:        r.Harness,
-		Driver:         r.Driver,
-		Model:          r.Model,
-		Effort:         r.Effort,
-		ConversationID: r.ConversationID,
-		Mode:           Mode(r.Mode),
-		TUISession:     r.TUISession,
-		Pool:           Pool(r.Pool),
-		State:          AgentState(r.State),
-		StateSince:     fromMillis(r.StateSince),
-		ProgressNote:   r.ProgressNote,
-		Nudges:         r.NudgeCount,
-		CreatedAt:      fromMillis(r.CreatedAt),
-		EndedAt:        fromMillisPtr(r.EndedAt),
+		ID:              ident.AgentID(r.ID),
+		Ticket:          ident.TicketID(r.TicketID),
+		Harness:         r.Harness,
+		Driver:          r.Driver,
+		Model:           r.Model,
+		Effort:          r.Effort,
+		ConversationID:  r.ConversationID,
+		Mode:            Mode(r.Mode),
+		TUISession:      r.TUISession,
+		Pool:            Pool(r.Pool),
+		State:           AgentState(r.State),
+		StateSince:      fromMillis(r.StateSince),
+		ProgressNote:    r.ProgressNote,
+		Nudges:          r.NudgeCount,
+		Declared:        r.Declared,
+		DeclaredSummary: r.DeclaredSum,
+		CreatedAt:       fromMillis(r.CreatedAt),
+		EndedAt:         fromMillisPtr(r.EndedAt),
 	}
 	if r.LeaseExpiresAt != nil {
 		a.Lease = &Lease{Holder: r.LeaseHolder, ExpiresAt: fromMillis(*r.LeaseExpiresAt)}
@@ -295,6 +304,18 @@ func (a *Agents) LiveForTicket(ctx context.Context, ticket ident.TicketID) (*Age
 	return a.one(ctx, a.db, func(q *bun.SelectQuery) *bun.SelectQuery {
 		return q.Where("ticket_id = ?", string(ticket)).Where("ended_at IS NULL")
 	})
+}
+
+// ReleasedForTicket reports whether the ticket's agent was released to a
+// person (`attach --no-resume`). The ticket stays assigned, so without this
+// the scheduler would start a new agent on work a person has taken over.
+func (a *Agents) ReleasedForTicket(ctx context.Context, ticket ident.TicketID) (bool, error) {
+	n, err := a.db.NewSelect().Table("agents").
+		Where("ticket_id = ?", string(ticket)).Where("state = ?", string(StateReleased)).Count(ctx)
+	if err != nil {
+		return false, fmt.Errorf("state: checking ticket %s for a released agent: %w", ticket, err)
+	}
+	return n > 0, nil
 }
 
 // LatestForTicket returns the ticket's newest agent, live or ended: whose
@@ -405,6 +426,13 @@ func (a *Agents) RotateTokenHash(ctx context.Context, id ident.AgentID, hash str
 	})
 }
 
+// SetDeclared records what an attached agent declared, "" to clear it.
+func (a *Agents) SetDeclared(ctx context.Context, id ident.AgentID, declared, summary string) error {
+	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
+		return q.Set("declared = ?", declared).Set("declared_summary = ?", summary)
+	})
+}
+
 // SetProgressNote records the agent's own one-line note.
 func (a *Agents) SetProgressNote(ctx context.Context, id ident.AgentID, note string) error {
 	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
@@ -485,16 +513,18 @@ func (a *Agents) AcquireLease(ctx context.Context, id ident.AgentID, l *Lease) e
 	})
 }
 
-// RenewLease extends an unexpired lease its holder has on a live agent: the
-// heartbeat. A lease that has expired, been released or been taken over is
-// ErrConflict, so a late heartbeat can neither re-attach an agent the
-// daemon handed back nor race the expiry sweep; the CLI must re-acquire.
-// An ended agent is ErrEnded, so the heartbeat learns it ended.
+// RenewLease extends a lease its holder still has on a live agent: the
+// heartbeat, and a CLI reconnecting after a restart. It renews a lease that
+// has expired but not yet been swept, since its holder is still attached
+// (a machine waking from suspend finds every lease expired). A lease that
+// has been released, swept or taken over is ErrConflict, in one statement,
+// so a late heartbeat can't re-attach an agent the daemon handed back, and
+// a sweep acting on an older read loses to it. An ended agent is ErrEnded,
+// so the heartbeat learns it ended.
 func (a *Agents) RenewLease(ctx context.Context, id ident.AgentID, l *Lease) error {
 	res, err := a.db.NewUpdate().Table("agents").Set("lease_expires_at = ?", toMillis(l.ExpiresAt)).
 		Where("id = ?", string(id)).Where("ended_at IS NULL").
 		Where("mode = ?", string(ModeAttached)).Where("lease_holder = ?", l.Holder).
-		Where("lease_expires_at > ?", toMillis(a.clock.Now())).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("state: renewing lease on agent %s: %w", id, err)
@@ -505,7 +535,7 @@ func (a *Agents) RenewLease(ctx context.Context, id ident.AgentID, l *Lease) err
 	if err := a.missingOrEnded(ctx, id); err != nil {
 		return err
 	}
-	return fmt.Errorf("%w: %s holds no unexpired lease on agent %s", ErrConflict, l.Holder, id)
+	return fmt.Errorf("%w: %s holds no lease on agent %s", ErrConflict, l.Holder, id)
 }
 
 // ReleaseLease hands the agent back to programmatic mode, if holder holds

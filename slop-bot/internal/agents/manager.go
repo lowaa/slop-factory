@@ -78,6 +78,8 @@ type Manager struct {
 	// new work.
 	wantSlot []ident.AgentID
 	stopping bool
+	// streams counts the attached CLIs' open streams per agent.
+	streams map[ident.AgentID]int
 
 	limits *limits
 	// wake fires when the earliest held harness's window resets, at
@@ -88,6 +90,8 @@ type Manager struct {
 	kick chan struct{}
 	stop chan struct{}
 	done chan struct{}
+	// swept is closed when the lease sweeper has stopped.
+	swept chan struct{}
 }
 
 // New makes a Manager; nothing runs until Start.
@@ -99,10 +103,12 @@ func New(opts *Options) (*Manager, error) {
 	return &Manager{
 		opts:    opts,
 		runners: map[ident.AgentID]*runner{},
+		streams: map[ident.AgentID]int{},
 		limits:  newLimits(),
 		kick:    make(chan struct{}, 1),
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
+		swept:   make(chan struct{}),
 	}, nil
 }
 
@@ -115,6 +121,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 	go m.schedule() // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
+	go m.sweeper()  // #nosec G118 -- like the scheduler, it runs until Stop
 	m.Kick()
 	return nil
 }
@@ -139,6 +146,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Unlock()
 	close(m.stop)
 	<-m.done
+	<-m.swept
 	var wg sync.WaitGroup
 	for _, r := range runners {
 		wg.Go(func() { r.shutdown(ctx) })

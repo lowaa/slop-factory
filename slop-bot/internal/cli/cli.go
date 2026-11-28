@@ -41,7 +41,8 @@ type Deps struct {
 	// Commands runs doctor's probes: each harness's version, sign-in and
 	// model list.
 	Commands doctor.Commands
-	// Stdin answers `uninstall --purge`'s confirmation.
+	// Stdin answers `uninstall --purge`'s confirmation, and is the terminal
+	// an attached TUI reads.
 	Stdin io.Reader
 
 	// daemonBuilt lets in-package tests see the daemon `slop-bot daemon`
@@ -49,6 +50,10 @@ type Deps struct {
 	daemonBuilt func(*daemon.Daemon)
 	// harnesses lets in-package tests run the daemon on a fake harness.
 	harnesses daemon.Harnesses
+	// clock lets in-package tests run the daemon on a fake clock.
+	clock clock.Clock
+	// tuiGrace shortens the daemon's wait for a hung-up TUI in tests.
+	tuiGrace time.Duration
 }
 
 // FromOS is the real outside world.
@@ -174,7 +179,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			}
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 			opts := &daemon.Options{
-				Config: cfg, Paths: p, Logger: logger, Clock: clock.Real{},
+				Config: cfg, Paths: p, Logger: logger, Clock: clock.Or(a.deps.clock), TUIGrace: a.deps.tuiGrace,
 				CLIReference: AgentReference(cmd.Root()),
 			}
 			// Only when set: a nil map in the interface would read as

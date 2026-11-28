@@ -78,6 +78,9 @@ const (
 	// CmdQuietCancel (TUI mode) makes a cancel run no hook, as agy's
 	// doesn't: only the screen shows it.
 	CmdQuietCancel = "quiet_cancel"
+	// CmdIgnoreHangup (TUI mode) makes the fake survive SIGHUP, as a TUI
+	// that misses its terminal closing would.
+	CmdIgnoreHangup = "ignore_hangup"
 )
 
 // Report is what the fake tells the test.
@@ -87,6 +90,8 @@ type Report struct {
 	ID string `json:"id,omitempty"`
 	// Resumed is set on started when the fake was asked to resume ID.
 	Resumed bool `json:"resumed,omitempty"`
+	// TUI is set on started when the fake runs in TUI mode.
+	TUI bool `json:"tui,omitempty"`
 	// Text and From of a received user message, or a paste's text; MidTurn
 	// says it came while a turn ran.
 	Text    string `json:"text,omitempty"`
@@ -124,6 +129,10 @@ const (
 	RepHook  = "hook"
 	RepQuit  = "quit"
 )
+
+// TUIQuit is the line that quits the TUI mode, as /exit quits Claude Code's:
+// how a person hands an attached agent back.
+const TUIQuit = "/quit"
 
 // How a user message arrived, in TUI mode.
 const (

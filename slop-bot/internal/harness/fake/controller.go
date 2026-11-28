@@ -109,6 +109,8 @@ type Session struct {
 	// ID and Resumed come from the fake's started report.
 	ID      string
 	Resumed bool
+	// TUI says the fake runs in TUI mode, as an attach hands it over.
+	TUI bool
 }
 
 func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
@@ -125,7 +127,7 @@ func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 		}
 		if first && r.Rep == RepStarted {
 			first = false
-			s.ID, s.Resumed = r.ID, r.Resumed
+			s.ID, s.Resumed, s.TUI = r.ID, r.Resumed, r.TUI
 			select {
 			case started <- s:
 			case <-closed:

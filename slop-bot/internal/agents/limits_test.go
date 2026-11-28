@@ -177,7 +177,8 @@ func TestOnlyABlankUnstartedTicketFallsBackToAnotherHarness(t *testing.T) {
 	_, err := f.state.Agents.Create(ctx, &state.NewAgent{ID: "old", Ticket: started.ID, Harness: config.ClaudeCode, Driver: "rpc",
 		Pool: state.PoolNormal, State: state.StateStarting, TokenHash: control.HashToken("old")})
 	require.NoError(t, err)
-	_, err = f.state.Agents.SetState(ctx, &state.Transition{Agent: "old", To: state.StateReleased})
+	// Done, not released: a released ticket is a person's, and isn't scheduled.
+	_, err = f.state.Agents.SetState(ctx, &state.Transition{Agent: "old", To: state.StateDone})
 	require.NoError(t, err)
 	_, err = f.tickets.Assign(ctx, ident.UserPrincipal(), started.ID, "ada")
 	require.NoError(t, err)

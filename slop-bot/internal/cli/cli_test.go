@@ -126,7 +126,7 @@ func startDaemon(t *testing.T, h *harness) (stop func()) {
 	stop = func() {
 		once.Do(func() {
 			cancel()
-			assert.Equal(t, 0, <-done)
+			assert.Equal(t, 0, <-done, "daemon: %s", daemonDeps.Stderr)
 		})
 	}
 	t.Cleanup(stop)

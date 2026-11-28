@@ -55,7 +55,12 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any) error
 // Stream opens a long-lived GET whose body is newline-delimited JSON. The
 // caller closes it.
 func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error) {
-	resp, err := c.send(ctx, http.MethodGet, path, nil)
+	return c.StreamRequest(ctx, http.MethodGet, path, nil)
+}
+
+// StreamRequest is Stream for any method, sending in (if non-nil) as JSON.
+func (c *Client) StreamRequest(ctx context.Context, method, path string, in any) (io.ReadCloser, error) {
+	resp, err := c.send(ctx, method, path, in)
 	if err != nil {
 		return nil, err
 	}

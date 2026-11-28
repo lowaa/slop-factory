@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -58,7 +60,7 @@ func runTUI(o *tuiOptions) int {
 	t.write("\x1b[?2004h")
 	defer t.write("\x1b[?2004l")
 	chunks := readChunks(o.stdin)
-	t.rep.report(Report{Rep: RepStarted, ID: t.id, Resumed: t.resumed})
+	t.rep.report(Report{Rep: RepStarted, ID: t.id, Resumed: t.resumed, TUI: true})
 	t.hook(HookSessionStart, &HookPayload{Resumed: t.resumed})
 	t.draw()
 	return t.loop(chunks)
@@ -136,7 +138,7 @@ func (t *tui) submit() (int, bool) {
 	switch strings.TrimSpace(text) {
 	case "":
 		return 0, false
-	case "/quit":
+	case TUIQuit:
 		t.rep.report(Report{Rep: RepQuit})
 		return 0, true
 	}
@@ -217,6 +219,8 @@ func (t *tui) command(c *Command) (int, bool) {
 		return 0, false
 	case CmdIgnoreInterrupts:
 		t.ignoreInterrupts = c.On
+	case CmdIgnoreHangup:
+		signal.Ignore(syscall.SIGHUP)
 	case CmdQuietCancel:
 		t.quietCancel = c.On
 	case CmdDropSubmits:

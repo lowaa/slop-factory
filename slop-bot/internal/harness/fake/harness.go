@@ -47,6 +47,11 @@ func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harn
 	return rpcdriver.Start(ctx, &rpcdriver.Options{
 		Harness: Name, Driver: Driver, Codec: codec{}, Spec: launch(h.Binary, h.Control, h.TranscriptDir, ws, resume),
 		Logger: h.Logger, Clock: h.Clock,
+		// The hand-over: the same fake in its TUI mode, on the same
+		// conversation, as `claude --resume <id>` is Claude Code's.
+		Attach: func(id string) *harness.LaunchSpec {
+			return launch(h.Binary, h.Control, h.TranscriptDir, ws, &harness.ConversationRef{Harness: Name, Driver: Driver, ID: id}, "--tui")
+		},
 	})
 }
 
