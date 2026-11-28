@@ -158,6 +158,9 @@ type Conversation struct {
 	closing      bool
 	exitErr      error
 
+	// hooks are the hooks in flight, which Close waits for.
+	hooks sync.WaitGroup
+
 	finishOnce sync.Once
 	closeOnce  sync.Once
 }
@@ -437,6 +440,23 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 		call = &HookCall{}
 	}
 	call.Event = event
+	// One in flight as Close runs is waited for, and one after it has
+	// begun is only answered (the guard still decides a tool call): Close
+	// lets go of the session, so nothing may change or write to it after,
+	// a tag write's retry included.
+	c.mu.Lock()
+	closing := c.closing
+	if !closing {
+		c.hooks.Add(1)
+	}
+	c.mu.Unlock()
+	if closing {
+		if refusal, refused := c.guard(ctx, call); refused {
+			return refusal, nil
+		}
+		return c.p.Reply(call, nil)
+	}
+	defer c.hooks.Done()
 	var inject []*harness.Message
 	c.apply(func() []harness.Event {
 		c.hookGen++
@@ -1106,6 +1126,7 @@ func (c *Conversation) Close() error {
 			}()
 		}
 		c.wg.Wait()
+		c.hooks.Wait()
 		c.emitMu.Lock()
 		if !c.eventsClosed {
 			c.eventsClosed = true

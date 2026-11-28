@@ -2,6 +2,7 @@ package tuidriver_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync/atomic"
@@ -90,6 +91,7 @@ type flakyHost struct {
 	fail      atomic.Int32
 	failed    chan struct{}
 	failPaste atomic.Int32
+	failTag   atomic.Bool
 }
 
 func (h *flakyHost) Paste(ctx context.Context, session, text string) error {
@@ -148,6 +150,51 @@ func (h *flakyHost) Status(ctx context.Context, session string) (*sessionhost.St
 		return nil, errors.New("fork/exec tmux: resource temporarily unavailable")
 	}
 	return h.Tmux.Status(ctx, session)
+}
+
+func (h *flakyHost) SetTag(ctx context.Context, session, name, value string) error {
+	if h.failTag.Load() {
+		return errors.New("fork/exec tmux: resource temporarily unavailable")
+	}
+	return h.Tmux.SetTag(ctx, session, name, value)
+}
+
+// capturingHub is the rig's hub, keeping the handler a session is routed
+// to, so a test can deliver a hook as one in flight would: after Close.
+type capturingHub struct {
+	tuidriver.HookHub
+	handler atomic.Pointer[tuidriver.HookHandler]
+}
+
+func (h *capturingHub) Route(session string, handler tuidriver.HookHandler) (func(), error) {
+	h.handler.Store(&handler)
+	return h.HookHub.Route(session, handler)
+}
+
+// Close lets go of the session: a hook still in flight as it runs (one
+// retrying a tag write that failed, say) writes nothing to the session
+// afterwards. Here the late hook would retag a session a test, or the
+// next daemon, had already read the tag of.
+func TestNoHookWritesToTheSessionAfterClose(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	host := &flakyHost{Tmux: r.Host, failed: make(chan struct{}, 1)}
+	host.failTag.Store(true)
+	hub := &capturingHub{HookHub: r.Harness.Hub}
+	r.Harness.Host, r.Harness.Hub = host, hub
+	r.conv = r.launch(t, nil)
+	id := r.conv.Ref().ID
+	require.NotEmpty(t, id)
+	require.NoError(t, r.conv.Close())
+	host.failTag.Store(false)
+
+	payload, err := json.Marshal(&fake.HookPayload{ConversationID: id, Text: "late"})
+	require.NoError(t, err)
+	_, _ = (*hub.handler.Load())(r.ctx, fake.HookText, payload)
+
+	got, err := r.Host.Tag(r.ctx, fake.SessionName("a1"), "slop-bot-conversation")
+	require.NoError(t, err)
+	assert.Empty(t, got, "nothing is written to a session Close let go of")
 }
 
 func TestATmuxFailureIsNotAnExit(t *testing.T) {
