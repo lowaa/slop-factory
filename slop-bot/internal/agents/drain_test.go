@@ -2,15 +2,18 @@ package agents_test
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/agents"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
+	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 )
 
 // Tests of the daemon's drain (Manager.Stop): what it waits for, and what
@@ -105,4 +108,37 @@ func TestASecondStopWaitsForTheFirst(t *testing.T) {
 	f.do(s, fake.Command{Cmd: fake.CmdTurnEnd})
 	require.NoError(t, <-first)
 	require.NoError(t, f.mgr.Stop(f.ctx()))
+}
+
+// An ended agent's cleanup still running when the deadline passes is
+// waited for, ForceStopGrace more, and reported if it outlasts that: the
+// daemon closes the stores it writes to next.
+func TestADrainPastItsDeadlineWaitsOutAnEndingAgentsCleanup(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	_, a := f.working("t")
+	inCleanup, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	f.wts.mu.Lock()
+	f.wts.beforeCleanup = func() { close(inCleanup); <-release }
+	f.wts.mu.Unlock()
+	f.setStatus(a.Ticket, tickets.StatusCancelled)
+	<-inCleanup
+
+	gaveUp, cancel := context.WithCancel(f.ctx())
+	cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- f.mgr.Stop(gaveUp) }()
+	// The grace runs on the fake clock: moved on until Stop gives up.
+	for {
+		select {
+		case err := <-stopped:
+			require.ErrorIs(t, err, context.Canceled)
+			require.ErrorContains(t, err, "still being cleaned up", "waited for, then reported")
+			return
+		default:
+			f.clock.Advance(agents.ForceStopGrace)
+			runtime.Gosched()
+		}
+	}
 }

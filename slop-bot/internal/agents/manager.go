@@ -196,9 +196,9 @@ func (m *Manager) Start(ctx context.Context) error {
 // Stop drains: each agent finishes its current turn and stops, so it can be
 // resumed by id when the daemon starts again. Starts in flight are
 // abandoned. ctx bounds the wait: past it, the agents are forced to stop
-// rather than waited for, each within ForceStopGrace, and Stop returns
-// ctx's error. A second Stop waits for the first, within its own ctx, and
-// returns the first's result.
+// rather than waited for, and what is still settling gets ForceStopGrace
+// more; Stop returns ctx's error, and names what didn't finish. A second
+// Stop waits for the first, within its own ctx, and returns its result.
 func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	if m.stopping {
@@ -227,6 +227,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 func (m *Manager) drain(ctx context.Context) error {
 	close(m.stop)
 	m.cancelBase()
+	// Past ctx, what is still settling gets ForceStopGrace more: starts
+	// were cancelled with the base context and give up fast, and an ended
+	// agent's cleanup writes to the stores the daemon closes next.
+	grace, cancelGrace := m.graceAfter(ctx)
+	defer cancelGrace()
 	// A wait cut short by ctx doesn't skip the agents: they are still
 	// stopped below, and with ctx done that forces them, rather than
 	// leaving harnesses running once the daemon has gone.
@@ -234,8 +239,9 @@ func (m *Manager) drain(ctx context.Context) error {
 	if err == nil {
 		err = waitCtx(ctx, m.swept)
 	}
-	if err == nil {
-		err = waitGroup(ctx, &m.starts)
+	var late []error
+	if werr := waitGroup(grace, &m.starts); werr != nil {
+		late = append(late, fmt.Errorf("agents: starts still in flight: %w", werr))
 	}
 	// Only now is the set of runners final: a start that was in flight has
 	// adopted its runner, or given up.
@@ -254,19 +260,38 @@ func (m *Manager) drain(ctx context.Context) error {
 	wg.Wait()
 	// An agent that finished during the drain is cleaned up before the
 	// daemon closes the databases under it.
-	if err == nil {
-		err = waitGroup(ctx, &m.ends)
+	if werr := waitGroup(grace, &m.ends); werr != nil {
+		late = append(late, fmt.Errorf("agents: ended agents still being cleaned up: %w", werr))
 	}
 	if err == nil {
 		// The deadline passed as the agents stopped: some were forced.
 		err = ctx.Err()
 	}
-	return errors.Join(append([]error{err}, errs...)...)
+	return errors.Join(append(append([]error{err}, errs...), late...)...)
+}
+
+// graceAfter is a context that ends ForceStopGrace after ctx does, on the
+// injected clock: the last bound on what the drain still waits for.
+func (m *Manager) graceAfter(ctx context.Context) (context.Context, context.CancelFunc) {
+	grace, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-grace.Done():
+			return
+		}
+		select {
+		case <-m.opts.Clock.After(ForceStopGrace):
+			cancel()
+		case <-grace.Done():
+		}
+	}()
+	return grace, cancel
 }
 
 // ForceStopGrace bounds the wait for a conversation forced to stop once the
-// drain's deadline has passed: one that still hasn't exited is reported,
-// not waited on for ever.
+// drain's deadline has passed, and for starts and cleanups still settling:
+// what still hasn't finished is reported, not waited on for ever.
 const ForceStopGrace = 10 * time.Second
 
 // startTimeout is Options.StartTimeout, defaulted.

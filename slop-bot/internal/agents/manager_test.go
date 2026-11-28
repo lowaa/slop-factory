@@ -211,6 +211,8 @@ type recordingWorktrees struct {
 	leftover error
 	// beforeCreate, when set, runs before each Create; an error fails it.
 	beforeCreate func(ctx context.Context) error
+	// beforeCleanup, when set, runs once, before the next Cleanup.
+	beforeCleanup func()
 }
 
 func (w *recordingWorktrees) Create(ctx context.Context, ticket ident.TicketID, repos []string, primary string) ([]*worktree.Worktree, error) {
@@ -237,6 +239,13 @@ func (w *recordingWorktrees) Create(ctx context.Context, ticket ident.TicketID, 
 }
 
 func (w *recordingWorktrees) Cleanup(_ context.Context, ticket ident.TicketID, wts []*worktree.Worktree) []*worktree.CleanupResult {
+	w.mu.Lock()
+	before := w.beforeCleanup
+	w.beforeCleanup = nil
+	w.mu.Unlock()
+	if before != nil {
+		before()
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.cleanups = append(w.cleanups, ticket)
