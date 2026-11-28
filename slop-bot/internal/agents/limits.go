@@ -194,8 +194,11 @@ func (m *Manager) specFor(ctx context.Context, t *tickets.Ticket) (tickets.Agent
 		if _, held := m.heldUntil(n); held {
 			continue
 		}
-		alt := spec
-		alt.Harness = n
+		// Resolved afresh, not spec with the harness swapped: the blank
+		// model resolved to the held harness's, which n may not run.
+		asked := t.Agent
+		asked.Harness = n
+		alt := agentspec.Resolve(asked, m.opts.Config)
 		if agentspec.Validate(alt, m.opts.Config) == nil {
 			return alt, nil
 		}

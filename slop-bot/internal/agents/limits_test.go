@@ -186,6 +186,28 @@ func TestOnlyABlankUnstartedTicketFallsBackToAnotherHarness(t *testing.T) {
 	f.await(agents.EventHeld, heldFor(started.ID))
 }
 
+// A blank ticket's model is its harness's configured one, so falling back
+// takes the new harness's model, not the held one's: Claude's model name
+// means nothing to Codex.
+func TestAFallbackTakesTheNewHarnesssModel(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ cfg, want string }{
+		"its configured model": {"harnesses: {claude-code: {model: claude-opus-5-5}, codex: {model: gpt-9}}\n", "gpt-9"},
+		"its own default":      {"harnesses: {claude-code: {model: claude-opus-5-5}, codex: {}}\n", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixtureFor(t, tc.cfg, []string{config.ClaudeCode, config.Codex})
+			f.reportLimit(99, t0.Add(time.Hour))
+			blank := f.file("blank", nil)
+			f.await(agents.EventSpawned, heldFor(blank.ID))
+			a := f.agentFor(blank.ID)
+			assert.Equal(t, config.Codex, a.Harness)
+			assert.Equal(t, tc.want, a.Model)
+		})
+	}
+}
+
 func TestARestartedDaemonStillHoldsAHarnessAtItsLimit(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "")
