@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -99,4 +101,29 @@ func TestLabel_RequiresServerAndToken(t *testing.T) {
 	err = run([]string{"label", id, "--verdict=confirmed", "--report-to=http://127.0.0.1:1"}, &out, &errOut)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SLOP_REVIEW_REPORT_TOKEN")
+}
+
+// review.sh hands label the same .env as a review: the server and token
+// may come from it, below the environment and the flags.
+func TestLabel_ReadsTheServerAndTokenFromTheEnvFile(t *testing.T) {
+	srv, reqs := labelAPI(t, http.StatusCreated)
+	t.Setenv("SLOP_REVIEW_REPORT_URL", "")
+	t.Setenv("SLOP_REVIEW_REPORT_TOKEN", "")
+	t.Setenv("SLOP_REVIEW_REPORT_TOKEN_COMMAND", "")
+	path := filepath.Join(t.TempDir(), ".env")
+	require.NoError(t, os.WriteFile(path, []byte("SLOP_REVIEW_REPORT_URL="+srv.URL+"\nSLOP_REVIEW_REPORT_TOKEN='file-tok'\n"), 0o600))
+	var out, errOut bytes.Buffer
+
+	require.NoError(t, run([]string{"label", "--env-file=" + path, uuid.NewString(), "--verdict=confirmed"}, &out, &errOut))
+	require.Len(t, *reqs, 1)
+	assert.Equal(t, "Bearer file-tok", (*reqs)[0].auth)
+
+	t.Setenv("SLOP_REVIEW_REPORT_TOKEN", "env-tok")
+	require.NoError(t, run([]string{"label", "--env-file=" + path, uuid.NewString(), "--verdict=confirmed"}, &out, &errOut))
+	require.Len(t, *reqs, 2)
+	assert.Equal(t, "Bearer env-tok", (*reqs)[1].auth, "the environment beats the file")
+
+	err := run([]string{"label", "--env-file=" + path, uuid.NewString(), "--verdict=confirmed", "--report-to="}, &out, &errOut)
+	require.ErrorContains(t, err, "no server", "an explicit empty flag beats the file")
+	assert.Len(t, *reqs, 2)
 }

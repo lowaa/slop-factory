@@ -141,9 +141,10 @@ type Result struct {
 
 // FellBack says a run moved to its fallback provider, and why.
 type FellBack struct {
-	From, To string
+	From string `json:"from"`
+	To   string `json:"to"`
 	// Class is the primary's failure that triggered it.
-	Class string
+	Class string `json:"class"`
 }
 
 // routing is one run's choice of route: the primary until a session fails

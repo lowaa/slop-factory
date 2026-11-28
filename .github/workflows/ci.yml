@@ -96,6 +96,7 @@ jobs:
         with:
           go: "true"
           npm-ci: tools
+          shellspec: "true"
       - run: slop-review/report/test.sh
       - run: slop-review/test.sh
 
@@ -226,6 +227,7 @@ jobs:
           - suite: slop-review
             go: "true"
             npm-ci: tools
+            shellspec: "true"
             run: slop-review/report/test.sh && slop-review/test.sh
           # quality_lib.sh is host-side shell every project's quality.sh runs.
           - suite: dev-tools-quality

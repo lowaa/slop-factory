@@ -230,7 +230,9 @@ class ReviewHandle:
 
     def _start_run(self, paths: _Paths, base: str | None, cwd: Path, env: Mapping[str, str]) -> subprocess.Popen[bytes]:
         assert self._settings.script is not None
-        argv = [str(self._settings.script), f"--persona={self._settings.persona}", "--intent", str(paths.intent)]
+        # --env-file= keeps the .env of the checkout review.sh lives in (the user's) out: the review's settings are
+        # `env` alone, and a token in that file would beat the supervisor's token command.
+        argv = [str(self._settings.script), "--env-file=", f"--persona={self._settings.persona}", "--intent", str(paths.intent)]
         if base is not None:
             argv.append(f"--from-commit-hash={base}")
         with paths.out.open("wb") as out, paths.err.open("wb") as err:

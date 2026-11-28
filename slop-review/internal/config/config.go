@@ -5,6 +5,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -172,9 +173,9 @@ type CentralSource interface {
 type Config struct {
 	// Route is the primary provider: the one every session starts on.
 	Route
-	// Fallback, when the central config names one that is usable on this
-	// machine, is where a session goes when the primary fails with one of
-	// FallbackOn.
+	// Fallback, when the central config or the local
+	// SLOP_REVIEW_FALLBACK_* settings name one usable on this machine, is
+	// where a session goes when the primary fails with one of FallbackOn.
 	Fallback   *Route
 	FallbackOn []report.FailureClass
 	// ProviderSource is where Route and Fallback came from, and
@@ -254,9 +255,9 @@ type Config struct {
 	// whose configured remote isn't the shared identity (a personal fork,
 	// say).
 	ReportRepo string
-	// ReportToken authenticates the post. Env-var-only, like the provider
-	// API keys (see Load) -- never a flag, so it can't land in shell
-	// history or a process listing.
+	// ReportToken authenticates the post. From the environment or the
+	// .env, never a flag, so it can't land in shell history or a process
+	// listing.
 	ReportToken string
 	// ReportTokenCommand, when set, is run for the token before each
 	// request, for a token that expires; an explicit ReportToken
@@ -338,13 +339,26 @@ var flagSpecs = []flagSpec{
 	{"bench-variant", "SLOP_REVIEW_BENCH_VARIANT", ""},
 	{"bench-run", "SLOP_REVIEW_BENCH_RUN", "0"},
 	{"provider-config-cache-dir", "SLOP_REVIEW_PROVIDER_CONFIG_CACHE_DIR", ""},
+	{"fallback-provider", "SLOP_REVIEW_FALLBACK_PROVIDER", ""},
+	{"fallback-model", "SLOP_REVIEW_FALLBACK_MODEL", ""},
+	{"fallback-reasoning-effort", "SLOP_REVIEW_FALLBACK_REASONING_EFFORT", ""},
+	{"fallback-on", "SLOP_REVIEW_FALLBACK_ON", ""},
 }
 
 // providerFlags are the flags that choose the reviewer. Any of them on the
 // command line makes the run a local one-off (SourceFlags): a flag's model
 // laid over the central config's provider could pair a model with a
 // provider that doesn't serve it.
-var providerFlags = []string{"provider", "model", "reasoning-effort"}
+var providerFlags = append([]string{"provider", "model", "reasoning-effort"}, fallbackFlags...)
+
+// fallbackFlags choose the fallback. A one-off run has one only if they are
+// on its command line too: the SLOP_REVIEW_FALLBACK_* settings were chosen
+// to back up SLOP_REVIEW_PROVIDER, not whatever --provider names.
+var fallbackFlags = []string{"fallback-provider", "fallback-model", "fallback-reasoning-effort", "fallback-on"}
+
+// envFileFlag names the .env file read below the environment (see DotEnv).
+// A flag only, never a setting itself, so the file can't point elsewhere.
+const envFileFlag = "env-file"
 
 // boolFlags are the flagSpecs that may be given bare: "--run-checks" means
 // true. A value then has to follow "=", so LoadWith refuses a stray
@@ -353,8 +367,9 @@ var boolFlags = map[string]bool{"run-checks": true, "allow-secrets": true}
 
 // reportTokenEnv is where the ingest token comes from. Deliberately absent
 // from flagSpecs/providerProfiles' apiKeyEnv pattern: it must never be
-// bindable as a flag (see Config.ReportToken), so it's read directly with
-// os.Getenv in Load rather than through viper's flag/env precedence.
+// bindable as a flag (see Config.ReportToken), so Load reads it with
+// DotEnv.Getenv (the environment, then the .env) rather than through
+// viper's flag/env precedence.
 const reportTokenEnv = "SLOP_REVIEW_REPORT_TOKEN"
 
 // ReportTokenSource is where the report token comes from: the fixed
@@ -397,8 +412,8 @@ func ReportTokenSource(token, command string) (reporter.TokenSource, error) {
 }
 
 // Load reads configuration from CLI flags (highest precedence), then env
-// vars, then defaults (viper's normal precedence order). args is the
-// program's argument list excluding argv[0] (i.e. os.Args[1:]).
+// vars, then the --env-file .env, then defaults. args is the program's
+// argument list excluding argv[0] (i.e. os.Args[1:]).
 //
 // On an error past flag parsing, Load still returns the Config as far as it
 // got: every setting read, the reporting ones resolved, the rest possibly
@@ -413,33 +428,11 @@ func Load(args []string) (*Config, error) {
 // ProviderSource describes. A central config beats the environment; the
 // command line beats both.
 func LoadWith(ctx context.Context, args []string, central CentralSource) (*Config, error) {
-	v := viper.New()
-
-	fs := pflag.NewFlagSet("slop-review", pflag.ContinueOnError)
-	for _, s := range flagSpecs {
-		fs.String(s.flag, "", fmt.Sprintf("overrides %s", s.key))
-		if boolFlags[s.flag] {
-			fs.Lookup(s.flag).NoOptDefVal = "true"
-		}
+	l, err := readLayers(args)
+	if err != nil {
+		return nil, err
 	}
-	if err := fs.Parse(args); err != nil {
-		return nil, fmt.Errorf("config: parse flags: %w", err)
-	}
-	if fs.NArg() > 0 {
-		return nil, fmt.Errorf("config: unexpected argument %q: slop-review takes only flags, and a bare flag's value goes after \"=\" (--run-checks=false)", fs.Arg(0))
-	}
-
-	for _, s := range flagSpecs {
-		if err := v.BindEnv(s.key, s.key); err != nil {
-			return nil, fmt.Errorf("config: bind env %s: %w", s.key, err)
-		}
-		if err := v.BindPFlag(s.key, fs.Lookup(s.flag)); err != nil {
-			return nil, fmt.Errorf("config: bind flag %s: %w", s.flag, err)
-		}
-		if s.def != "" {
-			v.SetDefault(s.key, s.def)
-		}
-	}
+	v := l.v
 
 	cfg := &Config{
 		Route: Route{
@@ -455,7 +448,7 @@ func LoadWith(ctx context.Context, args []string, central CentralSource) (*Confi
 		ReportURL:          v.GetString("SLOP_REVIEW_REPORT_URL"),
 		ReportRemote:       v.GetString("SLOP_REVIEW_REPORT_REMOTE"),
 		ReportRepo:         v.GetString("SLOP_REVIEW_REPORT_REPO"),
-		ReportToken:        os.Getenv(reportTokenEnv),
+		ReportToken:        l.dotEnv.Getenv(reportTokenEnv),
 		ReportTokenCommand: v.GetString("SLOP_REVIEW_REPORT_TOKEN_COMMAND"),
 		ReportSpoolDir:     v.GetString("SLOP_REVIEW_REPORT_SPOOL_DIR"),
 		ToolVersion:        v.GetString("SLOP_REVIEW_TOOL_VERSION"),
@@ -479,8 +472,12 @@ func LoadWith(ctx context.Context, args []string, central CentralSource) (*Confi
 		cfg.ReportSpoolDir = filepath.Join(dir, "slop-review", "spool")
 	}
 
+	if keys := l.dotEnv.usedKeys(); len(keys) > 0 {
+		cfg.Notes = append(cfg.Notes, fmt.Sprintf("settings from %s: %s", l.envFile, strings.Join(keys, ", ")))
+	}
+
 	cfg.ProviderSource = SourceLocal
-	if slices.ContainsFunc(providerFlags, fs.Changed) {
+	if slices.ContainsFunc(providerFlags, l.fs.Changed) {
 		cfg.ProviderSource = SourceFlags
 	}
 	cfg.ProviderConfigCacheDir = v.GetString("SLOP_REVIEW_PROVIDER_CONFIG_CACHE_DIR")
@@ -488,11 +485,90 @@ func LoadWith(ctx context.Context, args []string, central CentralSource) (*Confi
 	if err := cfg.resolve(v); err != nil {
 		return cfg, err
 	}
-	if err := cfg.resolveProviders(ctx, central); err != nil {
+	if err := cfg.resolveProviders(ctx, central, l.localFallback()); err != nil {
 		return cfg, err
 	}
 	cfg.settleSecrets()
 	return cfg, nil
+}
+
+// layers are where a run's settings come from, highest first: the flags,
+// the environment, the .env file (viper's config layer), the defaults.
+type layers struct {
+	v       *viper.Viper
+	fs      *pflag.FlagSet
+	dotEnv  DotEnv
+	envFile string
+}
+
+func readLayers(args []string) (*layers, error) {
+	l := &layers{v: viper.New(), fs: pflag.NewFlagSet("slop-review", pflag.ContinueOnError)}
+	for _, s := range flagSpecs {
+		l.fs.String(s.flag, "", fmt.Sprintf("overrides %s", s.key))
+		if boolFlags[s.flag] {
+			l.fs.Lookup(s.flag).NoOptDefVal = "true"
+		}
+	}
+	envFile := l.fs.String(envFileFlag, "", "a .env file whose SLOP_REVIEW_* settings apply below the environment's")
+	if err := l.fs.Parse(args); err != nil {
+		return nil, fmt.Errorf("config: parse flags: %w", err)
+	}
+	if l.fs.NArg() > 0 {
+		return nil, fmt.Errorf("config: unexpected argument %q: slop-review takes only flags, and a bare flag's value goes after \"=\" (--run-checks=false)", l.fs.Arg(0))
+	}
+
+	l.envFile = *envFile
+	var err error
+	if l.dotEnv, err = ReadDotEnv(l.envFile); err != nil {
+		return nil, err
+	}
+	// An intent belongs to one change, and a relative path in the file
+	// would be taken from review.sh's directory, not the caller's.
+	if _, ok := l.dotEnv["SLOP_REVIEW_INTENT"]; ok {
+		return nil, fmt.Errorf("config: %s: SLOP_REVIEW_INTENT can't be set in a .env: it names one change's intent; give --intent", l.envFile)
+	}
+	fileSettings := make(map[string]any, len(l.dotEnv))
+	for k, val := range l.dotEnv {
+		fileSettings[k] = val
+	}
+	if err := l.v.MergeConfigMap(fileSettings); err != nil {
+		return nil, fmt.Errorf("config: %s: %w", l.envFile, err)
+	}
+
+	for _, s := range flagSpecs {
+		if err := l.v.BindEnv(s.key, s.key); err != nil {
+			return nil, fmt.Errorf("config: bind env %s: %w", s.key, err)
+		}
+		if err := l.v.BindPFlag(s.key, l.fs.Lookup(s.flag)); err != nil {
+			return nil, fmt.Errorf("config: bind flag %s: %w", s.flag, err)
+		}
+		if s.def != "" {
+			l.v.SetDefault(s.key, s.def)
+		}
+	}
+	return l, nil
+}
+
+// localFallback reads the fallback the local settings name. One on the
+// command line is taken from the command line alone: merged key by key with
+// the environment's, --fallback-provider could pair with a
+// SLOP_REVIEW_FALLBACK_MODEL its provider doesn't serve.
+func (l *layers) localFallback() *localFallback {
+	f := &localFallback{flagged: slices.ContainsFunc(fallbackFlags, l.fs.Changed)}
+	get := l.v.GetString
+	if f.flagged {
+		get = func(key string) string {
+			i := slices.IndexFunc(flagSpecs, func(s flagSpec) bool { return s.key == key })
+			return l.fs.Lookup(flagSpecs[i].flag).Value.String()
+		}
+	}
+	f.choice = providerconfig.Choice{
+		Provider:        get("SLOP_REVIEW_FALLBACK_PROVIDER"),
+		Model:           get("SLOP_REVIEW_FALLBACK_MODEL"),
+		ReasoningEffort: get("SLOP_REVIEW_FALLBACK_REASONING_EFFORT"),
+	}
+	f.on = get("SLOP_REVIEW_FALLBACK_ON")
+	return f
 }
 
 // resolve parses and checks everything Load read as a plain string.
@@ -621,10 +697,52 @@ func (cfg *Config) loadIntent(path string) error {
 	return nil
 }
 
+// localFallback is the fallback the local settings name: the command
+// line's, or else the environment's over the .env file's.
+type localFallback struct {
+	choice providerconfig.Choice
+	// on is SLOP_REVIEW_FALLBACK_ON, comma-separated; empty is
+	// providerconfig.DefaultTrigger.
+	on string
+	// flagged says a fallback flag was on the command line.
+	flagged bool
+}
+
+func (f *localFallback) named() bool {
+	return f.choice != providerconfig.Choice{} || strings.TrimSpace(f.on) != ""
+}
+
+// settings is the fallback as the central config would carry it, over
+// primary, so that one validation, resolution and run-time path serves
+// both. Only primary's provider is carried: its model and effort were
+// already checked as local settings, and the provider is all a fallback's
+// rules depend on.
+func (f *localFallback) settings(primary *Route) (*providerconfig.Settings, error) {
+	if f.choice.Provider == "" {
+		return nil, errors.New("config: SLOP_REVIEW_FALLBACK_MODEL, _REASONING_EFFORT and _ON need SLOP_REVIEW_FALLBACK_PROVIDER")
+	}
+	fallback := f.choice
+	s := &providerconfig.Settings{Primary: providerconfig.Choice{Provider: primary.Provider}, Fallback: &fallback}
+	for class := range strings.SplitSeq(f.on, ",") {
+		if class = strings.TrimSpace(class); class != "" {
+			s.FallbackOn = append(s.FallbackOn, report.FailureClass(class))
+		}
+	}
+	if len(s.FallbackOn) == 0 {
+		s.FallbackOn = slices.Clone(providerconfig.DefaultTrigger)
+	}
+	if err := s.Validate(); err != nil {
+		return nil, fmt.Errorf("config: SLOP_REVIEW_FALLBACK_*: %w", err)
+	}
+	return s, nil
+}
+
 // resolveProviders settles the primary and fallback routes: from the
 // central config when there is one and the command line didn't choose,
-// otherwise from the local settings as read.
-func (cfg *Config) resolveProviders(ctx context.Context, central CentralSource) error {
+// otherwise from the local settings as read. The local fallback backs up
+// the local primary only: a central config brings its own fallback (or
+// none), and a one-off run gets one only from its own command line.
+func (cfg *Config) resolveProviders(ctx context.Context, central CentralSource, fallback *localFallback) error {
 	tokens, err := cfg.ReportTokenSource()
 	if err != nil {
 		return err
@@ -634,18 +752,15 @@ func (cfg *Config) resolveProviders(ctx context.Context, central CentralSource) 
 	}
 	local := cfg.Route
 	if cfg.ProviderSource == SourceLocal && central != nil && cfg.ReportURL != "" && tokens != nil {
-		if cfg.ProviderConfigCacheDir == "" {
-			dir, err := os.UserCacheDir()
-			if err != nil {
-				return fmt.Errorf("config: resolve default provider config cache dir: %w", err)
-			}
-			cfg.ProviderConfigCacheDir = filepath.Join(dir, "slop-review", "provider-config")
+		c, err := cfg.lookUpCentral(ctx, central, tokens)
+		if err != nil {
+			return err
 		}
-		if c := central.Lookup(ctx, cfg.ReportURL, tokens, cfg.ProviderConfigCacheDir); c != nil {
-			cfg.Notes = append(cfg.Notes, c.Notes...)
-			if c.Config != nil {
-				return cfg.applyCentral(c, &local)
+		if c != nil {
+			if fallback.named() {
+				cfg.Notes = append(cfg.Notes, "the central provider config applies, so SLOP_REVIEW_FALLBACK_* is not used")
 			}
+			return cfg.applyCentral(c, &local)
 		}
 	}
 	route, err := resolveRoute(&local, &local, "SLOP_REVIEW_")
@@ -653,6 +768,44 @@ func (cfg *Config) resolveProviders(ctx context.Context, central CentralSource) 
 		return err
 	}
 	cfg.Route = *route
+	return cfg.applyLocalFallback(fallback, &local)
+}
+
+// lookUpCentral is the central config to apply, or nil for none.
+func (cfg *Config) lookUpCentral(ctx context.Context, central CentralSource, tokens reporter.TokenSource) (*Central, error) {
+	if cfg.ProviderConfigCacheDir == "" {
+		dir, err := os.UserCacheDir()
+		if err != nil {
+			return nil, fmt.Errorf("config: resolve default provider config cache dir: %w", err)
+		}
+		cfg.ProviderConfigCacheDir = filepath.Join(dir, "slop-review", "provider-config")
+	}
+	c := central.Lookup(ctx, cfg.ReportURL, tokens, cfg.ProviderConfigCacheDir)
+	if c == nil {
+		return nil, nil
+	}
+	cfg.Notes = append(cfg.Notes, c.Notes...)
+	if c.Config == nil {
+		return nil, nil
+	}
+	return c, nil
+}
+
+// applyLocalFallback sets the local fallback over the local primary,
+// unless this is a one-off run whose command line named none.
+func (cfg *Config) applyLocalFallback(fallback *localFallback, local *Route) error {
+	if !fallback.named() {
+		return nil
+	}
+	if cfg.ProviderSource == SourceFlags && !fallback.flagged {
+		cfg.Notes = append(cfg.Notes, "--provider/--model/--reasoning-effort make this run a one-off without the SLOP_REVIEW_FALLBACK_* fallback; give --fallback-provider for one")
+		return nil
+	}
+	s, err := fallback.settings(&cfg.Route)
+	if err != nil {
+		return err
+	}
+	cfg.applyFallback(s, local)
 	return nil
 }
 
@@ -668,18 +821,23 @@ func (cfg *Config) applyCentral(c *Central, local *Route) error {
 		return fmt.Errorf("central provider config (revision %d), primary: %w", pc.Revision, err)
 	}
 	cfg.Route = *primary
-	if pc.Fallback == nil {
-		return nil
-	}
-	// A fallback this machine can't use (no key for it, say) is left out
-	// rather than failing a run the primary may well handle.
-	fallback, err := resolveRoute(routeFor(pc.Fallback), local, "")
-	if err != nil {
-		cfg.Notes = append(cfg.Notes, fmt.Sprintf("the fallback provider %q can't be used on this machine, so this run has none: %v", pc.Fallback.Provider, err))
-		return nil
-	}
-	cfg.Fallback, cfg.FallbackOn = fallback, pc.FallbackOn
+	cfg.applyFallback(&pc.Settings, local)
 	return nil
+}
+
+// applyFallback sets s's fallback, if it names one. A fallback this machine
+// can't use (no key for it, say) is left out rather than failing a run the
+// primary may well handle.
+func (cfg *Config) applyFallback(s *providerconfig.Settings, local *Route) {
+	if s.Fallback == nil {
+		return
+	}
+	fallback, err := resolveRoute(routeFor(s.Fallback), local, "")
+	if err != nil {
+		cfg.Notes = append(cfg.Notes, fmt.Sprintf("the fallback provider %q can't be used on this machine, so this run has none: %v", s.Fallback.Provider, err))
+		return
+	}
+	cfg.Fallback, cfg.FallbackOn = fallback, s.FallbackOn
 }
 
 func routeFor(c *providerconfig.Choice) *Route {
