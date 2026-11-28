@@ -2,17 +2,22 @@
 // long-lived process per conversation, speaking JSONL commands and events.
 //
 // It runs on the user's own pi configuration (~/.pi/agent: login, settings,
-// extensions, skills, trust decisions) and loads no extension of its own:
-// the rpc protocol covers turns, steering, abort and state, and the agent
-// reaches slop-bot through its CLI.
+// extensions, skills, trust decisions). The rpc protocol covers turns,
+// steering, abort and state, and the agent reaches slop-bot through its
+// CLI; the one extension of slop-bot's own is the merge guard's
+// (merge_guard.ts), loaded with -e, which project trust doesn't gate.
 package pi
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 
 	"github.com/google/uuid"
@@ -64,7 +69,18 @@ type Harness struct {
 	Clock    clock.Clock
 	// Environ is the base environment; nil means os.Environ.
 	Environ func() []string
+	// PreToolHook, when set, is the command (an argv) pi runs before each
+	// bash or MCP tool call, through slop-bot's extension: the merge guard,
+	// `slop-bot hook pre-tool`. The extension is written beside the
+	// briefing file, outside the worktree.
+	PreToolHook []string
 }
+
+//go:embed merge_guard.ts
+var mergeGuardExtension []byte
+
+// hookEnv names the hook's argv, as JSON, for the extension.
+const hookEnv = "SLOP_BOT_PRE_TOOL_HOOK"
 
 // Name implements harness.AIHarness.
 func (h *Harness) Name() string { return Name }
@@ -90,11 +106,11 @@ func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harn
 	if err != nil {
 		return nil, err
 	}
+	env := h.env(ws)
 	id := uuid.NewString()
 	if resume != nil {
 		id = resume.ID
 	}
-	env := h.env(ws)
 	args := append([]string{"--mode", "rpc", "--session-id", id}, flags...)
 	spec := &harness.LaunchSpec{Path: bin, Args: args, Env: env, Dir: ws.Dir}
 	h.Logger.Info("pi: starting", "agent", ws.Agent, "session", id, "model", h.model(ws), "resume", resume != nil)
@@ -135,7 +151,27 @@ func (h *Harness) common(ws *harness.Workspace) ([]string, error) {
 	if b := briefingArg(ws); b != "" {
 		args = append(args, "--append-system-prompt", b)
 	}
+	if len(h.PreToolHook) > 0 {
+		ext, err := writeGuardExtension(ws)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--extension", ext)
+	}
 	return args, nil
+}
+
+// writeGuardExtension writes the merge guard's extension beside the
+// briefing file, the agent's own directory, and returns its path.
+func writeGuardExtension(ws *harness.Workspace) (string, error) {
+	if ws.BriefingFile == "" {
+		return "", errors.New("pi: the merge guard's extension goes beside the briefing file, and the workspace has none")
+	}
+	path := filepath.Join(filepath.Dir(ws.BriefingFile), "merge-guard.ts")
+	if err := os.WriteFile(path, mergeGuardExtension, 0o600); err != nil {
+		return "", fmt.Errorf("pi: writing the merge guard's extension: %w", err)
+	}
+	return path, nil
 }
 
 // briefingArg prefers the briefing file: pi reads an argument that names an
@@ -155,6 +191,10 @@ func (h *Harness) env(ws *harness.Workspace) []string {
 	set := map[string]string{}
 	if h.AgentDir != "" {
 		set["PI_CODING_AGENT_DIR"] = h.AgentDir
+	}
+	if len(h.PreToolHook) > 0 {
+		b, _ := json.Marshal(h.PreToolHook) // a []string always encodes
+		set[hookEnv] = string(b)
 	}
 	return agentproc.WorkspaceEnv(h.Environ, ws, set)
 }

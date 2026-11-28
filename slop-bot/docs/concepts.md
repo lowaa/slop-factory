@@ -256,9 +256,12 @@ and the risk is accepted**. It stops mistakes, not malice.
   (unless `api_key_opt_in`), Claude Code's parent-session variables (not
   `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*` or `CLAUDE_CODE_SKIP_*_AUTH`),
   and other agents' tokens.
-- The merge flag is policy in the briefing, not enforcement. A harness
-  driver with pre-tool hooks could refuse `gh pr merge` on a ticket without
-  `AutoMerge`; none does yet.
+- The merge flag is policy in the briefing, backed where a harness has a
+  pre-tool hook by a guard that refuses obvious merges (`gh pr merge`, a
+  push to the default branch) on a ticket without `AutoMerge` until you
+  run `slop-bot tell <agent> --merge`. Claude Code and pi have the guard.
+  Codex doesn't. The guard is advisory: an agent with a shell can get round
+  it. See [merge_guard.md](merge_guard.md).
 - `agy` runs on a Google sign-in whose consumer terms may forbid driving it
   from another program. `doctor` says so once; whether to proceed is your
   call.

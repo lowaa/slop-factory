@@ -21,17 +21,27 @@ func (h Harnesses) Harness(name string) (harness.AIHarness, bool) {
 	return a, ok
 }
 
+// buildOptions is what every harness implementation is built with.
+type buildOptions struct {
+	logger *slog.Logger
+	clock  clock.Clock
+	// preToolHook is `slop-bot hook pre-tool`, the merge guard, for the
+	// harnesses whose drivers have a pre-tool hook to run it from.
+	preToolHook []string
+}
+
 // builders are the harness implementations this build has, by harness and
-// driver.
-var builders = map[[2]string]func(logger *slog.Logger, clk clock.Clock) harness.AIHarness{
-	{config.ClaudeCode, claudecode.Driver}: func(l *slog.Logger, c clock.Clock) harness.AIHarness {
-		return &claudecode.Harness{Logger: l, Clock: c}
+// driver. Codex gets no merge guard: its hooks don't run under app-server
+// (docs/merge_guard.md).
+var builders = map[[2]string]func(o *buildOptions) harness.AIHarness{
+	{config.ClaudeCode, claudecode.Driver}: func(o *buildOptions) harness.AIHarness {
+		return &claudecode.Harness{Logger: o.logger, Clock: o.clock, PreToolHook: o.preToolHook}
 	},
-	{config.Codex, codex.Driver}: func(l *slog.Logger, c clock.Clock) harness.AIHarness {
-		return &codex.Harness{Logger: l, Clock: c, Version: version.String()}
+	{config.Codex, codex.Driver}: func(o *buildOptions) harness.AIHarness {
+		return &codex.Harness{Logger: o.logger, Clock: o.clock, Version: version.String()}
 	},
-	{config.Pi, pi.Driver}: func(l *slog.Logger, c clock.Clock) harness.AIHarness {
-		return &pi.Harness{Logger: l, Clock: c}
+	{config.Pi, pi.Driver}: func(o *buildOptions) harness.AIHarness {
+		return &pi.Harness{Logger: o.logger, Clock: o.clock, PreToolHook: o.preToolHook}
 	},
 }
 
@@ -45,11 +55,11 @@ func Implemented(name, driver string) bool {
 // configuredHarnesses builds the implementation for each harness in the
 // config, under its configured driver. A harness whose driver this build
 // doesn't have yet is left out: tickets that ask for it are misconfigured.
-func configuredHarnesses(cfg *config.Config, logger *slog.Logger, clk clock.Clock) Harnesses {
+func configuredHarnesses(cfg *config.Config, o *buildOptions) Harnesses {
 	out := Harnesses{}
 	for name, hc := range cfg.Harnesses {
 		if build, ok := builders[[2]string{name, hc.Driver}]; ok {
-			out[name] = build(logger, clk)
+			out[name] = build(o)
 		}
 	}
 	return out

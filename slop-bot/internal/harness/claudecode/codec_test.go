@@ -177,11 +177,43 @@ func TestOpenReturnsTheChosenID(t *testing.T) {
 
 func TestCommonFlags(t *testing.T) {
 	t.Parallel()
-	assert.Empty(t, common(&harness.Workspace{}))
+	h := &Harness{}
+	none, err := h.common(&harness.Workspace{})
+	require.NoError(t, err)
+	assert.Empty(t, none)
+	all, err := h.common(&harness.Workspace{Permissive: true, Model: "opus", Effort: "high", Briefing: "brief", ExtraDirs: []string{"/ws/t1-lib"}})
+	require.NoError(t, err)
 	assert.Equal(t, []string{
 		"--dangerously-skip-permissions", "--model", "opus", "--effort", "high",
 		"--append-system-prompt", "brief", "--add-dir", "/ws/t1-lib",
-	}, common(&harness.Workspace{Permissive: true, Model: "opus", Effort: "high", Briefing: "brief", ExtraDirs: []string{"/ws/t1-lib"}}))
+	}, all)
+}
+
+func TestThePreToolHookGoesInThroughSessionSettings(t *testing.T) {
+	t.Parallel()
+	h := &Harness{PreToolHook: []string{"/opt/slop bot/slop-bot", "hook", "pre-tool"}}
+	args, err := h.common(&harness.Workspace{})
+	require.NoError(t, err)
+	require.Len(t, args, 2)
+	assert.Equal(t, "--settings", args[0])
+	var settings struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+				Timeout int    `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(args[1]), &settings))
+	pre := settings.Hooks["PreToolUse"]
+	require.Len(t, pre, 1)
+	assert.Equal(t, "Bash|mcp__.*", pre[0].Matcher)
+	require.Len(t, pre[0].Hooks, 1)
+	assert.Equal(t, "command", pre[0].Hooks[0].Type)
+	assert.Equal(t, "'/opt/slop bot/slop-bot' hook pre-tool", pre[0].Hooks[0].Command, "quoted for the shell Claude Code runs it with")
+	assert.Positive(t, pre[0].Hooks[0].Timeout)
 }
 
 func TestEnvDisablesBackgroundTasksAndKeepsAPIKeysOut(t *testing.T) {

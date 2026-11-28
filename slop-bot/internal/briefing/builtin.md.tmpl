@@ -32,7 +32,9 @@ to follow.
    {{- else -}}
    This ticket does **not** have AutoMerge. When the work is ready to merge,
    run `{{.CLI}} ready-to-merge` (with `--pr <url>` if there is one) and end
-   your turn. Merge only when the user tells you to.
+   your turn. Merge only when the user tells you to: until then slop-bot may
+   refuse merge commands (`gh pr merge`, a push to the default branch), and
+   a refusal means stop and wait, not find another way.
    {{- end}}
 6. **Done.** A merge isn't necessarily the end: there may be checks to watch,
    a deploy to verify, or follow-up work. When the ticket's goal is met, run

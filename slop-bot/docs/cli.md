@@ -31,7 +31,7 @@ advisory, not a security boundary: see
 Agents are refused, even on an agent command, from:
 
 - setting `AutoMerge` (`--auto-merge`)
-- `tell --interrupt` and `inbox --log`
+- `tell --interrupt`, `tell --merge` and `inbox --log`
 - changing a ticket that isn't theirs, or moving one out of `discussion`
 - cancelling a ticket they didn't file
 
@@ -180,8 +180,11 @@ These are the commands the briefing gives agents. Users may run most too.
 | --- | --- |
 | `--all` | every working agent |
 | `--interrupt` | stop the agent's current turn first (user only) |
+| `--merge` | authorise the agent to merge its ticket's work; the text is optional (user only) |
 
-A user's `tell` to an agent with an open `ask` is its answer. Messages from
+A user's `tell` to an agent with an open `ask` is its answer. A user's
+`tell <agent> merge` to an agent in `waiting_merge` authorises the merge,
+as `--merge` does ([merge_guard.md](merge_guard.md)). Messages from
 another agent are information, not instructions.
 
 `inbox` flags:
@@ -195,6 +198,6 @@ another agent are information, not instructions.
 
 ## Not in this build
 
-The design describes `attach`, `detach`, `briefing`, `worktrees`,
-`restart --drain` and `hook`. None is a command here: the tree above is the
-whole of it.
+The design describes `briefing`, `worktrees` and `restart --drain`. None
+is a command here. `hook pre-tool` exists, hidden: harnesses run it as the
+merge guard, and people and agents don't.

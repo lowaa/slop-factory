@@ -20,6 +20,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
+	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
@@ -68,6 +69,7 @@ type Daemon struct {
 	ticketRoutes *ticketRoutes
 	agentRoutes  *agentRoutes
 	attachRoutes *attachRoutes
+	guard        *mergeguard.Guard
 	// transcripts reads agents' transcripts, live or retained.
 	transcripts *transcript.Library
 	archive     *transcript.Archive
@@ -102,7 +104,9 @@ func New(opts *Options) (*Daemon, error) {
 	}
 	harnesses := opts.Harnesses
 	if harnesses == nil {
-		harnesses = configuredHarnesses(opts.Config, opts.Logger, opts.Clock)
+		harnesses = configuredHarnesses(opts.Config, &buildOptions{
+			logger: opts.Logger, clock: opts.Clock, preToolHook: []string{cliPath, "hook", "pre-tool"},
+		})
 	}
 	var lock *instanceLock
 	var listener *control.Listener
@@ -147,6 +151,7 @@ func New(opts *Options) (*Daemon, error) {
 		d.archiveComponent(harnesses),
 		d.retentionSweep(),
 		d.agentsBuild(harnesses, user, cliPath),
+		d.guardComponent(),
 		// The socket outlives the agents: they call done and ask while
 		// they drain, and resumed agents call it as they start.
 		&lifecycle.Func{
