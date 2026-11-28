@@ -146,6 +146,9 @@ type Conversation struct {
 	submitted chan struct{}
 	// pending are messages waiting for an injecting hook, or for idle.
 	pending []*harness.Message
+	// injecting are the messages hooks have taken from pending for a reply
+	// they haven't yet returned (injection).
+	injecting map[*injection]bool
 	// flushing means a flush is running or about to: one at a time.
 	flushing bool
 	// hookGen counts hooks, and lastHook is when the last arrived: a screen
@@ -444,10 +447,44 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 		return c.answer(ctx, call, nil)
 	}
 	defer c.hooks.Done()
-	inject := c.takeHook(call)
+	inj := c.takeHook(call)
 	// Also retries a tag that failed before.
 	c.recordID(ctx)
-	return c.answer(ctx, call, inject)
+	reply, err := c.answer(ctx, call, inj.msgs())
+	c.settleInjection(inj, err)
+	return reply, err
+}
+
+// injection is the held messages one hook's reply carries, from when the
+// hook takes them until it has answered: an exit meanwhile (finish) puts
+// them back in pending, for Undelivered, as the reply may never reach the
+// harness. Nil for a hook that took none.
+type injection struct{ taken []*harness.Message }
+
+func (i *injection) msgs() []*harness.Message {
+	if i == nil {
+		return nil
+	}
+	return i.taken
+}
+
+// settleInjection ends inj's time in flight: a reply that failed to encode
+// holds its messages again, unless the exit already has.
+func (c *Conversation) settleInjection(inj *injection, err error) {
+	if inj == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.injecting[inj] {
+		return // finish took them back
+	}
+	delete(c.injecting, inj)
+	if err != nil {
+		// Not delivered: hold them again. A turn end this hook would have
+		// continued is then left to the screen to report.
+		c.pending = append(inj.taken, c.pending...)
+	}
 }
 
 // enterHook counts a hook in flight, which Close waits for, unless Close
@@ -466,9 +503,9 @@ func (c *Conversation) enterHook() bool {
 }
 
 // takeHook applies a hook's news to the state, and returns the held
-// messages its reply is to inject.
-func (c *Conversation) takeHook(call *HookCall) []*harness.Message {
-	var inject []*harness.Message
+// messages its reply is to inject, in flight until settleInjection.
+func (c *Conversation) takeHook(call *HookCall) *injection {
+	var inj *injection
 	c.apply(func() []harness.Event {
 		c.hookGen++
 		c.lastHook = c.opts.Clock.Now()
@@ -482,11 +519,16 @@ func (c *Conversation) takeHook(call *HookCall) []*harness.Message {
 		// message past the cancel, which then cancels it too.
 		cancelling := call.Inject == InjectTurnEnd && c.interrupting
 		if c.p.Injects && call.Inject != InjectNone && !c.stopping && !cancelling && len(c.pending) > 0 {
-			inject, c.pending = c.pending, nil
+			inj = &injection{taken: c.pending}
+			c.pending = nil
+			if c.injecting == nil {
+				c.injecting = map[*injection]bool{}
+			}
+			c.injecting[inj] = true
 		}
-		return c.hookEvents(call, len(inject) > 0)
+		return c.hookEvents(call, inj != nil)
 	})
-	return inject
+	return inj
 }
 
 // answer is a hook's reply: the guard's refusal of a tool call, or the
@@ -495,15 +537,7 @@ func (c *Conversation) answer(ctx context.Context, call *HookCall, inject []*har
 	if refusal, refused := c.guard(ctx, call); refused {
 		return refusal, nil // a pre-tool hook carries no messages
 	}
-	reply, err := c.p.Reply(call, inject)
-	if err != nil && len(inject) > 0 {
-		// Not delivered: hold them again. A turn end this hook would have
-		// continued is then left to the screen to report.
-		c.mu.Lock()
-		c.pending = append(inject, c.pending...)
-		c.mu.Unlock()
-	}
-	return reply, err
+	return c.p.Reply(call, inject)
 }
 
 // guard puts a pre-tool hook's tool call to the Guard, and returns the
@@ -701,6 +735,12 @@ func (c *Conversation) finish(code int, exitErr error) {
 		}
 		c.announced = false
 		c.exitErr = exitErr
+		// A hook still answering may carry messages to a harness that has
+		// gone: they are pending again, for Undelivered.
+		for inj := range c.injecting {
+			c.pending = append(inj.taken, c.pending...)
+			delete(c.injecting, inj)
+		}
 		c.mu.Unlock()
 		if !c.eventsClosed {
 			c.events <- harness.Event{Kind: harness.Exited, At: c.opts.Clock.Now(), ExitCode: code, Err: exitErr}

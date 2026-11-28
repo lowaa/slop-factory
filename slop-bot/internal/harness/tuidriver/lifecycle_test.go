@@ -92,7 +92,12 @@ type flakyHost struct {
 	failed    chan struct{}
 	failPaste atomic.Int32
 	failTag   atomic.Bool
+	// holdTag, when set, holds the next tag write: it closes entered, then
+	// waits for release.
+	holdTag atomic.Pointer[heldTag]
 }
+
+type heldTag struct{ entered, release chan struct{} }
 
 func (h *flakyHost) Paste(ctx context.Context, session, text string) error {
 	if h.failPaste.Add(-1) >= 0 {
@@ -153,6 +158,10 @@ func (h *flakyHost) Status(ctx context.Context, session string) (*sessionhost.St
 }
 
 func (h *flakyHost) SetTag(ctx context.Context, session, name, value string) error {
+	if held := h.holdTag.Swap(nil); held != nil {
+		close(held.entered)
+		<-held.release
+	}
 	if h.failTag.Load() {
 		return errors.New("fork/exec tmux: resource temporarily unavailable")
 	}
@@ -195,6 +204,45 @@ func TestNoHookWritesToTheSessionAfterClose(t *testing.T) {
 	got, err := r.Host.Tag(r.ctx, fake.SessionName("a1"), "slop-bot-conversation")
 	require.NoError(t, err)
 	assert.Empty(t, got, "nothing is written to a session Close let go of")
+}
+
+// A hook that has taken held messages for its reply and is still
+// answering when the session dies may never get them to the harness: the
+// exit puts them back, Undelivered, for the next session.
+func TestMessagesAHookWasCarryingAtTheExitAreUndelivered(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	host := &flakyHost{Tmux: r.Host, failed: make(chan struct{}, 1)}
+	// Every tag write fails, so every hook retries it: where this one is
+	// held, after it has taken the message.
+	host.failTag.Store(true)
+	hub := &capturingHub{HookHub: r.Harness.Hub}
+	r.Harness.Host, r.Harness.Hub = host, hub
+	r.conv = r.launch(t, nil)
+	r.inTurn(t)
+	require.NoError(t, r.conv.Send(r.ctx, msg("carried")))
+
+	held := &heldTag{entered: make(chan struct{}), release: make(chan struct{})}
+	host.holdTag.Store(held)
+	payload, err := json.Marshal(&fake.HookPayload{ConversationID: r.conv.Ref().ID})
+	require.NoError(t, err)
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		_, _ = (*hub.handler.Load())(r.ctx, fake.HookStep, payload)
+	}()
+	<-held.entered
+	require.NoError(t, r.Host.Kill(r.ctx, fake.SessionName("a1")))
+	next(r.ctx, t, r.conv, harness.Exited)
+
+	var texts []string
+	for _, m := range r.conv.Undelivered() {
+		texts = append(texts, m.Text)
+	}
+	assert.Equal(t, []string{"carried"}, texts)
+	close(held.release)
+	<-answered
+	assert.Len(t, r.conv.Undelivered(), 1, "the late answer doesn't take it back")
 }
 
 func TestATmuxFailureIsNotAnExit(t *testing.T) {
