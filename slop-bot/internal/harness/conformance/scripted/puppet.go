@@ -232,6 +232,12 @@ func (l *longTool) unblock() {
 	_ = f.Close()
 }
 
+// Accepted implements conformance.Puppet. A real harness shows a steer to
+// nobody before its next model call, so there is nothing to wait on: the
+// steer is in its stdin before release, and each harness reads stdin while a
+// tool runs, so it has it before the tool's end moves the turn on.
+func (p *Puppet) Accepted(context.Context, string) error { return nil }
+
 // Received implements conformance.Puppet. The harness received text when the
 // model was sent it. It came mid-turn when the first request carrying it is
 // the one that delivered the long tool's result: the harness folded it into
@@ -266,33 +272,31 @@ func (p *Puppet) Remembers(_ context.Context, text string) error {
 		return errors.New("scripted: the current session is not a resume")
 	}
 	has := func(r *scriptedmodel.Request) bool { return strings.Contains(r.MessageText, text) }
-	all := p.requests(0)
-	if indexOf(all[:cur.from], has) < 0 {
+	earlier, resumed := p.split(cur.from)
+	if indexOf(earlier, has) < 0 {
 		return fmt.Errorf("scripted: no earlier session sent the model %q", text)
 	}
-	if reqs := all[cur.from:]; indexOf(reqs, has) < 0 {
-		return fmt.Errorf("scripted: the resumed session never sent the model %q (%s)", text, summarise(reqs))
+	if indexOf(resumed, has) < 0 {
+		return fmt.Errorf("scripted: the resumed session never sent the model %q (%s)", text, summarise(resumed))
 	}
 	return nil
 }
 
 // Interrupted implements conformance.Puppet. The harness reported the turn
 // interrupted (the suite asserts that); what the model shows is that the
-// turn stopped there: nothing unexpected was asked of it, and the long
-// tool's result, which the command never produced, was not sent.
+// turn stopped there. The long tool's call was played, and the turn after it
+// is scripted only at release, so a harness that carried on with the turn
+// anyway would have asked for a turn the script lacks: a recorded error.
 func (p *Puppet) Interrupted(context.Context) error {
 	cur, long := p.current()
 	if cur == nil || long == nil {
 		return errors.New("scripted: no long tool to interrupt")
 	}
-	rec := p.server.Recording()
-	if len(rec.Errors) > 0 {
-		return fmt.Errorf("scripted: unexpected requests: %v", rec.Errors)
+	if rec := p.server.Recording(); len(rec.Errors) > 0 {
+		return fmt.Errorf("scripted: the harness carried on, or asked something unexpected: %v", rec.Errors)
 	}
-	for _, r := range rec.Requests[cur.from:] {
-		if strings.Contains(strings.Join(r.ToolResults, "\n"), long.marker) {
-			return errors.New("scripted: the interrupted tool's result reached the model")
-		}
+	if n := p.server.Remaining(); n != 0 {
+		return fmt.Errorf("scripted: %d scripted turn(s) unplayed: the long tool was never called", n)
 	}
 	return nil
 }
@@ -315,8 +319,18 @@ func (p *Puppet) current() (*session, *longTool) {
 // requests are the conversation's requests (not the harness's housekeeping)
 // from index from of the recording on.
 func (p *Puppet) requests(from int) []*scriptedmodel.Request {
+	_, after := p.split(from)
+	return after
+}
+
+// split is the conversation's requests before and after index at of the
+// recording. at counts the housekeeping requests too, so each side is
+// filtered on its own.
+func (p *Puppet) split(at int) (before, after []*scriptedmodel.Request) {
 	rec := p.server.Recording()
-	return (&scriptedmodel.Recording{Requests: rec.Requests[from:]}).Conversation()
+	before = (&scriptedmodel.Recording{Requests: rec.Requests[:at]}).Conversation()
+	after = (&scriptedmodel.Recording{Requests: rec.Requests[at:]}).Conversation()
+	return before, after
 }
 
 func (p *Puppet) close() {

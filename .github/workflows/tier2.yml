@@ -7,9 +7,16 @@ name: slop-bot tier 2
 # only when an adapter, the scripted model or a pin changes, and weekly.
 on:
   pull_request:
+    # The adapters and the scripted model, and everything else the tier 2
+    # packages build from (`go list -deps -test`) or the image installs.
     paths:
       - slop-bot/internal/harness/**
       - slop-bot/internal/scriptedmodel/**
+      - slop-bot/internal/ident/**
+      - slop-bot/internal/version/**
+      - slop-bot/go.mod
+      - slop-bot/go.sum
+      - go-clock/**
       - slop-bot/tier2/**
       - slop-bot/tier2.sh
       - .github/workflows/tier2.yml

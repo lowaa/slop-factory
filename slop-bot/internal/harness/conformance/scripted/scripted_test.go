@@ -141,8 +141,8 @@ func TestClaudeCodeConformance(t *testing.T) {
 		return f.subject(h, map[string]string{
 			// A config dir of its own: nothing is written to ~/.claude or
 			// ~/.claude.json, and no login of the user's is seen.
-			"CLAUDE_CONFIG_DIR":  t.TempDir(),
-			"ANTHROPIC_BASE_URL": f.server.URL(),
+			"CLAUDE_CONFIG_DIR":   t.TempDir(),
+			"ANTHROPIC_BASE_URL":  f.server.URL(),
 			"DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
 			// CLAUDE_CODE_* is dropped from the base environment (a parent
 			// session's), so these go in the workspace's.

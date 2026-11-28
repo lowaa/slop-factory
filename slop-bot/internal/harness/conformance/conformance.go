@@ -24,6 +24,10 @@ type Puppet interface {
 	// LongTool makes the next turn start a tool call that runs until release
 	// is called. A message sent meanwhile is mid-turn.
 	LongTool(ctx context.Context) (release func(context.Context) error, err error)
+	// Accepted returns once the harness has taken in text, sent mid-turn,
+	// so the turn cannot end before it does. A puppet that can't see that
+	// before the next model call returns at once.
+	Accepted(ctx context.Context, text string) error
 	// Received checks that the harness received text in the current
 	// session, mid-turn or not. It may be called once the turn the text
 	// arrived in has ended: a real harness shows a steer to the model only
@@ -154,6 +158,7 @@ func testMidTurn(t *testing.T, s *Subject) {
 	ctx := ctxFor(t, s)
 	conv, release := inLongTool(ctx, t, s)
 	send(ctx, t, conv, "main is broken, stop merging")
+	require.NoError(t, s.Puppet.Accepted(ctx, "main is broken, stop merging"))
 	require.NoError(t, release(ctx))
 	assert.Equal(t, harness.TurnCompleted, next(ctx, t, conv, harness.TurnEnded).Outcome)
 	require.NoError(t, s.Puppet.Received(ctx, "main is broken, stop merging", true))

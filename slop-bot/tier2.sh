@@ -40,10 +40,14 @@ set -a
 # shellcheck source=SCRIPTDIR/tier2/harness_versions.env
 source "${HERE}/tier2/harness_versions.env"
 set +a
+BUILD_ARGS=()
 if [[ "${HARNESS_LATEST:-0}" == "1" ]]; then
   CLAUDE_CODE_VERSION=latest
   CODEX_VERSION=latest
   PI_VERSION=latest
+  # "latest" is the same build arg every time, so a cached npm install
+  # layer would be reused as if it were still the latest release.
+  BUILD_ARGS+=(--no-cache --pull)
 fi
 
 WORK="$(mktemp -d)"
@@ -64,7 +68,7 @@ trap 'exit 143' TERM
 build() {
   local attempt
   for attempt in 1 2 3; do
-    docker build --target test --iidfile "${WORK}/image.iid" \
+    docker build --target test --iidfile "${WORK}/image.iid" ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} \
       --build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}" \
       --build-arg "CODEX_VERSION=${CODEX_VERSION}" \
       --build-arg "PI_VERSION=${PI_VERSION}" \

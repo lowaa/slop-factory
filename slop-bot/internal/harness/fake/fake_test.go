@@ -89,22 +89,27 @@ func (p *puppet) LongTool(ctx context.Context) (func(context.Context) error, err
 		started <- err
 	}()
 	return func(ctx context.Context) error {
-		if err := doKeepingUser(ctx, s, fake.Command{Cmd: fake.CmdToolEnd, Tool: "shell"}); err != nil {
+		if _, err := s.Do(ctx, fake.Command{Cmd: fake.CmdToolEnd, Tool: "shell"}); err != nil {
 			return err
 		}
-		return doKeepingUser(ctx, s, fake.Command{Cmd: fake.CmdTurnEnd})
+		_, err := s.Do(ctx, fake.Command{Cmd: fake.CmdTurnEnd})
+		return err
 	}, nil
 }
 
-// doKeepingUser runs c, keeping a mid-turn user report that arrives ahead of
-// its ack for Received, which the suite calls once the turn has ended.
-func doKeepingUser(ctx context.Context, s *fake.Session, c fake.Command) error {
-	r, err := s.Do(ctx, c)
-	if err != nil && r != nil && r.Rep == fake.RepUser {
-		pendingUser.Store(s, r)
-		_, err = s.Expect(ctx, fake.RepAck)
+// Accepted waits for the fake's report of the message, which it makes while
+// still in the turn, and keeps it for Received.
+func (p *puppet) Accepted(ctx context.Context, text string) error {
+	s := p.session()
+	r, err := s.Expect(ctx, fake.RepUser)
+	if err != nil {
+		return err
 	}
-	return err
+	if r.Text != text {
+		return fmt.Errorf("accepted %q, want %q", r.Text, text)
+	}
+	pendingUser.Store(s, r)
+	return nil
 }
 
 // pendingUser holds a user report a script goroutine consumed, so Received
