@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
@@ -19,3 +20,6 @@ func Render(msgs []state.Message) string { return render(msgs) }
 func RemovalAdvice(ticket ident.TicketID, res *worktree.CleanupResult) string {
 	return removalAdvice(ticket, res)
 }
+
+// EventPayload is what the event log records of a harness event.
+func EventPayload(ev *harness.Event) map[string]any { return eventPayload(ev) }
