@@ -104,6 +104,9 @@ type request struct {
 	// the steer is refused.
 	msg  *harness.Message
 	turn string
+	// decline is the command approval a guard's refusal answers once this
+	// steer, its reason, has been taken (answer).
+	decline json.RawMessage
 }
 
 // Undelivered implements rpcdriver.Holder: the messages Send took that
@@ -350,6 +353,15 @@ func (c *codec) response(w *rpcdriver.Wire, m *message) ([]harness.Event, error)
 	case reqTurn:
 		return c.turnStarted(w, m)
 	case reqSteer:
+		if r.decline != nil {
+			// The reason is in, or refused: either way the command is
+			// declined now, and a refused reason isn't sent again (the
+			// turn it was for has ended).
+			if m.Error != nil {
+				c.opts.logger.Info("codex refused a refusal's reason", "err", m.Error.Message)
+			}
+			return nil, c.decline(w, r.decline)
+		}
 		if m.Error != nil {
 			return nil, c.steerRefused(w, r, m.Error)
 		}

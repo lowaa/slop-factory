@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -129,13 +130,26 @@ const shellTool = "exec_command"
 func (c *codec) answer(w *rpcdriver.Wire, m *message, s *screened) error {
 	if s != nil && !s.verdict.Allow {
 		if m.Method == protocol.MethodExecCommandApproval {
-			// The legacy denial carries its reason to the model.
+			// The legacy denial carries its reason to the model, so no
+			// steer is needed and nothing races.
 			return c.reply(w, m, &protocol.ExecCommandApprovalResponse{Decision: deniedDecision(s.verdict.Reason)})
 		}
-		if err := c.reply(w, m, &protocol.CommandExecutionRequestApprovalResponse{Decision: protocol.CommandExecutionApprovalDecisionDecline}); err != nil {
-			return err
+		if !c.explainable(s) {
+			return c.decline(w, m.ID)
 		}
-		return c.explain(w, s)
+		// The reason goes first, and the decline only once Codex has taken
+		// it (response's reqSteer): declined, Codex moves the turn on at
+		// once, and a steer it takes during that next model call has it
+		// reject the commands the call made, unasked ("rejected by user"),
+		// ordinary ones too. Written back to back, the two still raced.
+		_, err := c.request(w, &request{kind: reqSteer, msg: &harness.Message{Text: s.verdict.Reason}, turn: c.turnID, decline: m.ID},
+			protocol.MethodTurnSteer, &protocol.TurnSteerParams{
+				ThreadID: c.threadID, ExpectedTurnID: c.turnID, Input: textInput(s.verdict.Reason),
+			})
+		if err != nil {
+			return errors.Join(err, c.decline(w, m.ID))
+		}
+		return nil
 	}
 	answer, outcome := decline, "declined"
 	if c.opts.permissive {
@@ -152,20 +166,25 @@ func (c *codec) answer(w *rpcdriver.Wire, m *message, s *screened) error {
 	return c.reply(w, m, result)
 }
 
-// explain steers a refusal's reason into the turn that asked, when that is
-// this conversation's running turn. Anywhere else the command is only
-// declined: a sub-agent's thread isn't this one, so the reason would reach
-// an agent that didn't run the command; and a turn being interrupted, or
-// one not running, would have the reason start a turn of its own after the
-// user stopped the agent (screen runs outside mu, so an interrupt can land
-// during the guard's check).
-func (c *codec) explain(w *rpcdriver.Wire, s *screened) error {
+// explainable says a refusal's reason can be steered into the turn that
+// asked: this conversation's running turn. Anywhere else the command is
+// only declined: a sub-agent's thread isn't this one, so the reason would
+// reach an agent that didn't run the command; and a turn being
+// interrupted, or one not running, would have the reason start a turn of
+// its own after the user stopped the agent (screen runs outside mu, so an
+// interrupt can land during the guard's check). mu is held.
+func (c *codec) explainable(s *screened) bool {
 	if s.thread != c.threadID || s.turnID == "" || s.turnID != c.turnID || c.interrupted || c.starting {
 		c.opts.logger.Info("codex: a merge refused outside the running turn; declined without the reason",
 			"thread", s.thread, "turn", s.turnID)
-		return nil
+		return false
 	}
-	return c.deliver(w, &harness.Message{Text: s.verdict.Reason})
+	return true
+}
+
+// decline answers a command's approval with a decline.
+func (c *codec) decline(w *rpcdriver.Wire, id json.RawMessage) error {
+	return c.reply(w, &message{ID: id}, &protocol.CommandExecutionRequestApprovalResponse{Decision: protocol.CommandExecutionApprovalDecisionDecline})
 }
 
 // reply answers a server request with result.

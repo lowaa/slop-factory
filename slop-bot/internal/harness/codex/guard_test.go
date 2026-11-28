@@ -173,6 +173,40 @@ func approvalLine(t *testing.T, id int, threadID, turnID string) []byte {
 // TestARefusalOutsideTheRunningTurnIsOnlyDeclined: steered anywhere but the
 // turn that asked, the reason would start a turn of its own, or reach the
 // wrong agent.
+// TestARefusalIsDeclinedOnceItsReasonIsIn: declined, Codex moves the turn
+// on at once, and a steer it takes during that next model call has it
+// reject the call's commands unasked ("rejected by user"): seen under load
+// in tier 2, an ordinary command after a refused merge never ran, and
+// writing the steer just before the decline still raced. The decline waits
+// for Codex to have taken the reason; a refused reason is declined too.
+func TestARefusalIsDeclinedOnceItsReasonIsIn(t *testing.T) {
+	t.Parallel()
+	for name, answer := range map[string]string{
+		"taken":   `"result":{"turnId":"t"}`,
+		"refused": `"error":{"code":-32600,"message":"no active turn to steer"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := guardedFixture(t, &fakeGuard{verdicts: []*mergeguard.Verdict{{Reason: refusal}}})
+			_, err := f.c.Decode([]byte(`{"method":"turn/started","params":{"threadId":"`+thread+`","turn":{"id":"t","items":[],"status":"inProgress"}}}`), f.w)
+			require.NoError(t, err)
+			sent := len(f.p.sent)
+			_, err = f.c.Decode(approvalLine(t, 4, thread, "t"), f.w)
+			require.NoError(t, err)
+			require.Len(t, f.p.sent[sent:], 1, "the reason, and no decline yet")
+			steer := f.p.sent[sent]
+			assert.Equal(t, protocol.MethodTurnSteer, steer.Method)
+
+			_, err = f.c.Decode([]byte(`{"id":`+string(steer.ID)+`,`+answer+`}`), f.w)
+			require.NoError(t, err)
+			after := f.p.sent[sent+1:]
+			require.Len(t, after, 1, "the decline, and nothing more")
+			assert.Equal(t, "4", string(after[0].ID))
+			assert.Equal(t, `{"decision":"decline"}`, string(after[0].Result))
+		})
+	}
+}
+
 func TestARefusalOutsideTheRunningTurnIsOnlyDeclined(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
