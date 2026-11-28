@@ -20,9 +20,10 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
 )
 
-// stopTimeout bounds a shutdown: components get this long to finish before
-// the process exits anyway.
-const stopTimeout = 30 * time.Second
+// StopTimeout bounds a shutdown: components get this long to finish before
+// the process exits anyway. The service unit's stop timeout is derived from
+// it, so the supervisor never kills a daemon that is still draining.
+const StopTimeout = 30 * time.Second
 
 // Options are the daemon's inputs.
 type Options struct {
@@ -88,7 +89,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	close(d.ready)
 	<-ctx.Done()
 	d.opts.Logger.Info("slop-bot daemon stopping")
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopTimeout)
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopTimeout)
 	defer cancel()
 	return d.group.Stop(stopCtx)
 }

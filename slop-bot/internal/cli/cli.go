@@ -19,6 +19,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
 )
 
@@ -30,6 +31,11 @@ type Deps struct {
 	Env    *paths.Env
 	// Token is the agent token from the environment, "" for the user.
 	Token string
+	// ServiceRunner runs systemctl, loginctl and launchctl for `slop-bot
+	// service`.
+	ServiceRunner service.Runner
+	// FindBinary is the slop-bot binary the service should run.
+	FindBinary func() (string, error)
 
 	// daemonBuilt lets in-package tests see the daemon `slop-bot daemon`
 	// builds, to wait on its Ready.
@@ -42,7 +48,10 @@ func FromOS() (*Deps, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Deps{Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv)}, nil
+	return &Deps{
+		Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv),
+		ServiceRunner: service.ExecRunner{}, FindBinary: service.NewBinaryFinder().Find,
+	}, nil
 }
 
 // app holds what commands share once flags are parsed.
@@ -69,6 +78,7 @@ func New(deps *Deps) *cobra.Command {
 		a.pathsCmd(),
 		a.daemonCmd(),
 		a.healthCmd(),
+		a.serviceCmd(),
 	)
 	return root
 }
