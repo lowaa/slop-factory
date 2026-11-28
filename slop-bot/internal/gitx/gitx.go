@@ -11,7 +11,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Sentinels for the failures callers branch on. Match them with errors.Is; the
@@ -78,15 +80,24 @@ type Options struct {
 	Bin string
 	// Env is the environment git starts from; nil means os.Environ(). Tests
 	// pass their own so the user's git config can't leak in.
-	Env    []string
+	Env []string
+	// WaitDelay bounds how long Run waits, once git has exited or been told
+	// to stop, for its children (hooks, filters) to let go of its output.
+	// Zero means DefaultWaitDelay.
+	WaitDelay time.Duration
+	// Logger defaults to discarding.
 	Logger *slog.Logger
 }
 
+// DefaultWaitDelay is Options.WaitDelay's default.
+const DefaultWaitDelay = 10 * time.Second
+
 // Git runs git commands.
 type Git struct {
-	bin    string
-	env    []string
-	logger *slog.Logger
+	bin       string
+	env       []string
+	waitDelay time.Duration
+	logger    *slog.Logger
 }
 
 // New resolves the git binary and builds the environment every command runs
@@ -99,11 +110,23 @@ func New(opts *Options) (*Git, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gitx: %w: %s: %w", ErrGitNotFound, opts.Bin, err)
 	}
+	// os/exec resolves a relative path against each command's Dir, which
+	// would run a "git" from inside whatever repo the command is aimed at.
+	if bin, err = filepath.Abs(bin); err != nil {
+		return nil, fmt.Errorf("gitx: %w", err)
+	}
 	env := opts.Env
 	if env == nil {
 		env = os.Environ()
 	}
-	return &Git{bin: bin, env: cleanEnv(env), logger: opts.Logger}, nil
+	g := &Git{bin: bin, env: cleanEnv(env), waitDelay: opts.WaitDelay, logger: opts.Logger}
+	if g.waitDelay == 0 {
+		g.waitDelay = DefaultWaitDelay
+	}
+	if g.logger == nil {
+		g.logger = slog.New(slog.DiscardHandler)
+	}
+	return g, nil
 }
 
 // repoEnv is what git itself calls its "local env vars" (`git rev-parse
@@ -161,8 +184,21 @@ func (g *Git) Run(ctx context.Context, dir string, args ...string) (string, erro
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// SIGTERM to git's whole process group, not SIGKILL to git alone: git
+	// cleans up on SIGTERM (an interrupted `worktree add` removes its half-made
+	// worktree instead of leaving it locked "initializing"), and its hooks and
+	// filters stop too rather than holding the output pipes open.
+	setProcessGroup(cmd)
+	cmd.Cancel = func() error { return terminateGroup(cmd) }
+	cmd.WaitDelay = g.waitDelay
 	g.logger.Debug("git", "dir", dir, "args", args)
 	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
+		// git exited 0 and its output is complete; a background child it
+		// started (a hook's `cmd &`) still held the pipes.
+		g.logger.Warn("git exited but a child kept its output open", "dir", dir, "args", args)
+		err = nil
+	}
 	if err == nil {
 		return stdout.String(), nil
 	}

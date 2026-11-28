@@ -3,8 +3,13 @@ package gitx_test
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,5 +115,70 @@ func TestCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := g.Run(ctx, t.TempDir(), "status")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// hookRepo is a repo whose post-commit hook runs body.
+func hookRepo(t *testing.T, g *gitx.Git, body string) string {
+	t.Helper()
+	dir := initRepo(t, g)
+	hook := filepath.Join(dir, ".git", "hooks", "post-commit")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\n"+body+"\n"), 0o700)) // #nosec G306 -- a hook must be executable
+	return dir
+}
+
+// killPidFile stops a hook's sleep, which would outlive the test otherwise.
+func killPidFile(t *testing.T, pidFile string) {
+	t.Cleanup(func() {
+		raw, err := os.ReadFile(pidFile) // #nosec G304 -- the test's own temp file
+		if err != nil {
+			return
+		}
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+}
+
+// A hook that leaves a background child holding git's output must not hang
+// Run once git itself has exited.
+func TestABackgroundChildHoldingTheOutputDoesNotHangRun(t *testing.T) {
+	t.Parallel()
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	killPidFile(t, pidFile)
+	g, err := gitx.New(&gitx.Options{Bin: "git", Env: gitxtest.Env(t), WaitDelay: time.Millisecond})
+	require.NoError(t, err)
+	repo := hookRepo(t, g, "sleep 300 &\necho $! > "+pidFile)
+
+	_, err = g.Run(context.Background(), repo, "commit", "-q", "--allow-empty", "-m", "x")
+	require.NoError(t, err)
+}
+
+// Cancelling stops git's hooks too, so Run returns rather than waiting on a
+// hook that holds the output (WaitDelay here is far past the test timeout).
+// Logger is left nil on purpose: it defaults to discarding.
+func TestCancelStopsGitsWholeProcessGroup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "ready")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	pidFile := filepath.Join(dir, "pid")
+	killPidFile(t, pidFile)
+	g, err := gitx.New(&gitx.Options{Bin: "git", Env: gitxtest.Env(t), WaitDelay: time.Hour})
+	require.NoError(t, err)
+	repo := hookRepo(t, g, "echo $$ > "+pidFile+"\necho ready > "+fifo+"\nexec sleep 300")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		// Opening the FIFO blocks until the hook is running.
+		f, err := os.Open(fifo) // #nosec G304 -- the test's own FIFO
+		if err == nil {
+			_, _ = f.Read(make([]byte, 8))
+			_ = f.Close()
+		}
+		cancel()
+	}()
+	_, err = g.Run(ctx, repo, "commit", "-q", "--allow-empty", "-m", "x")
 	require.ErrorIs(t, err, context.Canceled)
 }

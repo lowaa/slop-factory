@@ -13,5 +13,6 @@ installed while slop-bot was being built. The install docs grow from this.
 
 ## Already present on the dev host
 
-Go 1.27.4, docker, gh, bats, shfmt, govulncheck, osv-scanner, gitleaks,
+Go 1.27.4, git 2.55 (slop-bot needs 2.36 or later: `git worktree list --porcelain -z`;
+the tests set `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`, from 2.32), docker, gh, bats, shfmt, govulncheck, osv-scanner, gitleaks,
 trivy, and the four harness CLIs (`claude`, `codex`, `pi`, `agy`).

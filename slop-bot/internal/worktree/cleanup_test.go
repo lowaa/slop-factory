@@ -127,7 +127,7 @@ func TestCleanupSafeguards(t *testing.T) {
 			if tc.kept == nil {
 				assert.True(t, r.Removed)
 				assert.Empty(t, r.Reasons)
-				assert.False(t, exists(t, wt.Path))
+				assert.False(t, onDisk(t, wt.Path))
 				assert.False(t, f.branchExists("a", branch))
 				assert.NotContains(t, f.run(wt.RepoPath, "worktree", "list"), wt.Path)
 				return
@@ -137,7 +137,7 @@ func TestCleanupSafeguards(t *testing.T) {
 			for _, reason := range r.Reasons {
 				assert.NotEmpty(t, reason.Detail)
 			}
-			assert.True(t, exists(t, wt.Path))
+			assert.True(t, onDisk(t, wt.Path))
 			assert.True(t, f.branchExists("a", branch), "a kept worktree keeps its branches")
 		})
 	}
@@ -158,7 +158,7 @@ func TestCleanupReasonDetails(t *testing.T) {
 	assert.Equal(t, []Reason{
 		{Kind: Uncommitted, Detail: "1 file with uncommitted changes"},
 		{Kind: Untracked, Detail: "2 untracked files"},
-		{Kind: Unpushed, Detail: "branch slop-bot/t9/work has 2 commits on no remote and not merged into refs/remotes/origin/main"},
+		{Kind: Unpushed, Detail: "branch slop-bot/t9/work has 2 commits on no remote, not merged into refs/remotes/origin/main"},
 	}, r.Reasons)
 }
 
@@ -179,9 +179,9 @@ func TestCleanupAcrossReposReportsEach(t *testing.T) {
 	assert.False(t, res[1].Removed)
 	assert.Equal(t, []ReasonKind{Untracked}, kinds(res[1].Reasons))
 	assert.True(t, res[2].Removed)
-	assert.True(t, exists(t, wts[1].Path))
-	assert.False(t, exists(t, wts[0].Path))
-	assert.False(t, exists(t, wts[2].Path))
+	assert.True(t, onDisk(t, wts[1].Path))
+	assert.False(t, onDisk(t, wts[0].Path))
+	assert.False(t, onDisk(t, wts[2].Path))
 }
 
 // Ticket 4's cleanup must not see ticket 42's branches as its own.
@@ -197,7 +197,7 @@ func TestCleanupLeavesOtherTicketsAlone(t *testing.T) {
 	require.NoError(t, r.Err)
 	assert.True(t, r.Removed)
 	assert.True(t, f.branchExists("a", "slop-bot/t42/work"))
-	assert.True(t, exists(t, t42.Path))
+	assert.True(t, onDisk(t, t42.Path))
 }
 
 // A worktree deleted by hand: its registration is pruned, and its branch is
@@ -257,7 +257,7 @@ func TestCleanupRefusesWhatIsNotOurs(t *testing.T) {
 	require.ErrorIs(t, f.m.ForceCleanup(ctx, "81", notOurs), ErrCollision)
 	assert.FileExists(t, filepath.Join(mine, "precious"))
 
-	assert.True(t, exists(t, wt.Path))
+	assert.True(t, onDisk(t, wt.Path))
 }
 
 // A ticket branch checked out somewhere else can't be deleted; the worktree
@@ -272,8 +272,8 @@ func TestCleanupReportsABranchItCouldNotDelete(t *testing.T) {
 	r := f.m.Cleanup(context.Background(), "11", []*Worktree{wt})[0]
 	require.Error(t, r.Err)
 	assert.True(t, r.Removed)
-	assert.False(t, exists(t, wt.Path))
-	assert.True(t, exists(t, elsewhere))
+	assert.False(t, onDisk(t, wt.Path))
+	assert.True(t, onDisk(t, elsewhere))
 }
 
 // With its .git link gone, git run in the worktree would find the repo
@@ -290,7 +290,7 @@ func TestABrokenWorktreeNeverReachesAnEnclosingRepo(t *testing.T) {
 	r := f.m.Cleanup(ctx, "12", []*Worktree{wt})[0]
 	require.ErrorIs(t, r.Err, ErrBroken)
 	assert.False(t, r.Removed)
-	assert.True(t, exists(t, wt.Path))
+	assert.True(t, onDisk(t, wt.Path))
 
 	_, err := f.m.NewBranch(ctx, wt, "next")
 	require.ErrorIs(t, err, ErrBroken)
@@ -311,7 +311,7 @@ func TestForceCleanupRemovesWorkTheUserHasLookedAt(t *testing.T) {
 
 	require.False(t, f.m.Cleanup(ctx, "10", []*Worktree{next})[0].Removed)
 	require.NoError(t, f.m.ForceCleanup(ctx, "10", next))
-	assert.False(t, exists(t, wt.Path))
+	assert.False(t, onDisk(t, wt.Path))
 	assert.False(t, f.branchExists("a", "slop-bot/t10/work"))
 	assert.False(t, f.branchExists("a", "slop-bot/t10/pr2"))
 

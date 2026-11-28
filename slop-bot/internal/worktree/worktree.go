@@ -2,8 +2,8 @@
 // a ticket touches, flat under the workspace dir as t<ticket>-<repo>, kept for
 // the ticket's whole life and removed at its end without throwing work away.
 //
-// Callers serialise calls for one ticket; calls for different tickets may run
-// at once, since they touch different paths and refs.
+// Callers serialise calls for one ticket. Calls for different tickets may run
+// at once: each touches only its own paths, refs and worktree registrations.
 package worktree
 
 import (
@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
@@ -36,13 +35,15 @@ var (
 	// path isn't where Manager puts that ticket's worktree: a guard against
 	// removing an arbitrary directory on a bad record.
 	ErrNotOurs = errors.New("worktree does not belong to this ticket")
-	// ErrBroken is a worktree directory git doesn't see as a worktree, as
-	// when its .git link was deleted.
-	ErrBroken = errors.New("worktree directory isn't a working git worktree")
+	// ErrBroken is a worktree git doesn't see as a working one: its .git
+	// link was deleted, its creation was interrupted, or it is locked while
+	// its directory is missing. ForceCleanup clears it.
+	ErrBroken = errors.New("worktree isn't a working git worktree")
+	// ErrNoDefaultBranch is an origin/HEAD that points at a ref that's gone.
+	ErrNoDefaultBranch = errors.New("default branch not found")
+	// ErrUnsavedWork is an operation that would leave commits on no branch.
+	ErrUnsavedWork = errors.New("commits would be left on no branch")
 )
-
-// remote is the remote whose HEAD names a repo's default branch.
-const remote = "origin"
 
 // Repos is the repo lookup; *config.Config satisfies it.
 type Repos interface {
@@ -106,15 +107,18 @@ type repoRef struct {
 // Create gives ticket a worktree in each of repos, primary among them, at
 // <workspace>/t<ticket>-<repo>. A new worktree is on a new branch,
 // slop-bot/t<ticket>/work, cut from the repo's default branch as origin/HEAD
-// names it, or from the main checkout's HEAD when there's no origin/HEAD.
-// Nothing is fetched: the agent brings its branch up to date itself.
+// names it, or from the commit the main checkout is on when there's no
+// origin/HEAD. Nothing is fetched: the agent brings its branch up to date
+// itself.
 //
 // It is idempotent: a worktree already there for this ticket and repo is
 // reused as it stands, whatever branch it is on, since one ticket makes
-// several PRs from the same worktree. On error, the worktrees made so far are
-// returned with it, so the caller can record them.
+// several PRs from the same worktree. One whose directory was deleted is
+// re-added on the branch it was on (a detached HEAD's commits are first
+// saved to a ticket branch). On error, the worktrees made so far are returned
+// with it, so the caller can record them.
 func (m *Manager) Create(ctx context.Context, ticket ident.TicketID, repos []string, primary string) ([]*Worktree, error) {
-	refs, err := m.resolve(ticket, repos, primary)
+	refs, err := m.resolve(ctx, ticket, repos, primary)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +136,7 @@ func (m *Manager) Create(ctx context.Context, ticket ident.TicketID, repos []str
 
 // resolve checks every name and repo before anything is made, so a config
 // mistake doesn't leave half a ticket's worktrees behind.
-func (m *Manager) resolve(ticket ident.TicketID, repos []string, primary string) ([]repoRef, error) {
+func (m *Manager) resolve(ctx context.Context, ticket ident.TicketID, repos []string, primary string) ([]repoRef, error) {
 	if err := validTicket(ticket); err != nil {
 		return nil, fmt.Errorf("worktree: %w", err)
 	}
@@ -146,7 +150,7 @@ func (m *Manager) resolve(ticket ident.TicketID, repos []string, primary string)
 			return nil, fmt.Errorf("worktree: repo %q listed twice", name)
 		}
 		seen[name] = true
-		p, err := m.repoPath(name)
+		p, err := m.repoPath(ctx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -158,7 +162,7 @@ func (m *Manager) resolve(ticket ident.TicketID, repos []string, primary string)
 	return refs, nil
 }
 
-func (m *Manager) repoPath(name string) (string, error) {
+func (m *Manager) repoPath(ctx context.Context, name string) (string, error) {
 	if err := validRepo(name); err != nil {
 		return "", fmt.Errorf("worktree: %w", err)
 	}
@@ -166,24 +170,10 @@ func (m *Manager) repoPath(name string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("worktree: %w: %q", ErrUnknownRepo, name)
 	}
-	if err := checkRepoPath(r.Path); err != nil {
+	if err := m.checkRepo(ctx, r.Path); err != nil {
 		return "", fmt.Errorf("worktree: repo %q: %w", name, err)
 	}
 	return r.Path, nil
-}
-
-func checkRepoPath(p string) error {
-	info, err := os.Stat(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("%w: %s", ErrRepoMissing, p)
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%w: %s isn't a directory", ErrRepoMissing, p)
-	}
-	return nil
 }
 
 func (m *Manager) path(ticket ident.TicketID, repo string) string {
@@ -196,43 +186,88 @@ func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) 
 	if err != nil {
 		return nil, err
 	}
-	if reg != nil && !reg.prunable {
-		wt.Branch = reg.branch
-		m.logger.Info("reusing worktree", "ticket", ticket, "repo", r.name, "path", wt.Path, "branch", wt.Branch)
-		return wt, nil
-	}
-	if reg != nil {
-		if err := m.prune(ctx, r.path, wt.Path); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := os.Lstat(wt.Path); err == nil {
-		return nil, fmt.Errorf("%w: %s exists but isn't a worktree of %s", ErrCollision, wt.Path, r.path)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
-
-	wt.Branch = BranchName(ticket, FirstBranch)
-	exists, err := m.branchExists(ctx, r.path, wt.Branch)
+	present, err := exists(wt.Path)
 	if err != nil {
 		return nil, err
 	}
-	if exists {
-		// Left by a worktree that was pruned: pick its work back up.
-		_, err = m.git.Run(ctx, r.path, "worktree", "add", "--quiet", wt.Path, wt.Branch)
+	switch {
+	case reg != nil && reg.locked && reg.lockReason == lockInitializing:
+		return nil, fmt.Errorf("%w: %s: an earlier `git worktree add` was interrupted; clean it up with --force",
+			ErrBroken, wt.Path)
+	case reg != nil && present:
+		if err := m.checkWorktree(ctx, wt.Path); err != nil {
+			return nil, err
+		}
+		wt.Branch = reg.branch
+		m.logger.Info("reusing worktree", "ticket", ticket, "repo", r.name, "path", wt.Path, "branch", wt.Branch)
+		return wt, nil
+	case reg != nil && reg.locked:
+		// Locked and missing is git's way of saying "on storage that isn't
+		// mounted": it may come back, so it isn't stale.
+		return nil, fmt.Errorf("%w: %s is locked (%s) but missing; remount it, or clean it up with --force",
+			ErrBroken, wt.Path, reg.lockReason)
+	case reg != nil:
+		return m.recover(ctx, wt, reg)
+	case present:
+		return nil, fmt.Errorf("%w: %s exists but isn't a worktree of %s", ErrCollision, wt.Path, r.path)
+	}
+	return m.add(ctx, wt, BranchName(ticket, FirstBranch))
+}
+
+// recover re-adds a worktree whose directory was deleted, on the branch it
+// was on, so the agent carries on with the PR it was working on.
+func (m *Manager) recover(ctx context.Context, wt *Worktree, reg *registration) (*Worktree, error) {
+	if reg.detached {
+		if err := m.rescue(ctx, wt.RepoPath, wt.Ticket, reg.head); err != nil {
+			return nil, err
+		}
+	}
+	if err := m.unregister(ctx, wt.RepoPath, wt.Path); err != nil {
+		return nil, err
+	}
+	if reg.detached {
+		if _, err := m.git.Run(ctx, wt.RepoPath, "worktree", "add", "--quiet", "--detach", wt.Path, reg.head); err != nil {
+			return nil, err
+		}
+		m.logger.Info("re-added worktree", "ticket", wt.Ticket, "repo", wt.Repo, "path", wt.Path, "head", reg.head)
+		return wt, nil
+	}
+	branch := BranchName(wt.Ticket, FirstBranch)
+	if reg.branch != "" {
+		ok, err := m.branchExists(ctx, wt.RepoPath, reg.branch)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			branch = reg.branch
+		}
+	}
+	return m.add(ctx, wt, branch)
+}
+
+// add makes the worktree on branch, cutting the branch from the default
+// branch if it doesn't exist yet.
+func (m *Manager) add(ctx context.Context, wt *Worktree, branch string) (*Worktree, error) {
+	ok, err := m.branchExists(ctx, wt.RepoPath, branch)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		_, err = m.git.Run(ctx, wt.RepoPath, "worktree", "add", "--quiet", wt.Path, branch)
 	} else {
 		var base string
-		if base, err = m.base(ctx, r.path); err != nil {
+		if base, err = m.base(ctx, wt.RepoPath); err != nil {
 			return nil, err
 		}
 		// --no-track: an upstream of origin/main would make the agent's
 		// plain `git push` aim at main.
-		_, err = m.git.Run(ctx, r.path, "worktree", "add", "--quiet", "--no-track", "-b", wt.Branch, wt.Path, base)
+		_, err = m.git.Run(ctx, wt.RepoPath, "worktree", "add", "--quiet", "--no-track", "-b", branch, wt.Path, base)
 	}
 	if err != nil {
 		return nil, err
 	}
-	m.logger.Info("created worktree", "ticket", ticket, "repo", r.name, "path", wt.Path, "branch", wt.Branch)
+	wt.Branch = branch
+	m.logger.Info("added worktree", "ticket", wt.Ticket, "repo", wt.Repo, "path", wt.Path, "branch", branch)
 	return wt, nil
 }
 
@@ -240,8 +275,9 @@ func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) 
 // worktree for the ticket's next PR. Like Create, it starts from the repo's
 // default branch, not from the previous PR's branch, which stays as it is.
 // Local changes carry over unless they conflict, in which case git refuses.
+// It refuses to leave a detached HEAD's commits on no branch.
 func (m *Manager) NewBranch(ctx context.Context, wt *Worktree, name string) (*Worktree, error) {
-	if err := m.owns(wt.Ticket, wt); err != nil {
+	if err := m.owns(ctx, wt.Ticket, wt); err != nil {
 		return nil, err
 	}
 	if err := validLeaf(name); err != nil {
@@ -251,12 +287,19 @@ func (m *Manager) NewBranch(ctx context.Context, wt *Worktree, name string) (*Wo
 	if _, err := m.git.Run(ctx, wt.RepoPath, "check-ref-format", "--branch", branch); err != nil {
 		return nil, fmt.Errorf("worktree: %w: branch name %q: %w", ErrInvalidName, branch, err)
 	}
+	path := m.path(wt.Ticket, wt.Repo)
+	if err := m.checkWorktree(ctx, path); err != nil {
+		return nil, fmt.Errorf("worktree: %w", err)
+	}
+	if err := m.refuseDetachedWork(ctx, path); err != nil {
+		return nil, err
+	}
 	base, err := m.base(ctx, wt.RepoPath)
 	if err != nil {
 		return nil, fmt.Errorf("worktree: %w", err)
 	}
-	if _, err := m.inWorktree(ctx, m.path(wt.Ticket, wt.Repo), "switch", "--quiet", "--no-track", "-c", branch, base); err != nil {
-		return nil, fmt.Errorf("worktree: new branch in %s: %w", wt.Path, err)
+	if _, err := m.git.Run(ctx, path, "switch", "--quiet", "--no-track", "-c", branch, base); err != nil {
+		return nil, fmt.Errorf("worktree: new branch in %s: %w", path, err)
 	}
 	m.logger.Info("new branch", "ticket", wt.Ticket, "repo", wt.Repo, "branch", branch)
 	next := *wt
@@ -264,23 +307,31 @@ func (m *Manager) NewBranch(ctx context.Context, wt *Worktree, name string) (*Wo
 	return &next, nil
 }
 
-// inWorktree runs git in the worktree at path, once git agrees path is a
-// worktree's top level. Without the check, a worktree whose .git link is gone
-// would have git discover whatever repo encloses the workspace dir (the
-// user's own checkout, if the workspace sits inside one) and act on that.
-func (m *Manager) inWorktree(ctx context.Context, path string, args ...string) (string, error) {
-	top, err := m.git.Run(ctx, path, "rev-parse", "--show-toplevel")
+// refuseDetachedWork stops a switch away from a detached HEAD whose commits
+// are on no branch or remote: git would only warn, and they'd be left
+// reachable from the worktree's reflog alone.
+func (m *Manager) refuseDetachedWork(ctx context.Context, path string) error {
+	_, err := m.git.Run(ctx, path, "symbolic-ref", "-q", "HEAD")
+	if err == nil {
+		return nil
+	}
+	if !gitx.IsExit(err, 1) {
+		return err
+	}
+	n, err := m.unsaved(ctx, path, "HEAD", "--branches")
 	if err != nil {
-		return "", fmt.Errorf("%w: %s: %w", ErrBroken, path, err)
+		return err
 	}
-	if got := canon(strings.TrimSpace(top)); got != canon(path) {
-		return "", fmt.Errorf("%w: %s (git found the repo at %s)", ErrBroken, path, got)
+	if n > 0 {
+		return fmt.Errorf("worktree: %w: %s has a detached HEAD with %s on no branch; put them on a branch first",
+			ErrUnsavedWork, path, plural(n, "commit"))
 	}
-	return m.git.Run(ctx, path, args...)
+	return nil
 }
 
-// owns checks wt is ticket's and sits exactly where Manager would have put it.
-func (m *Manager) owns(ticket ident.TicketID, wt *Worktree) error {
+// owns checks wt is ticket's, sits exactly where Manager would have put it,
+// and hangs off a real repo.
+func (m *Manager) owns(ctx context.Context, ticket ident.TicketID, wt *Worktree) error {
 	if err := validTicket(ticket); err != nil {
 		return fmt.Errorf("worktree: %w", err)
 	}
@@ -291,117 +342,17 @@ func (m *Manager) owns(ticket ident.TicketID, wt *Worktree) error {
 	if wt.Ticket != ticket || canon(wt.Path) != want {
 		return fmt.Errorf("worktree: %w: %s (ticket %s) isn't %s", ErrNotOurs, wt.Path, wt.Ticket, want)
 	}
-	if err := checkRepoPath(wt.RepoPath); err != nil {
+	if err := m.checkRepo(ctx, wt.RepoPath); err != nil {
 		return fmt.Errorf("worktree: repo %q: %w", wt.Repo, err)
 	}
 	return nil
 }
 
-// base is the revision a new branch starts from: origin's default branch, or
-// the main checkout's HEAD when origin/HEAD isn't set.
-func (m *Manager) base(ctx context.Context, repoPath string) (string, error) {
-	out, err := m.git.Run(ctx, repoPath, "symbolic-ref", "-q", "refs/remotes/"+remote+"/HEAD")
-	switch {
-	case err == nil:
-		return strings.TrimSpace(out), nil
-	case gitx.IsExit(err, 1):
-		return "HEAD", nil
-	default:
-		return "", err
-	}
-}
-
-// defaultRefs are what "merged into the default branch" is measured against:
-// origin's default branch and the local branch of the same name, or the main
-// checkout's HEAD when origin/HEAD isn't set.
-func (m *Manager) defaultRefs(ctx context.Context, repoPath string) ([]string, error) {
-	base, err := m.base(ctx, repoPath)
-	if err != nil || base == "HEAD" {
-		return []string{base}, err
-	}
-	refs := []string{base}
-	local := "refs/heads/" + strings.TrimPrefix(base, "refs/remotes/"+remote+"/")
-	if ok, err := m.refExists(ctx, repoPath, local); err != nil {
-		return nil, err
-	} else if ok {
-		refs = append(refs, local)
-	}
-	return refs, nil
-}
-
-func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
-	return m.refExists(ctx, repoPath, "refs/heads/"+branch)
-}
-
-func (m *Manager) refExists(ctx context.Context, repoPath, ref string) (bool, error) {
-	_, err := m.git.Run(ctx, repoPath, "show-ref", "--verify", "--quiet", ref)
-	switch {
-	case err == nil:
-		return true, nil
-	case gitx.IsExit(err, 1):
+// exists reports whether anything, a symlink included, is at p.
+func exists(p string) (bool, error) {
+	_, err := os.Lstat(p)
+	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
-	default:
-		return false, err
 	}
-}
-
-// registration is how repo's worktree list has path, or nil if it isn't
-// there.
-type registration struct {
-	head     string
-	branch   string
-	detached bool
-	// prunable is git's word for a registration whose directory is gone.
-	prunable bool
-}
-
-func (m *Manager) registration(ctx context.Context, repoPath, path string) (*registration, error) {
-	out, err := m.git.Run(ctx, repoPath, "worktree", "list", "--porcelain", "-z")
-	if err != nil {
-		return nil, err
-	}
-	for _, rec := range strings.Split(out, "\x00\x00") {
-		var (
-			reg  registration
-			here bool
-		)
-		for _, line := range strings.Split(rec, "\x00") {
-			key, val, _ := strings.Cut(line, " ")
-			switch key {
-			case "worktree":
-				here = canon(val) == path
-			case "HEAD":
-				reg.head = val
-			case "branch":
-				reg.branch = strings.TrimPrefix(val, "refs/heads/")
-			case "detached":
-				reg.detached = true
-			case "prunable":
-				reg.prunable = true
-			}
-		}
-		if here {
-			return &reg, nil
-		}
-	}
-	return nil, nil
-}
-
-// prune drops stale registrations, which would otherwise block re-adding a
-// worktree at the same path.
-func (m *Manager) prune(ctx context.Context, repoPath, path string) error {
-	m.logger.Info("pruning stale worktree registration", "repo", repoPath, "path", path)
-	_, err := m.git.Run(ctx, repoPath, "worktree", "prune")
-	return err
-}
-
-// canon resolves symlinks in p's parent, as git does when it records a
-// worktree, but not in p itself: a symlink at t<ticket>-<repo> must not pass
-// for whatever it points at.
-func canon(p string) string {
-	p = filepath.Clean(p)
-	if dir, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
-		return filepath.Join(dir, filepath.Base(p))
-	}
-	return p
+	return err == nil, err
 }

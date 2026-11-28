@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -25,6 +23,9 @@ const (
 	// Unpushed is commits on no remote and not merged into the default
 	// branch.
 	Unpushed ReasonKind = "unpushed"
+	// Locked is a worktree someone locked (`git worktree lock`), often
+	// because it lives on storage that isn't always mounted.
+	Locked ReasonKind = "locked"
 )
 
 // Reason is one thing that would be lost if the worktree were removed.
@@ -52,16 +53,21 @@ type CleanupResult struct {
 // branches at the end of the ticket, keeping any that would lose work:
 //   - a worktree with uncommitted changes or untracked files;
 //   - a branch, or a detached HEAD, with commits that are on no remote
-//     (any remote-tracking ref) and not merged into the default branch.
+//     (any remote-tracking ref) and not merged into the default branch;
+//   - a locked worktree.
 //
 // A branch that is pushed but not merged is removed locally: the remote has
 // its commits, so nothing is lost, and the PR lives on there. Remote-tracking
 // refs are trusted as they stand, without a fetch; a stale one can only make a
 // branch look pushed that was, at that point, really on the remote.
 //
-// A kept worktree keeps all its ticket's branches in that repo too. Removal
-// goes through `git worktree remove` without --force, so git refuses as well
-// if the worktree changed since it was checked.
+// A kept worktree keeps its registration and all its ticket's branches in that
+// repo. A worktree whose directory was deleted has its detached HEAD, if any,
+// saved to a ticket branch first, so the check above covers it.
+//
+// Between the checks and the removal, git refuses to remove a worktree that
+// became dirty, and each branch is deleted only if it still points where it
+// did when checked, so work that lands in between isn't lost either.
 func (m *Manager) Cleanup(ctx context.Context, ticket ident.TicketID, worktrees []*Worktree) []*CleanupResult {
 	out := make([]*CleanupResult, 0, len(worktrees))
 	for _, wt := range worktrees {
@@ -85,92 +91,140 @@ func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Wor
 	if err != nil {
 		return false, nil, err
 	}
-	var reasons []Reason
-	if st.reg != nil && !st.gone {
-		if reasons, err = m.dirty(ctx, st.path); err != nil {
-			return false, nil, err
-		}
+	reasons, err := m.atRisk(ctx, wt.RepoPath, st)
+	if err != nil || len(reasons) > 0 {
+		return false, reasons, err
 	}
-	unpushed, err := m.unpushed(ctx, wt.RepoPath, st)
-	if err != nil {
-		return false, nil, err
-	}
-	reasons = append(reasons, unpushed...)
-	if len(reasons) > 0 {
-		return false, reasons, nil
-	}
-	if !st.gone {
+	switch {
+	case st.reg != nil && st.present:
 		if _, err := m.git.Run(ctx, wt.RepoPath, "worktree", "remove", st.path); err != nil {
 			return false, nil, fmt.Errorf("worktree: removing %s: %w", st.path, err)
+		}
+	case st.reg != nil:
+		if err := m.unregister(ctx, wt.RepoPath, st.path); err != nil {
+			return false, nil, err
 		}
 	}
 	return true, nil, m.deleteBranches(ctx, wt.RepoPath, st.branches)
 }
 
+// atRisk is everything removing st would lose.
+func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Reason, error) {
+	var reasons []Reason
+	if st.reg != nil && st.reg.locked {
+		reasons = append(reasons, Reason{Kind: Locked, Detail: "locked: " + orNone(st.reg.lockReason)})
+	}
+	if st.reg != nil && st.present {
+		dirty, err := m.dirty(ctx, st.path)
+		if err != nil {
+			return nil, err
+		}
+		reasons = append(reasons, dirty...)
+	}
+	unpushed, err := m.unpushed(ctx, repoPath, st)
+	if err != nil {
+		return nil, err
+	}
+	return append(reasons, unpushed...), nil
+}
+
 // ForceCleanup removes ticket's worktree and its branches whatever they
 // hold, for `slop-bot worktrees clean <t> --force` once the user has looked.
-// It still refuses a path that isn't this repo's worktree.
+// That includes a locked one, one whose creation was interrupted, and one
+// whose .git link is gone. It still refuses a path that isn't this repo's
+// worktree.
 func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *Worktree) error {
 	st, err := m.inspect(ctx, ticket, wt)
 	if err != nil {
 		return err
 	}
-	if !st.gone {
-		// Twice, so a locked worktree goes too: the user asked for it gone.
-		if _, err := m.git.Run(ctx, wt.RepoPath, "worktree", "remove", "--force", "--force", st.path); err != nil {
-			return fmt.Errorf("worktree: removing %s: %w", st.path, err)
+	switch {
+	case st.reg != nil && st.present:
+		if err := m.forceRemove(ctx, wt.RepoPath, st.path); err != nil {
+			return err
+		}
+	case st.reg != nil:
+		if err := m.unregister(ctx, wt.RepoPath, st.path); err != nil {
+			return err
 		}
 	}
 	if err := m.deleteBranches(ctx, wt.RepoPath, st.branches); err != nil {
 		return err
 	}
-	m.logger.Info("worktree force-removed", "ticket", ticket, "path", st.path, "branches", st.branches)
+	m.logger.Info("worktree force-removed", "ticket", ticket, "path", st.path, "branches", len(st.branches))
 	return nil
+}
+
+func (m *Manager) forceRemove(ctx context.Context, repoPath, path string) error {
+	err := m.checkWorktree(ctx, path)
+	switch {
+	case err == nil:
+		// Twice, so a locked worktree goes too: the user asked for it gone.
+		if _, err := m.git.Run(ctx, repoPath, "worktree", "remove", "--force", "--force", path); err != nil {
+			return fmt.Errorf("worktree: removing %s: %w", path, err)
+		}
+		return nil
+	case errors.Is(err, ErrBroken):
+		// git won't remove a worktree it can't validate. The path is ours
+		// (owns), registered to this repo (inspect), and a real directory
+		// (checkWorktree got as far as asking git), so delete it ourselves.
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("worktree: removing %s: %w", path, err)
+		}
+		return m.unregister(ctx, repoPath, path)
+	default:
+		return fmt.Errorf("worktree: %w", err)
+	}
+}
+
+// branchRef is a branch and the commit it pointed at when inspected.
+type branchRef struct {
+	ref string
+	oid string
 }
 
 // state is what inspect found of one worktree.
 type state struct {
-	path string
-	reg  *registration
-	// gone is a worktree whose directory is no longer there; its stale
-	// registration has been pruned.
-	gone bool
-	// branches are the ticket's branches in the repo, as full refs.
-	branches []string
+	path    string
+	reg     *registration
+	present bool
+	// branches are the ticket's branches in the repo.
+	branches []branchRef
 }
 
-// inspect checks wt is ours, prunes it if its directory is gone, and finds
-// the ticket's branches. It errors on a path that exists but isn't this
-// repo's worktree, which is never touched.
+// inspect checks wt is ours and finds its registration and the ticket's
+// branches. It errors on a path that exists but isn't this repo's worktree,
+// which is never touched. A deleted worktree's detached HEAD is saved to a
+// ticket branch, since its registration is all that holds those commits.
 func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktree) (*state, error) {
-	if err := m.owns(ticket, wt); err != nil {
+	if err := m.owns(ctx, ticket, wt); err != nil {
 		return nil, err
 	}
 	st := &state{path: m.path(ticket, wt.Repo)}
-	reg, err := m.registration(ctx, wt.RepoPath, st.path)
-	if err != nil {
+	var err error
+	if st.reg, err = m.registration(ctx, wt.RepoPath, st.path); err != nil {
 		return nil, err
 	}
-	st.reg = reg
-	_, statErr := os.Lstat(st.path)
-	switch {
-	case errors.Is(statErr, fs.ErrNotExist):
-		st.gone = true
-		if reg != nil {
-			if err := m.prune(ctx, wt.RepoPath, st.path); err != nil {
-				return nil, err
-			}
-		}
-	case statErr != nil:
-		return nil, statErr
-	case reg == nil:
+	if st.present, err = exists(st.path); err != nil {
+		return nil, err
+	}
+	if st.reg == nil && st.present {
 		return nil, fmt.Errorf("worktree: %w: %s isn't a worktree of %s", ErrCollision, st.path, wt.RepoPath)
 	}
-	out, err := m.git.Run(ctx, wt.RepoPath, "for-each-ref", "--format=%(refname)", ticketBranchPrefix(ticket))
+	if st.reg != nil && !st.present && st.reg.detached {
+		if err := m.rescue(ctx, wt.RepoPath, ticket, st.reg.head); err != nil {
+			return nil, err
+		}
+	}
+	out, err := m.git.Run(ctx, wt.RepoPath, "for-each-ref", "--format=%(objectname) %(refname)", ticketBranchPrefix(ticket))
 	if err != nil {
 		return nil, err
 	}
-	st.branches = strings.Fields(out)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if oid, ref, ok := strings.Cut(line, " "); ok {
+			st.branches = append(st.branches, branchRef{ref: ref, oid: oid})
+		}
+	}
 	return st, nil
 }
 
@@ -201,53 +255,68 @@ func (m *Manager) dirty(ctx context.Context, path string) ([]Reason, error) {
 
 // unpushed finds commits removing st would lose: on the ticket's branches,
 // and on a detached HEAD, which nothing else holds once the worktree goes.
+// Tips are the commits inspect saw, so the check and the deletion agree.
 func (m *Manager) unpushed(ctx context.Context, repoPath string, st *state) ([]Reason, error) {
 	defaults, err := m.defaultRefs(ctx, repoPath)
 	if err != nil {
 		return nil, err
 	}
-	tips := map[string]string{}
-	for _, b := range st.branches {
-		tips[b] = "branch " + strings.TrimPrefix(b, "refs/heads/")
+	into := "no default branch known (origin/HEAD is unset)"
+	if len(defaults) > 0 {
+		into = "not merged into " + defaults[0]
 	}
-	if st.reg != nil && st.reg.detached && st.reg.head != "" {
-		tips[st.reg.head] = "detached HEAD " + st.reg.head
+	type tip struct{ oid, what string }
+	tips := make([]tip, 0, len(st.branches)+1)
+	for _, b := range st.branches {
+		tips = append(tips, tip{b.oid, "branch " + strings.TrimPrefix(b.ref, "refs/heads/")})
+	}
+	if st.reg != nil && st.present && st.reg.detached && st.reg.head != "" {
+		tips = append(tips, tip{st.reg.head, "detached HEAD " + st.reg.head})
 	}
 	var reasons []Reason
-	for _, tip := range sortedKeys(tips) {
-		args := append([]string{"rev-list", "--count", tip, "--not", "--remotes"}, defaults...)
-		out, err := m.git.Run(ctx, repoPath, args...)
+	for _, t := range tips {
+		n, err := m.unsaved(ctx, repoPath, t.oid, defaults...)
 		if err != nil {
 			return nil, err
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(out))
-		if err != nil {
-			return nil, fmt.Errorf("worktree: rev-list count %q: %w", out, err)
 		}
 		if n > 0 {
 			reasons = append(reasons, Reason{
 				Kind:   Unpushed,
-				Detail: fmt.Sprintf("%s has %s on no remote and not merged into %s", tips[tip], plural(n, "commit"), defaults[0]),
+				Detail: fmt.Sprintf("%s has %s on no remote, %s", t.what, plural(n, "commit"), into),
 			})
 		}
 	}
 	return reasons, nil
 }
 
-func (m *Manager) deleteBranches(ctx context.Context, repoPath string, refs []string) error {
-	if len(refs) == 0 {
+// deleteBranches deletes each branch only if it still points where inspect
+// saw it, and never one checked out in some worktree, which would leave that
+// worktree on a branch that doesn't exist.
+func (m *Manager) deleteBranches(ctx context.Context, repoPath string, branches []branchRef) error {
+	if len(branches) == 0 {
 		return nil
 	}
-	names := make([]string, len(refs))
-	for i, r := range refs {
-		names[i] = strings.TrimPrefix(r, "refs/heads/")
+	regs, err := m.registrations(ctx, repoPath)
+	if err != nil {
+		return err
 	}
-	// -D, not -d: -d measures against the upstream or HEAD, not "pushed or
-	// merged", and the caller has already decided these are safe to go.
-	if _, err := m.git.Run(ctx, repoPath, append([]string{"branch", "-D", "--"}, names...)...); err != nil {
-		return fmt.Errorf("worktree: deleting branches: %w", err)
+	checkedOut := map[string]string{}
+	for _, r := range regs {
+		if r.branch != "" {
+			checkedOut["refs/heads/"+r.branch] = r.path
+		}
 	}
-	return nil
+	var errs []error
+	for _, b := range branches {
+		if at, ok := checkedOut[b.ref]; ok {
+			errs = append(errs, fmt.Errorf("worktree: not deleting %s: it is checked out at %s", b.ref, at))
+			continue
+		}
+		if _, err := m.git.Run(ctx, repoPath, "update-ref", "-d", b.ref, b.oid); err != nil {
+			errs = append(errs, fmt.Errorf("worktree: deleting %s: %w", b.ref, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func plural(n int, noun string) string {
@@ -257,11 +326,9 @@ func plural(n int, noun string) string {
 	return strconv.Itoa(n) + " " + noun + "s"
 }
 
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+func orNone(s string) string {
+	if s == "" {
+		return "no reason given"
 	}
-	slices.Sort(keys)
-	return keys
+	return s
 }

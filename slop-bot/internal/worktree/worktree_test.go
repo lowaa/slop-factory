@@ -137,7 +137,7 @@ func TestCreateRejectsUnsafeNames(t *testing.T) {
 		_, err := f.m.Create(ctx, "1", []string{repo}, repo)
 		require.ErrorIs(t, err, ErrInvalidName, "repo %q", repo)
 	}
-	assert.False(t, exists(t, filepath.Join(f.ws, "t1-a")))
+	assert.False(t, onDisk(t, filepath.Join(f.ws, "t1-a")))
 }
 
 func TestCreateRejectsBadRepoLists(t *testing.T) {
@@ -155,7 +155,7 @@ func TestCreateRejectsBadRepoLists(t *testing.T) {
 	// Every repo is checked before any worktree is made.
 	_, err = f.m.Create(ctx, "1", []string{"a", "nope"}, "a")
 	require.ErrorIs(t, err, ErrUnknownRepo)
-	assert.False(t, exists(t, filepath.Join(f.ws, "t1-a")))
+	assert.False(t, onDisk(t, filepath.Join(f.ws, "t1-a")))
 }
 
 func TestCreateMissingOrNonGitRepoPath(t *testing.T) {

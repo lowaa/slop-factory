@@ -98,7 +98,7 @@ func (f *fixture) branchExists(repo, branch string) bool {
 	return ok
 }
 
-func exists(t *testing.T, p string) bool {
+func onDisk(t *testing.T, p string) bool {
 	t.Helper()
 	_, err := os.Lstat(p)
 	if os.IsNotExist(err) {
