@@ -11,6 +11,7 @@ export QUALITY_REAL_ROOT
 # line, to $STUB_LOG, and does what the STUB_* variables say:
 #   STUB_GO_PACKAGES   what `go list` prints (default two packages)
 #   STUB_GO_TEST_EXIT  what `go test` exits with (default 0)
+#   STUB_GO_BUILD_EXIT what `go build` exits with (default 0)
 #   STUB_QUALITY_EXIT  what the quality CLI exits with (default 0)
 stub_setup() {
   SCRATCH="$(mktemp -d)"
@@ -18,7 +19,7 @@ stub_setup() {
   STUB_LOG="${SCRATCH}/log"
   : > "${STUB_LOG}"
   export STUB_LOG STUB_GO_PACKAGES="example.com/proj
-example.com/proj/internal/x" STUB_GO_TEST_EXIT=0 STUB_QUALITY_EXIT=0
+example.com/proj/internal/x" STUB_GO_TEST_EXIT=0 STUB_GO_BUILD_EXIT=0 STUB_QUALITY_EXIT=0
 
   cat > "${SCRATCH}/bin/go" << 'EOF'
 #!/usr/bin/env bash
@@ -31,6 +32,14 @@ case "$1" in
     done
     echo '{"Action":"pass"}'
     exit "${STUB_GO_TEST_EXIT}"
+    ;;
+  build)
+    echo "GOWORK=${GOWORK-unset}" >> "${STUB_LOG}"
+    ((STUB_GO_BUILD_EXIT == 0)) || exit "${STUB_GO_BUILD_EXIT}"
+    while (($#)); do
+      [[ "$1" != -o ]] || cp "${STUB_LOG%/log}/bin/quality" "$2"
+      shift
+    done
     ;;
 esac
 EOF

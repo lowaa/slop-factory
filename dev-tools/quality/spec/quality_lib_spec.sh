@@ -121,6 +121,7 @@ Describe 'quality_lib.sh'
     go_test_calls() { calls 'go test'; }
     quality_calls() { calls 'quality '; }
     all_calls() { cat "${STUB_LOG}"; }
+    build_gowork() { calls 'GOWORK='; }
 
     It 'runs the suite once, with -race and every package covered, and feeds both measures'
       When call quality_go "$(project)"
@@ -202,6 +203,25 @@ Describe 'quality_lib.sh'
       The status should be success
       The stderr should include 'go test'
       The path "$(calls 'quality measure' | sed -E 's/.*--test-json ([^ ]+)\/test.json.*/\1/')" should not be exist
+    End
+
+    It 'builds the CLI from its own go.sum when none is given'
+      unset QUALITY_BIN
+      When call quality_go "$(project)" --only=complexity
+      The status should be success
+      The result of function go_calls should match pattern 'go build -o */quality ./cmd/quality'
+      The result of function build_gowork should eq 'GOWORK=off'
+      The result of function quality_calls should include 'quality measure'
+    End
+
+    It 'stops when the CLI does not build'
+      unset QUALITY_BIN
+      STUB_GO_BUILD_EXIT=1
+      When call quality_go "$(project)"
+      The status should eq 2
+      The stderr should include 'building the quality CLI failed'
+      The result of function go_test_calls should eq ''
+      The result of function quality_calls should eq ''
     End
 
     It 'stubs mutation testing, running nothing'

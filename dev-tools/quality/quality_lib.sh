@@ -118,7 +118,10 @@ quality_bin() {
     echo "${QUALITY_BIN}"
     return
   fi
-  (cd "${QUALITY_LIB_DIR}" && GOWORK=off go build -o "$1/quality" ./cmd/quality) >&2
+  (cd "${QUALITY_LIB_DIR}" && GOWORK=off go build -o "$1/quality" ./cmd/quality) >&2 || {
+    echo "quality.sh: building the quality CLI failed" >&2
+    return 1
+  }
   echo "$1/quality"
 }
 
