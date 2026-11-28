@@ -50,6 +50,12 @@ Describe 'quality_lib.sh'
       The stderr should include "unknown measure 'speed'"
     End
 
+    It 'refuses a glob as a measure, not the files it matches'
+      When call quality_parse_args '--only=*'
+      The status should eq 2
+      The stderr should include "unknown measure '*'"
+    End
+
     It 'makes --coverprofile and --coverdir absolute, and takes several'
       When call quality_parse_args --coverprofile=a.out --coverprofile=/abs/b.out --coverdir=cov
       The status should be success

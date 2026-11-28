@@ -15,7 +15,6 @@ QUALITY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=SCRIPTDIR/../require_bash.sh
 . "${QUALITY_LIB_DIR}/../require_bash.sh"
 QUALITY_ROOT="$(cd "${QUALITY_LIB_DIR}/../.." && pwd)"
-QUALITY_REPORT_DIR="${QUALITY_REPORT_DIR:-${QUALITY_ROOT}/quality-reports}"
 QUALITY_MEASURES=coverage,complexity,testtime
 
 quality_usage() {
@@ -42,13 +41,15 @@ quality_abs() {
   esac
 }
 
+QUALITY_REPORT_DIR="$(quality_abs "${QUALITY_REPORT_DIR:-${QUALITY_ROOT}/quality-reports}")"
+
 # quality_parse_args ARGS...: sets QUALITY_MODE (check, prune, rebaseline or
 # report), QUALITY_ONLY, QUALITY_PROFILES, QUALITY_COVERDIRS and
 # QUALITY_MUTATION (empty, changed or all). Returns 2 on a usage error.
 quality_parse_args() {
   QUALITY_MODE=check QUALITY_ONLY="${QUALITY_MEASURES}" QUALITY_MUTATION=""
   QUALITY_PROFILES=() QUALITY_COVERDIRS=()
-  local modes=0 m
+  local modes=0 m only
   while (($#)); do
     case "$1" in
       --prune | --rebaseline | --report)
@@ -57,7 +58,8 @@ quality_parse_args() {
         ;;
       --only=?*)
         QUALITY_ONLY="${1#--only=}"
-        for m in ${QUALITY_ONLY//,/ }; do
+        IFS=, read -r -a only <<< "${QUALITY_ONLY}"
+        for m in "${only[@]}"; do
           [[ ",${QUALITY_MEASURES}," == *",${m},"* ]] || {
             echo "quality.sh: unknown measure '${m}'" >&2
             quality_usage
