@@ -121,39 +121,55 @@ func (c *codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) 
 			c.metered = r.APIKeySource != "" && r.APIKeySource != "none"
 		}
 	case "assistant":
-		for _, b := range r.Message.Content {
-			switch b.Type {
-			case "text":
-				evs = append(evs, harness.Event{Kind: harness.Text, Text: b.Text})
-			case "tool_use":
-				evs = append(evs, harness.Event{Kind: harness.ToolStarted, Tool: b.Name})
-			}
-		}
+		evs = append(evs, assistantEvents(&r)...)
 	case "user":
-		for _, b := range r.Message.Content {
-			if b.Type == "tool_result" {
-				evs = append(evs, harness.Event{Kind: harness.ToolEnded})
-			}
-		}
+		evs = append(evs, toolResultEvents(&r)...)
 	case "rate_limit_event":
 		if l := limitFrom(&r); l != nil {
 			evs = append(evs, harness.Event{Kind: harness.LimitReport, Limit: l})
 		}
 	case "result":
-		c.inTurn = false
-		evs = append(evs,
-			harness.Event{Kind: harness.UsageReport, Usage: &harness.Usage{
-				InputTokens:      r.Usage.InputTokens,
-				OutputTokens:     r.Usage.OutputTokens,
-				CacheReadTokens:  r.Usage.CacheReadInputTokens,
-				CacheWriteTokens: r.Usage.CacheCreationInputTokens,
-				CostUSD:          r.TotalCostUSD,
-				CostEstimated:    !c.metered,
-			}},
-			turnEnded(&r),
-		)
+		evs = append(evs, c.resultEvents(&r)...)
 	}
 	return evs, nil
+}
+
+func assistantEvents(r *record) []harness.Event {
+	var evs []harness.Event
+	for _, b := range r.Message.Content {
+		switch b.Type {
+		case "text":
+			evs = append(evs, harness.Event{Kind: harness.Text, Text: b.Text})
+		case "tool_use":
+			evs = append(evs, harness.Event{Kind: harness.ToolStarted, Tool: b.Name})
+		}
+	}
+	return evs
+}
+
+func toolResultEvents(r *record) []harness.Event {
+	var evs []harness.Event
+	for _, b := range r.Message.Content {
+		if b.Type == "tool_result" {
+			evs = append(evs, harness.Event{Kind: harness.ToolEnded})
+		}
+	}
+	return evs
+}
+
+func (c *codec) resultEvents(r *record) []harness.Event {
+	c.inTurn = false
+	return []harness.Event{
+		{Kind: harness.UsageReport, Usage: &harness.Usage{
+			InputTokens:      r.Usage.InputTokens,
+			OutputTokens:     r.Usage.OutputTokens,
+			CacheReadTokens:  r.Usage.CacheReadInputTokens,
+			CacheWriteTokens: r.Usage.CacheCreationInputTokens,
+			CostUSD:          r.TotalCostUSD,
+			CostEstimated:    !c.metered,
+		}},
+		turnEnded(r),
+	}
 }
 
 func turnEnded(r *record) harness.Event {
