@@ -145,6 +145,9 @@ type Manager struct {
 	// stopErr.
 	stopped chan struct{}
 	stopErr error
+	// fenced is set, under mu, as the drain takes its final look at the
+	// runners: from then on adopt refuses (see adopt).
+	fenced bool
 }
 
 // New makes a Manager; nothing runs until Start.
@@ -244,8 +247,10 @@ func (m *Manager) drain(ctx context.Context) error {
 		late = append(late, fmt.Errorf("agents: starts still in flight: %w", werr))
 	}
 	// Only now is the set of runners final: a start that was in flight has
-	// adopted its runner, or given up.
+	// adopted its runner, or given up, and the fence keeps one still going
+	// past the grace from adopting one after this look.
 	m.mu.Lock()
+	m.fenced = true
 	runners := make([]*runner, 0, len(m.runners))
 	for _, r := range m.runners {
 		runners = append(runners, r)

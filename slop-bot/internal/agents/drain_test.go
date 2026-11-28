@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/agents"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
@@ -141,4 +142,53 @@ func TestADrainPastItsDeadlineWaitsOutAnEndingAgentsCleanup(t *testing.T) {
 			runtime.Gosched()
 		}
 	}
+}
+
+// stopPastTheGrace stops f's manager with a deadline already passed, moving
+// the fake clock on until the drain gives up on what it still waits for.
+func (f *fixture) stopPastTheGrace() error {
+	f.t.Helper()
+	gaveUp, cancel := context.WithCancel(f.ctx())
+	cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- f.mgr.Stop(gaveUp) }()
+	for {
+		select {
+		case err := <-stopped:
+			return err
+		default:
+			f.clock.Advance(agents.ForceStopGrace)
+			runtime.Gosched()
+		}
+	}
+}
+
+// A start that ignores the drain's cancellation and is still in flight
+// when the drain gives up on it can't bring a runner up after the drain
+// has stopped the ones it had: its conversation is stopped instead. A
+// resume is the case that matters: a spawn's kick-off fails on its ended
+// context and cleans up, but a resume carries on.
+func TestAStartThatOutlivesTheDrainIsStoppedNotAdopted(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	f.waitingAgent("t", nil)
+	require.NoError(t, f.mgr.Stop(f.ctx()))
+	entered, release := make(chan struct{}), make(chan struct{})
+	f.hooks.set(func(h *harnessHooks) {
+		h.ignoresCancel = true
+		h.start = func(context.Context, *harness.Workspace, *harness.ConversationRef) error {
+			close(entered)
+			<-release
+			return nil
+		}
+	})
+	f.startAgain()
+	<-entered
+	err := f.stopPastTheGrace()
+	require.ErrorContains(t, err, "starts still in flight")
+
+	close(release)
+	resumed := f.session()
+	_, err = resumed.Await(f.ctx(), "never sent")
+	require.ErrorContains(t, err, "session ended", "its conversation was stopped, not left running")
 }

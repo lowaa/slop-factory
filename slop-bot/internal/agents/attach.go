@@ -517,7 +517,8 @@ func (m *Manager) adoptHandBack(ctx context.Context, old *runner, a *adoption) (
 	defer m.syncMu.Unlock()
 	cur, ok := m.runner(a.id)
 	if ok && cur == old && !old.isEnding() {
-		return m.adopt(ctx, a), true
+		r, err := m.adopt(ctx, a)
+		return r, err == nil
 	}
 	_ = a.conv.Stop(context.WithoutCancel(ctx), true)
 	m.opts.Logger.Info("agents: the agent ended while it was handed back", "agent", a.id)

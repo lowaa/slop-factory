@@ -93,8 +93,11 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 		m.failStart(ctx, id, t, err)
 		return fmt.Errorf("agents: starting %s for ticket %s: %w", h.Name(), t.ID, err)
 	}
-	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool,
+	r, err := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool,
 		started: &started{conv: conv, caps: h.Capabilities(), dir: ws.Dir}, st: state.StateStarting})
+	if err != nil {
+		return err
+	}
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
 	if err := m.kickOff(ctx, r, t); err != nil {
 		m.abortStart(ctx, r, t, err)
@@ -269,7 +272,15 @@ type adoption struct {
 	since time.Time
 }
 
-func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
+// errFenced is a conversation that came up after the drain took its final
+// look at the runners: nothing would stop it, so it isn't adopted.
+var errFenced = errors.New("agents: the drain has finished, so the conversation was stopped")
+
+// adopt takes a conversation on as id's runner, or, once the drain has
+// taken its final look at the runners (fenced), stops it and refuses
+// (errFenced): a start that outlived the drain's grace mustn't leave a
+// harness running after Stop, writing to stores the daemon has closed.
+func (m *Manager) adopt(ctx context.Context, a *adoption) (*runner, error) {
 	id := a.id
 	conv := a.conv
 	since := a.since
@@ -279,6 +290,12 @@ func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 	r := &runner{m: m, id: id, ticket: a.ticket, harness: a.harness, pool: a.pool, conv: conv, caps: a.caps, st: a.st,
 		since: since, decl: a.decl, summary: a.summary, holdsSlot: a.holdsSlot, exited: make(chan struct{})}
 	m.mu.Lock()
+	if m.fenced {
+		m.mu.Unlock()
+		stopLate(conv)
+		m.opts.Logger.Warn("agents: a start outlived the drain; its conversation was stopped", "agent", id)
+		return nil, errFenced
+	}
 	r.stopping = m.stopping
 	m.runners[id] = r
 	m.mu.Unlock()
@@ -286,7 +303,20 @@ func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 		m.opts.Logger.Warn("agents: recording the conversation id", "agent", id, "err", err)
 	}
 	go r.run(context.WithoutCancel(ctx))
-	return r
+	return r, nil
+}
+
+// stopLate forces a conversation no runner will own, within
+// ForceStopGrace. Its events are drained meanwhile: a driver's exit waits
+// for them to be read.
+func stopLate(conv harness.Conversation) {
+	go func() {
+		for range conv.Events() {
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), ForceStopGrace)
+	defer cancel()
+	_ = conv.Stop(ctx, true)
 }
 
 // started is a harness session the Manager started, new or resumed.
@@ -470,11 +500,13 @@ func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
 		// the hand-back resumes it, or says why it can't.
 		m.opts.Logger.Warn("agents: adopting an attached agent's session", "agent", a.ID, "err", err)
 	} else if ok {
-		r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s,
-			st: state.StateAttached, decl: declared(a.Declared), summary: a.DeclaredSummary})
-		r.mu.Lock()
-		r.joinable = true
-		r.mu.Unlock()
+		// Start runs before any Stop, so the fence is never up here.
+		if r, err := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s,
+			st: state.StateAttached, decl: declared(a.Declared), summary: a.DeclaredSummary}); err == nil {
+			r.mu.Lock()
+			r.joinable = true
+			r.mu.Unlock()
+		}
 		return
 	}
 	r := &runner{m: m, id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, st: state.StateAttached,
@@ -508,7 +540,10 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error
 			return err
 		}
 	}
-	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s, st: a.State, since: a.StateSince})
+	r, err := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s, st: a.State, since: a.StateSince})
+	if err != nil {
+		return err
+	}
 	st, cutShort := resumedState(a.State)
 	r.setState(ctx, st, "resumed")
 	if adopted {

@@ -83,6 +83,18 @@ type harnessHooks struct {
 	// hold makes a Send take the message and keep it, as a codec waiting
 	// for a turn does: the conversation's Undelivered.
 	hold bool
+	// ignoresCancel makes a start carry on past its context's end, as a
+	// harness's handshake that doesn't watch it would.
+	ignoresCancel bool
+}
+
+func (h *harnessHooks) ignoringCancel() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.ignoresCancel
 }
 
 func (h *harnessHooks) holds() bool {
@@ -153,6 +165,9 @@ func (e *envHarness) Start(ctx context.Context, ws *harness.Workspace, resume *h
 	}
 	ws.Env[reexec] = "1"
 	ws.Env["GORACE"] = "atexit_sleep_ms=0"
+	if e.hooks.ignoringCancel() {
+		ctx = context.WithoutCancel(ctx)
+	}
 	conv, err := e.Harness.Start(ctx, ws, resume)
 	if err != nil {
 		return nil, err
