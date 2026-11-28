@@ -446,6 +446,9 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 func (c *Conversation) hookEvents(call *HookCall, injected bool) []harness.Event {
 	var evs []harness.Event
 	for _, ev := range call.Events {
+		if !c.ready && ev.Kind != harness.Ready {
+			continue // start-up work (see HookCall.Events)
+		}
 		switch ev.Kind {
 		case harness.Ready:
 			if c.id == "" {
@@ -510,6 +513,9 @@ func (c *Conversation) readScreen(ctx context.Context) {
 func (c *Conversation) screenEvents(st screenState, cancelled bool) []harness.Event {
 	switch st {
 	case screenBusy:
+		if !c.ready {
+			return nil // start-up work (see HookCall.Events)
+		}
 		return c.turnStarted()
 	case screenIdle:
 		var evs []harness.Event
@@ -934,6 +940,7 @@ func (c *Conversation) beginQuit() bool {
 
 // quit types the quit sequence; c.keys is held.
 func (c *Conversation) quit(ctx context.Context) error {
+	c.awaitIdleScreen(ctx)
 	for _, in := range c.p.Quit {
 		if err := c.notAttached(ctx); err != nil {
 			return err
@@ -950,6 +957,34 @@ func (c *Conversation) quit(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// awaitIdleScreen waits, up to RenderTimeout, for the screen to show the
+// idle prompt. A hook's turn end can come before the TUI has finished the
+// turn (agy runs Stop with its turn still on screen), and the quit sequence
+// is meant for the idle prompt: mid-turn, a TUI can read the same keys
+// otherwise. Past the timeout the quit is typed anyway, and Stop's confirm
+// or kill takes over. Like awaitRendered, it polls on the wall clock: a
+// sub-second wait on the TUI's redraw.
+func (c *Conversation) awaitIdleScreen(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, c.opts.RenderTimeout)
+	defer cancel()
+	tick := time.NewTicker(renderPoll)
+	defer tick.Stop()
+	for {
+		screen, err := c.host.Capture(ctx, c.opts.Session)
+		if err == nil && c.p.Markers.classify(screen) == screenIdle {
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-c.exited:
+			return
+		case <-ctx.Done():
+			c.opts.Logger.Info("tuidriver: quitting without an idle screen", "screen", lastLine(screen))
+			return
+		}
+	}
 }
 
 // kill ends the session and waits for the exit to be reported.

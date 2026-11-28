@@ -12,6 +12,7 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake/faketest"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost/tmuxtest"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
@@ -139,4 +140,111 @@ func TestATmuxFailureIsNotAnExit(t *testing.T) {
 	r.clk.Advance(poll)
 	require.NoError(t, r.conv.Send(r.ctx, msg("still here")))
 	assert.Equal(t, pointer("still here"), r.await(t, fake.RepUser).Text)
+}
+
+// A harness that names its conversation only after a first prompt (agy)
+// launches with one, and is ready once that turn ends: the turn is its
+// start-up, not the core's.
+func TestWorkBeforeReadyIsNotReported(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	base := r.Harness.Profile()
+	p := *base
+	p.ParseHook = func(event string, payload []byte) (*tuidriver.HookCall, error) {
+		call, err := base.ParseHook(event, payload)
+		if err != nil {
+			return nil, err
+		}
+		switch event {
+		case fake.HookSessionStart:
+			call.Events = nil
+		case fake.HookTurnEnd:
+			call.Events = append(call.Events, harness.Event{Kind: harness.Ready})
+		}
+		return call, nil
+	}
+	type started struct {
+		conv *tuidriver.Conversation
+		err  error
+	}
+	done := make(chan started, 1)
+	go func() {
+		conv, err := tuidriver.Start(r.ctx, &tuidriver.Options{
+			Profile: &p, Host: r.Host, Hub: r.Hub, Session: fake.SessionName("a1"),
+			Pointer: faketest.Pointer, Clock: r.clk, PollInterval: poll, ConfirmTimeout: confirm,
+		}, faketest.Workspace(t, "a1"), nil)
+		done <- started{conv, err}
+	}()
+	_, _, err := r.Puppet.Started(r.ctx)
+	require.NoError(t, err)
+	r.fake = r.Puppet.Session()
+	r.do(t, fake.Command{Cmd: fake.CmdTurnStart})
+	r.do(t, fake.Command{Cmd: fake.CmdToolStart, Tool: "boot"})
+	r.do(t, fake.Command{Cmd: fake.CmdToolEnd, Tool: "boot"})
+	r.do(t, fake.Command{Cmd: fake.CmdTurnEnd})
+	s := <-done
+	require.NoError(t, s.err)
+	t.Cleanup(func() { _ = s.conv.Stop(context.Background(), true) })
+	assert.Equal(t, harness.Ready, (<-s.conv.Events()).Kind, "the first event")
+	assert.NotEmpty(t, s.conv.Ref().ID)
+}
+
+// laggingHost shows the busy footer while lag is set, as agy's screen does
+// while its Stop hook runs, and counts what is typed meanwhile.
+type laggingHost struct {
+	*sessionhost.Tmux
+	lag    atomic.Bool
+	typed  atomic.Int32
+	lagged chan struct{}
+}
+
+func (h *laggingHost) Capture(ctx context.Context, session string) (string, error) {
+	if h.lag.Load() {
+		select {
+		case h.lagged <- struct{}{}:
+		default:
+		}
+		return "[fake] busy (esc to cancel)", nil
+	}
+	return h.Tmux.Capture(ctx, session)
+}
+
+func (h *laggingHost) SendText(ctx context.Context, session, text string) error {
+	if h.lag.Load() {
+		h.typed.Add(1)
+	}
+	return h.Tmux.SendText(ctx, session, text)
+}
+
+func (h *laggingHost) SendKeys(ctx context.Context, session string, keys ...string) error {
+	if h.lag.Load() {
+		h.typed.Add(1)
+	}
+	return h.Tmux.SendKeys(ctx, session, keys...)
+}
+
+// A turn's end can reach the kit, by hook, before the TUI has finished it on
+// screen: the quit waits for the idle prompt, where a TUI acts on it.
+func TestStopQuitsOnceTheScreenIsIdle(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	host := &laggingHost{Tmux: r.Host, lagged: make(chan struct{}, 1)}
+	r.Harness.Host = host
+	r.conv = r.launch(t, nil)
+
+	host.lag.Store(true)
+	stopped := make(chan error, 1)
+	go func() { stopped <- r.conv.Stop(r.ctx, false) }()
+	// Twice: a quit typed after the first look would be counted by now.
+	for range 2 {
+		select {
+		case <-host.lagged:
+		case err := <-stopped:
+			require.Failf(t, "Stop didn't wait for the screen", "returned %v", err)
+		}
+	}
+	assert.Zero(t, host.typed.Load(), "nothing typed over a busy screen")
+	host.lag.Store(false)
+	require.NoError(t, <-stopped)
+	assert.Equal(t, 0, next(r.ctx, t, r.conv, harness.Exited).ExitCode)
 }
