@@ -202,6 +202,12 @@ type TicketChange struct {
 	AutoMerge *bool
 	Urgent    *UrgentChange
 	Repos     *[]string
+	// IfStatus makes the change conditional: it applies only while the
+	// ticket still has that status, checked in the same write, and is
+	// refused with ErrStatusChanged otherwise. A caller acting on a status it
+	// read earlier (the scheduler walking a ticket forward) uses it so it
+	// never overwrites a move someone made in between.
+	IfStatus *Status
 }
 
 // UrgentChange sets or clears the Urgent flag. Setting it records Reason;

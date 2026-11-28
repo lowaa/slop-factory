@@ -14,6 +14,31 @@ var statusTests = []test{
 	{"Status/EveryTransitionAsTheTableSays", testEveryTransition},
 	{"Status/OnlyTheUserReopens", testOnlyTheUserReopens},
 	{"Status/StartingTheWorkWaitsOnBlockers", testStartingWaitsOnBlockers},
+	{"Status/IfStatusMakesAChangeConditional", testIfStatus},
+}
+
+// A conditional change applies only while the ticket still has the status
+// its caller saw; otherwise it is refused and changes nothing, so a stale
+// writer can't undo a move made since.
+func testIfStatus(t *testing.T, nb NewBackend) {
+	f := newFixture(t, nb)
+	work := f.ticket("conditional")
+	open, inProgress, discussion := tickets.StatusOpen, tickets.StatusInProgress, tickets.StatusDiscussion
+	title := "renamed"
+
+	moved, err := f.sys.Update(f.ctx, user, work.ID, &tickets.TicketChange{Status: &inProgress, IfStatus: &open})
+	require.NoError(t, err)
+	assert.Equal(t, tickets.StatusInProgress, moved.Status)
+
+	_, err = f.sys.Update(f.ctx, user, work.ID, &tickets.TicketChange{Status: &discussion, Title: &title, IfStatus: &open})
+	require.ErrorIs(t, err, tickets.ErrStatusChanged)
+	got := f.get(work.ID)
+	assert.Equal(t, tickets.StatusInProgress, got.Status, "a refused change changes nothing")
+	assert.Equal(t, "conditional", got.Title)
+
+	a := f.agent("cas")
+	_, err = f.sys.Update(f.ctx, a, a.Ticket, &tickets.TicketChange{Status: &inProgress, IfStatus: &open})
+	require.ErrorIs(t, err, tickets.ErrStatusChanged, "a retried move under a stale condition is still refused")
 }
 
 // Every pair of statuses, through the implementation: each move the table

@@ -100,17 +100,56 @@ func (w *recordingWorktrees) Cleanup(_ context.Context, ticket ident.TicketID, w
 	return out
 }
 
+// racingTickets runs a test's hook just before the next status update the
+// manager makes, then reports how that update went.
+type racingTickets struct {
+	tickets.TicketingSystem
+	mu     sync.Mutex
+	before func()
+	result chan error
+}
+
+// arm makes the next status update run before first, and report on result.
+func (r *racingTickets) arm(before func()) <-chan error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.before, r.result = before, make(chan error, 1)
+	return r.result
+}
+
+func (r *racingTickets) Update(ctx context.Context, by ident.Principal, id ident.TicketID, change *tickets.TicketChange) (*tickets.Ticket, error) {
+	r.mu.Lock()
+	before, result := r.before, r.result
+	if change.Status != nil {
+		r.before, r.result = nil, nil
+	} else {
+		before, result = nil, nil
+	}
+	r.mu.Unlock()
+	if before != nil {
+		before()
+	}
+	t, err := r.TicketingSystem.Update(ctx, by, id, change)
+	if result != nil {
+		result <- err
+	}
+	return t, err
+}
+
 type fixture struct {
 	t       *testing.T
 	ctl     *fake.Controller
 	state   *state.State
 	tickets *local.System
-	clock   *clock.Fake
-	wts     *recordingWorktrees
-	cfg     *config.Config
-	paths   *paths.Paths
-	mgr     *agents.Manager
-	cursor  int64
+	// racing is the ticketing system the manager sees: tickets, with a hook
+	// that can land a write between the manager's read and its update.
+	racing *racingTickets
+	clock  *clock.Fake
+	wts    *recordingWorktrees
+	cfg    *config.Config
+	paths  *paths.Paths
+	mgr    *agents.Manager
+	cursor int64
 }
 
 func newFixture(t *testing.T, cfgYAML string) *fixture {
@@ -142,7 +181,7 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 	require.NoError(t, ts.Start(ctx, ""))
 	self, err := os.Executable()
 	require.NoError(t, err)
-	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, clock: clk, cfg: cfg, paths: p,
+	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, racing: &racingTickets{TicketingSystem: ts}, clock: clk, cfg: cfg, paths: p,
 		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}}
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -164,7 +203,7 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 
 func (f *fixture) newManager(h agents.Harnesses) *agents.Manager {
 	m, err := agents.New(&agents.Options{
-		Config: f.cfg, Paths: f.paths, State: f.state, Tickets: f.tickets, Harnesses: h,
+		Config: f.cfg, Paths: f.paths, State: f.state, Tickets: f.racing, Harnesses: h,
 		Worktrees: f.wts, User: "ada", Logger: slog.New(slog.NewTextHandler(testWriter{f.t}, nil)), Clock: f.clock, CLI: "/usr/bin/slop-bot",
 	})
 	require.NoError(f.t, err)
@@ -532,4 +571,37 @@ func TestCancellingATicketEndsItsAgentMidTurn(t *testing.T) {
 	// The turn never ends: the cancel cuts it off rather than waiting.
 	f.await(agents.EventFinished, nil)
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
+}
+
+func TestWalkingATicketForwardNeverUndoesAMoveMadeSince(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	tk := f.file("t", nil)
+	s := f.session()
+	f.user(s)
+	f.do(s, fake.Command{Cmd: fake.CmdTurnStart})
+	f.await(agents.EventState, toState(state.StateRefining))
+	a, err := f.state.Agents.LiveForTicket(context.Background(), tk.ID)
+	require.NoError(t, err)
+
+	// The user opens the ticket; the scheduler reads it as open and walks
+	// it on, but the agent parks it in discussion between that read and
+	// the scheduler's write.
+	discussion := tickets.StatusDiscussion
+	result := f.racing.arm(func() {
+		_, err := f.tickets.Update(context.Background(), ident.AgentPrincipal(a.ID, tk.ID), tk.ID, &tickets.TicketChange{Status: &discussion})
+		require.NoError(t, err)
+	})
+	open := tickets.StatusOpen
+	_, err = f.tickets.Update(context.Background(), ident.UserPrincipal(), tk.ID, &tickets.TicketChange{Status: &open})
+	require.NoError(t, err)
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, tickets.ErrStatusChanged)
+	case <-f.ctx().Done():
+		t.Fatal("the scheduler never walked the ticket forward")
+	}
+	got, err := f.tickets.Get(context.Background(), tk.ID)
+	require.NoError(t, err)
+	assert.Equal(t, tickets.StatusDiscussion, got.Status)
 }

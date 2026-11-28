@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -227,8 +228,17 @@ func (m *Manager) advanceTo(ctx context.Context, by ident.Principal, id ident.Ti
 		if next == t.Status || !tickets.CanTransition(t.Status, next) {
 			continue
 		}
-		st := next
-		if t, err = m.opts.Tickets.Update(ctx, by, id, &tickets.TicketChange{Status: &st}); err != nil {
+		// Each step is conditional on the status this walk saw: the read
+		// may be stale (the scheduler acts on feed events), and an
+		// unconditional write would undo a move made since, such as the
+		// agent parking the ticket in discussion.
+		st, seen := next, t.Status
+		t, err = m.opts.Tickets.Update(ctx, by, id, &tickets.TicketChange{Status: &st, IfStatus: &seen})
+		if errors.Is(err, tickets.ErrStatusChanged) {
+			m.opts.Logger.Debug("agents: a ticket moved while being walked forward; leaving it", "ticket", id, "to", next)
+			return
+		}
+		if err != nil {
 			m.opts.Logger.Warn("agents: moving a ticket", "ticket", id, "to", next, "err", err)
 			return
 		}
