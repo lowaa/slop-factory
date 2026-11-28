@@ -44,27 +44,38 @@ func ExecIfLauncher() {
 }
 
 func launch(target, socket string) error {
-	conn, err := net.Dial("unix", socket) // #nosec G704 -- the puppet's own socket, which the test passed in
-	if err != nil {
+	if err := reportPid(socket, os.Getpid()); err != nil {
 		return err
-	}
-	_, err = fmt.Fprintf(conn, "%d\n", os.Getpid())
-	if cerr := conn.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	env := make([]string, 0, len(os.Environ()))
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, envLaunchTarget+"=") && !strings.HasPrefix(kv, envLaunchSocket+"=") {
-			env = append(env, kv)
-		}
 	}
 	// argv[0] is the target's path: pi's launcher script finds its install
 	// from $0.
 	args := append([]string{target}, os.Args[1:]...)
-	return syscall.Exec(target, args, env) // #nosec G204 G702 -- the harness binary the test itself chose
+	return syscall.Exec(target, args, launchEnv(os.Environ())) // #nosec G204 G702 -- the harness binary the test itself chose
+}
+
+// reportPid tells the puppet's socket the pid the harness is about to have.
+func reportPid(socket string, pid int) error {
+	conn, err := net.Dial("unix", socket) // #nosec G704 -- the puppet's own socket, which the test passed in
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(conn, "%d\n", pid)
+	if cerr := conn.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// launchEnv is environ without the launcher's own variables, which the
+// harness has no use for and its children must not mistake for a launch.
+func launchEnv(environ []string) []string {
+	env := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		if !strings.HasPrefix(kv, envLaunchTarget+"=") && !strings.HasPrefix(kv, envLaunchSocket+"=") {
+			env = append(env, kv)
+		}
+	}
+	return env
 }
 
 // acceptLaunches passes each launcher's pid to Started, until the listener

@@ -148,69 +148,88 @@ func describeLimit(l *api.HarnessLimit) string {
 	return s + "\n"
 }
 
+// eventPayload is every field the watched events' payloads carry between
+// them; each event type reads its own.
+type eventPayload struct {
+	Tool        string    `json:"tool"`
+	Outcome     string    `json:"outcome"`
+	Text        string    `json:"text"`
+	Truncated   int       `json:"truncated"`
+	Input       int64     `json:"input_tokens"`
+	Output      int64     `json:"output_tokens"`
+	UsedPercent float64   `json:"used_percent"`
+	Window      string    `json:"window"`
+	ResetsAt    time.Time `json:"resets_at"`
+	From        string    `json:"from"`
+	To          string    `json:"to"`
+	Reason      string    `json:"reason"`
+	State       string    `json:"state"`
+	Ended       bool      `json:"ended"`
+}
+
 // describe is one watched event as a line for a person.
 func describe(ev *api.Event) string {
-	var p struct {
-		Tool        string    `json:"tool"`
-		Outcome     string    `json:"outcome"`
-		Text        string    `json:"text"`
-		Truncated   int       `json:"truncated"`
-		Input       int64     `json:"input_tokens"`
-		Output      int64     `json:"output_tokens"`
-		UsedPercent float64   `json:"used_percent"`
-		Window      string    `json:"window"`
-		ResetsAt    time.Time `json:"resets_at"`
-		From        string    `json:"from"`
-		To          string    `json:"to"`
-		Reason      string    `json:"reason"`
-		State       string    `json:"state"`
-		Ended       bool      `json:"ended"`
-	}
+	var p eventPayload
 	_ = json.Unmarshal(ev.Payload, &p)
-	var what string
-	switch ev.Type {
-	case api.WatchStarted:
-		what = fmt.Sprintf("watching %s (ticket %s), %s", ev.Agent, ev.Ticket, p.State)
-		if p.Ended {
-			what += ": it has ended; `slop-bot transcript " + ev.Agent + "` shows what it did"
-		}
-	case "harness.turn_started":
-		what = "turn started"
-	case "harness.turn_ended":
-		what = "turn ended: " + p.Outcome
-		if p.Text != "" {
-			what += ": " + p.Text
-		}
-	case "harness.tool_started":
-		what = "tool " + p.Tool
-	case "harness.tool_ended":
-		what = "tool done " + p.Tool
-	case "harness.text":
-		what = "text: " + strings.ReplaceAll(strings.TrimRight(p.Text, "\n"), "\n", "\n    ")
-		if p.Truncated > 0 {
-			what += fmt.Sprintf(" … (%d more bytes)", p.Truncated)
-		}
-	case "harness.usage":
-		what = fmt.Sprintf("usage: input %d, output %d", p.Input, p.Output)
-	case "harness.limit":
-		what = fmt.Sprintf("plan: %.0f%% used", p.UsedPercent)
-		if p.Window != "" {
-			what = fmt.Sprintf("plan %s: %.0f%% used", p.Window, p.UsedPercent)
-		}
-		if !p.ResetsAt.IsZero() {
-			what += ", resets " + p.ResetsAt.Local().Format("Jan 2 15:04")
-		}
-	case "agent.state":
-		what = fmt.Sprintf("state %s → %s", p.From, p.To)
-		if p.Reason != "" {
-			what += " (" + p.Reason + ")"
-		}
-	default:
-		what = strings.TrimPrefix(ev.Type, "agent.")
-	}
 	stamp := "--:--:--"
 	if !ev.At.IsZero() {
 		stamp = ev.At.Local().Format("15:04:05")
 	}
-	return fmt.Sprintf("[%s] %s\n", stamp, what)
+	return fmt.Sprintf("[%s] %s\n", stamp, describeEvent(ev, &p))
+}
+
+func describeEvent(ev *api.Event, p *eventPayload) string {
+	switch ev.Type {
+	case api.WatchStarted:
+		what := fmt.Sprintf("watching %s (ticket %s), %s", ev.Agent, ev.Ticket, p.State)
+		if p.Ended {
+			what += ": it has ended; `slop-bot transcript " + ev.Agent + "` shows what it did"
+		}
+		return what
+	case "harness.turn_started":
+		return "turn started"
+	case "harness.turn_ended":
+		what := "turn ended: " + p.Outcome
+		if p.Text != "" {
+			what += ": " + p.Text
+		}
+		return what
+	case "harness.tool_started":
+		return "tool " + p.Tool
+	case "harness.tool_ended":
+		return "tool done " + p.Tool
+	case "harness.text":
+		return describeText(p)
+	case "harness.usage":
+		return fmt.Sprintf("usage: input %d, output %d", p.Input, p.Output)
+	case "harness.limit":
+		return describeLimitEvent(p)
+	case "agent.state":
+		what := fmt.Sprintf("state %s → %s", p.From, p.To)
+		if p.Reason != "" {
+			what += " (" + p.Reason + ")"
+		}
+		return what
+	default:
+		return strings.TrimPrefix(ev.Type, "agent.")
+	}
+}
+
+func describeText(p *eventPayload) string {
+	what := "text: " + strings.ReplaceAll(strings.TrimRight(p.Text, "\n"), "\n", "\n    ")
+	if p.Truncated > 0 {
+		what += fmt.Sprintf(" … (%d more bytes)", p.Truncated)
+	}
+	return what
+}
+
+func describeLimitEvent(p *eventPayload) string {
+	what := fmt.Sprintf("plan: %.0f%% used", p.UsedPercent)
+	if p.Window != "" {
+		what = fmt.Sprintf("plan %s: %.0f%% used", p.Window, p.UsedPercent)
+	}
+	if !p.ResetsAt.IsZero() {
+		what += ", resets " + p.ResetsAt.Local().Format("Jan 2 15:04")
+	}
+	return what
 }
