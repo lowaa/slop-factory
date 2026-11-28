@@ -55,6 +55,10 @@ var (
 	// own nor one it filed that hasn't started.
 	ErrNotEditable = fmt.Errorf("%w: an agent may edit only its own ticket, "+
 		"or one it filed that is still preparing or open. To ask for a change, comment on it", ErrNotPermitted)
+	// ErrAutoMergeScopeLocked refuses an agent rewriting a ticket it filed
+	// that has AutoMerge.
+	ErrAutoMergeScopeLocked = fmt.Errorf("%w: an agent may not rewrite a ticket it filed that has AutoMerge. "+
+		"To change it, comment on it", ErrNotPermitted)
 	// ErrStatusNotPermitted refuses an agent moving the status of a ticket
 	// other than its own.
 	ErrStatusNotPermitted = fmt.Errorf("%w: an agent moves only its own ticket's status, "+
@@ -136,6 +140,11 @@ func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketCha
 	if !by.IsUser() && !AgentMayEdit(by, cur) {
 		return fmt.Errorf("%w (%s is %s)", ErrNotEditable, cur.ID, cur.Status)
 	}
+	// AutoMerge is granted against what a ticket says. A filer rewriting its
+	// filing afterwards would steer what merges without a person.
+	if !by.IsUser() && by.Ticket != cur.ID && cur.AutoMerge && changesScope(change) {
+		return fmt.Errorf("%w (%s)", ErrAutoMergeScopeLocked, cur.ID)
+	}
 	if change.Title != nil && strings.TrimSpace(*change.Title) == "" {
 		return fmt.Errorf("%w: a ticket needs a title", ErrInvalid)
 	}
@@ -162,6 +171,10 @@ func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketCha
 // any move. An agent moves its own ticket's, and may only cancel one it
 // filed: moving a filing on to open or in_progress itself would skip the
 // refinement another agent is meant to give it.
+func changesScope(c *TicketChange) bool {
+	return c.Title != nil || c.Body != nil || c.Repos != nil || c.Agent != nil
+}
+
 func checkStatusAuthority(by ident.Principal, cur *Ticket, to Status) error {
 	if by.IsUser() || to == cur.Status {
 		return nil

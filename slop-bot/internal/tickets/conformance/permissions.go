@@ -18,6 +18,36 @@ var permissionTests = []test{
 	{"Permissions/AgentsStartTheirTicketsPreparing", testAgentStartsPreparing},
 	{"Permissions/AgentOfAMissingTicket", testAgentOfAMissingTicket},
 	{"Permissions/AgentsMoveOnlyTheirOwnTicketsStatus", testAgentStatusAuthority},
+	{"Permissions/AFilingWithAutoMergeIsTheFilersNoMore", testAutoMergeLocksTheFilingsScope},
+}
+
+// The user accepts a filing and grants it AutoMerge, having read it: its
+// filer may not then rewrite it. The agent working it, and blockers, are
+// unaffected.
+func testAutoMergeLocksTheFilingsScope(t *testing.T, nb NewBackend) {
+	f := newFixture(t, nb)
+	a := f.agent("builder-1")
+	filed := f.filedBy(a, "follow-up")
+	_, err := f.sys.Update(f.ctx, user, filed.ID, &tickets.TicketChange{AutoMerge: ptr(true)})
+	require.NoError(t, err)
+
+	for name, change := range map[string]*tickets.TicketChange{
+		"title": {Title: ptr("bigger")}, "body": {Body: ptr("more")},
+		"repos": {Repos: &[]string{"elsewhere"}}, "agent": {Agent: &tickets.AgentSpec{Harness: "pi"}},
+	} {
+		_, err := f.sys.Update(f.ctx, a, filed.ID, change)
+		require.ErrorIs(t, err, tickets.ErrAutoMergeScopeLocked, name)
+	}
+	got := f.get(filed.ID)
+	assert.Equal(t, "follow-up", got.Title)
+	assert.Empty(t, got.Repos)
+
+	blocker := f.ticket("Blocker")
+	_, err = f.sys.AddBlocker(f.ctx, a, filed.ID, blocker.ID)
+	require.NoError(t, err, "it may still chain it")
+	refiner := ident.AgentPrincipal("builder-2", filed.ID)
+	_, err = f.sys.Update(f.ctx, refiner, filed.ID, &tickets.TicketChange{Body: ptr("refined")})
+	require.NoError(t, err, "the agent working it refines it")
 }
 
 // A filing is refined by the agent working it, not pushed on by its filer.
