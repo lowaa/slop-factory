@@ -10,11 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/cli"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/claudecode"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
 )
 
@@ -98,57 +96,31 @@ func assertGuarded(t *testing.T, server *scriptedmodel.Server) {
 	assert.Zero(t, server.Remaining())
 }
 
-func TestClaudeCodeMergeGuard(t *testing.T) {
-	t.Parallel()
-	optIn(t)
-	bin := binary(t, "claude")
+// guardTest runs the merge guard's script on one harness. Permissive is
+// --dangerously-skip-permissions for Claude Code: the hook's deny must hold
+// even there.
+func guardTest(t *testing.T, name string, target newTarget) {
+	t.Helper()
+	bin := binary(t, name)
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	require.NoError(t, server.Load(guardScript("Bash", func(cmd string) map[string]any {
-		return map[string]any{"command": cmd, "description": "run it"}
-	})))
 	ws, hook := guardWorkspace(t)
-	ws.APIKeyOptIn = true
-	for k, v := range map[string]string{
-		"CLAUDE_CONFIG_DIR": t.TempDir(), "ANTHROPIC_BASE_URL": server.URL(),
-		"DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
-		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
-	} {
-		ws.Env[k] = v
-	}
-	// Permissive is --dangerously-skip-permissions: the hook's deny must
-	// hold even there.
-	h := &claudecode.Harness{
-		Binary: bin, Logger: logger(), Clock: clock.Real{}, PreToolHook: hook,
-		Environ: environ(t.TempDir(), "ANTHROPIC_API_KEY=sk-ant-scripted-model-not-a-real-key"),
-	}
-	runGuardTurn(t, h, ws)
+	tg := target(t, &scripted.TargetOptions{Binary: bin, ServerURL: server.URL(), PreToolHook: hook})
+	require.NoError(t, server.Load(guardScript(tg.Shell.Tool, tg.Shell.Input)))
+	tg.Workspace(ws)
+	runGuardTurn(t, tg.Harness, ws)
 	assertGuarded(t, server)
+}
+
+func TestClaudeCodeMergeGuard(t *testing.T) {
+	t.Parallel()
+	optIn(t)
+	guardTest(t, "claude", scripted.ClaudeCode)
 }
 
 func TestPiMergeGuard(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	bin := binary(t, "pi")
-	server, err := scriptedmodel.New(nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = server.Close() })
-	require.NoError(t, server.Load(guardScript("bash", func(cmd string) map[string]any {
-		return map[string]any{"command": cmd}
-	})))
-	ws, hook := guardWorkspace(t)
-	ws.Model = "scripted/scripted-model-1"
-	for k, v := range map[string]string{
-		"SCRIPTED_MODEL_API_KEY": "scripted-model-not-a-real-key",
-		"PI_OFFLINE":             "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0",
-	} {
-		ws.Env[k] = v
-	}
-	h := &pi.Harness{
-		Binary: bin, Logger: logger(), Clock: clock.Real{}, PreToolHook: hook,
-		AgentDir: piAgentDir(t, server.URL()), Environ: environ(os.Getenv("HOME")),
-	}
-	runGuardTurn(t, h, ws)
-	assertGuarded(t, server)
+	guardTest(t, "pi", scripted.Pi)
 }

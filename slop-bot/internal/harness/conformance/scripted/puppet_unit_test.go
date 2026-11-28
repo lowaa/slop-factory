@@ -125,7 +125,7 @@ func TestReleaseGivesUpWhenNothingReadsTheFifo(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	assert.ErrorContains(t, long.release(ctx), "never read its FIFO")
+	assert.ErrorContains(t, long.Release(ctx), "never read its FIFO")
 }
 
 func TestUnblockFreesACommandStillReadingTheFifo(t *testing.T) {
@@ -140,7 +140,7 @@ func TestUnblockFreesACommandStillReadingTheFifo(t *testing.T) {
 	reader, err := os.OpenFile(long.fifo, os.O_RDONLY|unix.O_NONBLOCK, 0)
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
-	long.unblock()
+	long.Unblock()
 	buf := make([]byte, 64)
 	n, err := reader.Read(buf)
 	require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestUnblockWithNoReaderReturns(t *testing.T) {
 	_, err := p.LongTool(t.Context())
 	require.NoError(t, err)
 	_, long := p.current()
-	long.unblock()
+	long.Unblock()
 }
 
 func TestReceivedTellsMidTurnFromNewTurn(t *testing.T) {
