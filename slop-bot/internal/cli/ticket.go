@@ -316,7 +316,7 @@ func (a *app) ticketBlockCmd(add bool) *cobra.Command {
 func (a *app) ticketCancelCmd() *cobra.Command {
 	return agentCmd(&cobra.Command{
 		Use:   "cancel <id>",
-		Short: "Cancel a ticket (agents: your own, unless it is in discussion, or one you filed)",
+		Short: "Cancel a ticket (agents: their own, unless it is in discussion, or one they filed)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cancelled := "cancelled"
