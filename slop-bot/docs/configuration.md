@@ -38,7 +38,7 @@ Durations are Go duration strings: `15m`, `24h`, `720h`.
 | `repos[].path` | path | none | The repo's checkout on this machine. Required. |
 | `repos[].git_remote` | string | none | Accepted and kept, but nothing reads it yet (reserved for multi-machine use). |
 | `concurrency.max_active` | int | `4` | Agents in a turn at once, in the normal pool. At least 1. |
-| `concurrency.max_live` | int | the larger of `3 * max_active` and `max_active + urgent.max_active` | Cap on live harness processes, working or waiting. Must be at least `max_active + urgent.max_active`. |
+| `concurrency.max_live` | int | the larger of `3 * max_active` and `max_active + urgent.max_active` | Cap on live harness processes, working or waiting. At the cap, a start stops (parks) the longest-waiting idle agent, which is resumed when it next has work; see [slots](concepts.md#slots). Must be at least `max_active + urgent.max_active`. |
 | `concurrency.urgent.max_active` | int | `1` | Agents in a turn at once, in the urgent pool. At least 1. |
 | `autonomy.enabled` | bool | `false` | Whether tickets that agents file are worked without a person. `slop-bot autonomy on\|off` overrides it at runtime and persists. |
 | `autonomy.tickets_per_agent` | int | `10` | Budget of outstanding agent-filed tickets, per agent slot (`max_active + urgent.max_active`). At least 1. |
@@ -50,9 +50,12 @@ Durations are Go duration strings: `15m`, `24h`, `720h`.
 | `agents.nudges` | int | `3` | How many times an agent that stops without a reason is nudged before it is stalled. At least 1. |
 | `agents.stall_after` | duration | `15m` | How long a working agent may go without an event before it is stalled. |
 | `agents.attach_lease` | duration | `30s` | How long an attach outlives its CLI's last heartbeat. Past it, the agent is handed back. Across a daemon restart, the attached CLI has this long to reconnect. At least 1s. See [attach](concepts.md#attach-and-hand-back). |
-| `agents.ask_reminder_after` | duration | `24h` | Parsed and validated, but no code acts on it in this build: there is no ask reminder yet. |
+| `agents.ask_reminder_after` | duration | `24h` | How long an `ask` may go unanswered before you are reminded of it, once per ask, in your inbox. Not negative. |
 | `retention.transcripts` | duration | `720h` (30 days) | How long a retained transcript is kept after its agent ends. |
 | `retention.events` | duration | `720h` (30 days) | How long the event log keeps events. |
+| `retention.state_changes` | duration | `720h` (30 days) | How long agents' state history is kept. |
+| `retention.messages` | duration | `720h` (30 days) | How long a message is kept once delivered or read. Queued messages, and open asks, are kept however old. |
+| `retention.agents` | duration | `2160h` (90 days) | How long an ended agent's record is kept, with its worktree list and history. Keep it at least `retention.transcripts`, so a retained transcript can still be found by its ticket's id. An agent released to a person (`attach --no-resume`) is kept for good: its record keeps new agents off the ticket. So is one whose worktrees couldn't be cleaned up, until they are. |
 | `doctor.require` | list of strings | empty | Binaries your workflow needs on `PATH` (`gh`, linters). slop-bot doesn't use them, but its agents will; `doctor` fails when one is missing. Entries must not be blank. |
 
 If `harnesses` is empty, it holds just the default harness with all
@@ -114,6 +117,9 @@ agents:
 retention:
   transcripts: 720h
   events: 720h
+  state_changes: 720h
+  messages: 720h
+  agents: 2160h
 
 doctor:
   require: [gh]

@@ -33,6 +33,9 @@ func TestEmptyConfigGetsEveryDefault(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, c.Agents.StallAfter.D())
 	assert.Equal(t, 24*time.Hour, c.Agents.AskReminderAfter.D())
 	assert.Equal(t, 30*time.Second, c.Agents.AttachLease.D())
+	assert.Equal(t, 30*24*time.Hour, c.Retention.StateChanges.D())
+	assert.Equal(t, 30*24*time.Hour, c.Retention.Messages.D())
+	assert.Equal(t, 90*24*time.Hour, c.Retention.Agents.D(), "outlasts a retained transcript")
 	require.Contains(t, c.Harnesses, ClaudeCode)
 	assert.Equal(t, "stream-json", c.Harnesses[ClaudeCode].Driver)
 	assert.True(t, *c.Harnesses[ClaudeCode].Permissive)
@@ -58,7 +61,7 @@ harnesses:
   agy: {driver: tui, permissive: false, model: gemini-x}
   pi:
 agents: {nudges: 5, stall_after: 30m, ask_reminder_after: 2h, attach_lease: 1m}
-retention: {transcripts: 72h, events: 48h}
+retention: {transcripts: 72h, events: 48h, state_changes: 12h, messages: 6h, agents: 96h}
 doctor: {require: [gh, shellcheck]}
 `)
 	require.NoError(t, err)
@@ -79,6 +82,9 @@ doctor: {require: [gh, shellcheck]}
 	assert.Equal(t, 30*time.Minute, c.Agents.StallAfter.D())
 	assert.Equal(t, time.Minute, c.Agents.AttachLease.D())
 	assert.Equal(t, 48*time.Hour, c.Retention.Events.D())
+	assert.Equal(t, 12*time.Hour, c.Retention.StateChanges.D())
+	assert.Equal(t, 6*time.Hour, c.Retention.Messages.D())
+	assert.Equal(t, 96*time.Hour, c.Retention.Agents.D())
 }
 
 func TestInvalidConfigsNameTheField(t *testing.T) {
@@ -102,7 +108,10 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"limit over 100":        {"harnesses: {claude-code: {limit_threshold: 101}}\n", "harnesses.claude-code.limit_threshold: 101 isn't a percentage"},
 		"negative limit":        {"harnesses: {claude-code: {limit_threshold: -5}}\n", "limit_threshold: -5"},
 		"pi restricted":         {"default_harness: pi\nharnesses: {pi: {permissive: false}}\n", "harnesses.pi.permissive: pi has no permission prompts"},
-		"negative retention":    {"retention: {transcripts: -1h}\n", "retention: transcripts and events must be positive"},
+		"negative retention":    {"retention: {transcripts: -1h}\n", "retention.transcripts: -1h0m0s isn't a positive duration"},
+		"negative messages":     {"retention: {messages: -1h}\n", "retention.messages: -1h0m0s"},
+		"negative agents":       {"retention: {agents: -2h}\n", "retention.agents: -2h0m0s"},
+		"negative changes":      {"retention: {state_changes: -1m}\n", "retention.state_changes: -1m0s"},
 		"tiny attach lease":     {"agents: {attach_lease: 10ms}\n", "agents.attach_lease: 10ms is below 1s"},
 		"negative stall":        {"agents: {stall_after: -1m}\n", "stall_after and ask_reminder_after must not be negative"},
 	}

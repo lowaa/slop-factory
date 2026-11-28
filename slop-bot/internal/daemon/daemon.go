@@ -220,8 +220,8 @@ func (d *Daemon) archiveComponent(harnesses agents.Harnesses) lifecycle.Componen
 }
 
 // retentionSweep deletes what is past its retention, on the clock:
-// retained transcripts, and the event log, which holds some of what agents
-// said.
+// retained transcripts; the event log and delivered messages, which hold
+// some of what agents said; agents' state history; and ended agents.
 func (d *Daemon) retentionSweep() lifecycle.Component {
 	return &lifecycle.Periodic{
 		N: "retention sweep", Every: SweepEvery, Clock: d.opts.Clock, Logger: d.opts.Logger,
@@ -230,8 +230,13 @@ func (d *Daemon) retentionSweep() lifecycle.Component {
 }
 
 func (d *Daemon) sweep(ctx context.Context) error {
-	cutoff := d.opts.Clock.Now().Add(-d.opts.Config.Retention.Events.D())
-	_, err := d.state.Pruner.Prune(ctx, &state.PruneCutoffs{Events: cutoff})
+	now, r := d.opts.Clock.Now(), &d.opts.Config.Retention
+	_, err := d.state.Pruner.Prune(ctx, &state.PruneCutoffs{
+		Events:            now.Add(-r.Events.D()),
+		StateChanges:      now.Add(-r.StateChanges.D()),
+		DeliveredMessages: now.Add(-r.Messages.D()),
+		EndedAgents:       now.Add(-r.Agents.D()),
+	})
 	return errors.Join(d.archive.Sweep(ctx), err)
 }
 
