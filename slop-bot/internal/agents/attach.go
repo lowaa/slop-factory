@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -110,6 +112,10 @@ func (m *Manager) Attach(ctx context.Context, req *AttachRequest) (*Attachment, 
 		return nil, &state.LeaseHeldError{Holder: a.Lease.Holder, ExpiresAt: a.Lease.ExpiresAt}
 	}
 	r, ok := m.runner(a.ID)
+	if !ok && m.isParked(a.ID) {
+		return nil, fmt.Errorf("%w: agent %s is parked to free a process: `slop-bot tell` it to resume it, then attach",
+			ErrNoLiveAgent, a.ID)
+	}
 	if !ok {
 		return nil, fmt.Errorf("%w: agent %s isn't running", ErrNoLiveAgent, a.ID)
 	}
@@ -244,7 +250,7 @@ func (m *Manager) beginAttach(r *runner, a *state.Agent, holder string) error {
 	// An agent waiting for a slot gives up its place: attached, it holds a
 	// slot of its own, and left at the front it would stall its pool.
 	m.mu.Lock()
-	m.wantSlot = slices.DeleteFunc(m.wantSlot, func(id ident.AgentID) bool { return id == r.id })
+	m.dequeueLocked(r.id)
 	m.mu.Unlock()
 	return nil
 }
@@ -514,12 +520,17 @@ func (m *Manager) declare(ctx context.Context, r *runner, d declared, summary st
 	}
 }
 
-// sweeper runs sweepLeases on the clock until Stop.
-func (m *Manager) sweeper() {
+// sweepEvery is the sweeper's period: half the attach lease, so an
+// expired lease is handed back within half a lease of expiring.
+func (m *Manager) sweepEvery() time.Duration {
+	return max(m.opts.Config.Agents.AttachLease.D()/2, 1)
+}
+
+// sweeper runs sweepLeases and remindAsks on tick until Stop. The ticker is
+// made by Start, so time a test moves after Start is seen.
+func (m *Manager) sweeper(tick clock.Ticker) {
 	defer close(m.swept)
 	ctx := context.Background()
-	every := max(m.opts.Config.Agents.AttachLease.D()/2, 1)
-	tick := m.opts.Clock.NewTicker(every)
 	defer tick.Stop()
 	for {
 		select {
@@ -527,6 +538,7 @@ func (m *Manager) sweeper() {
 			return
 		case <-tick.C():
 			m.sweepLeases(ctx)
+			m.remindAsks(ctx)
 		}
 	}
 }

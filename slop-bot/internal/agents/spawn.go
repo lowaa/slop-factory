@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/agentspec"
 	"github.com/lowaa/slop-factory/slop-bot/internal/briefing"
@@ -238,13 +239,19 @@ type adoption struct {
 	decl      declared
 	summary   string
 	holdsSlot bool
+	// since is when the agent entered st; zero means now.
+	since time.Time
 }
 
 func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 	id := a.id
 	conv := a.conv
+	since := a.since
+	if since.IsZero() {
+		since = m.opts.Clock.Now()
+	}
 	r := &runner{m: m, id: id, ticket: a.ticket, harness: a.harness, pool: a.pool, conv: conv, caps: a.caps, st: a.st,
-		decl: a.decl, summary: a.summary, holdsSlot: a.holdsSlot, exited: make(chan struct{})}
+		since: since, decl: a.decl, summary: a.summary, holdsSlot: a.holdsSlot, exited: make(chan struct{})}
 	m.mu.Lock()
 	r.stopping = m.stopping
 	m.runners[id] = r
@@ -403,6 +410,12 @@ func (m *Manager) resumeAll(ctx context.Context) error {
 			m.endForTicket(ctx, a, nil, t.Status)
 		case a.ConversationID == "":
 			m.endRecord(ctx, a, state.StateReleased, "it never started a conversation to resume")
+		case a.ParkedAt != nil:
+			// Left stopped: it is resumed when it next has work, as if the
+			// daemon had never stopped.
+			m.mu.Lock()
+			m.parked[a.ID] = newParked(a)
+			m.mu.Unlock()
 		case a.State == state.StateCrashed || a.State == state.StateExited:
 			m.goStart(a.Ticket, a.Pool, false, func(ctx context.Context) { m.recover(ctx, a.ID) })
 		default:
@@ -452,16 +465,18 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error
 	if err != nil {
 		return err
 	}
-	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s, st: a.State})
+	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s, st: a.State, since: a.StateSince})
 	st, cutShort := resumedState(a.State)
 	r.setState(ctx, st, "resumed")
 	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
-	if cutShort || note == recoveredNote {
+	// An unparked agent (no note) was between turns: nothing was cut short.
+	if note != "" && (cutShort || note == recoveredNote) {
 		r.m.enqueueNotice(ctx, r, note)
 	}
 	m.sync(ctx, a.Ticket)
-	// Whatever was queued before the restart: an answer waiting for a slot,
-	// a nudge. The slot queue lived in memory, so this rebuilds it.
+	// Whatever was queued before the restart or while it was parked: an
+	// answer waiting for a slot, a nudge. It takes its place in the slot
+	// queue, kept in state.db.
 	m.deliverPending(ctx, r)
 	return nil
 }

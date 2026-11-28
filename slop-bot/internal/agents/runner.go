@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -41,8 +42,11 @@ type runner struct {
 	conv harness.Conversation
 	caps harness.Capabilities
 
-	mu      sync.Mutex
-	st      state.AgentState
+	mu sync.Mutex
+	st state.AgentState
+	// since is when the agent entered st: who has waited longest, for
+	// parking.
+	since   time.Time
 	inTurn  bool
 	decl    declared
 	summary string
@@ -67,6 +71,9 @@ type runner struct {
 	// holdsSlot carries an attached agent's slot into its first turn after
 	// the hand-back, so it can't lose it to new work in between.
 	holdsSlot bool
+	// parking is the agent being stopped to free a process: it takes no
+	// slot, and a message for it queues it to be resumed.
+	parking bool
 	// exited is closed when the conversation's events end.
 	exited chan struct{}
 }
@@ -116,6 +123,9 @@ func (r *runner) setState(ctx context.Context, to state.AgentState, reason strin
 	r.mu.Lock()
 	from := r.st
 	r.st = to
+	if from != to {
+		r.since = r.m.opts.Clock.Now()
+	}
 	r.mu.Unlock()
 	if from == to {
 		return
