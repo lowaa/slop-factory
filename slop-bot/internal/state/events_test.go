@@ -80,6 +80,24 @@ func TestReadAfterPagesInOrder(t *testing.T) {
 	assert.Equal(t, all, got)
 }
 
+// A limit of zero or less is the default page, not "none" and not "all".
+func TestReadAfterDefaultsANonPositiveLimit(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	for i := range state.DefaultEventLimit + 1 {
+		f.appendEvent(t, fmt.Sprint("e", i))
+	}
+	for _, limit := range []int{0, -1} {
+		evs, err := f.Events.ReadAfter(ctx, 0, limit)
+		require.NoError(t, err)
+		assert.Len(t, evs, state.DefaultEventLimit, "limit %d", limit)
+	}
+	evs, err := f.Events.ReadAfter(ctx, 0, 1)
+	require.NoError(t, err)
+	assert.Len(t, evs, 1)
+}
+
 func TestSeqIsNeverReusedAfterPruning(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

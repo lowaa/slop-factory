@@ -97,7 +97,7 @@ func TestExitStatusOfADeadPane(t *testing.T) {
 }
 
 // A lost wakeup (see WaitExit) mustn't hang the caller: each wait returns
-// by the recheck interval, live session or not.
+// by the recheck interval, through its own signal, live session or not.
 func TestWaitExitIsBounded(t *testing.T) {
 	t.Parallel()
 	ctx := ctxFor(t)

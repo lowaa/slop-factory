@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -48,18 +49,30 @@ type ExecCommands struct {
 	// Timeout bounds each probe, so a harness that hangs (waiting on a
 	// network, or a prompt) can't hang doctor.
 	Timeout time.Duration
-	// WaitDelay is how long to wait for a probe's pipes to close after it
-	// exits or is killed: a child it left behind can hold them open. Zero
-	// means defaultWaitDelay.
+	// WaitDelay is how long a child a probe left behind may hold its
+	// output open after the probe exits, before it is ended with the
+	// probe's group. Zero means defaultWaitDelay.
 	WaitDelay time.Duration
+	// GroupDelay is how long, once the group has been ended, its output may
+	// stay open before doctor stops reading it: only a child that left the
+	// group can hold it that long. Zero means defaultGroupDelay.
+	GroupDelay time.Duration
 }
 
 // LookPath is exec.LookPath.
 func (ExecCommands) LookPath(file string) (string, error) { return exec.LookPath(file) }
 
-const defaultWaitDelay = 2 * time.Second
+const (
+	defaultWaitDelay  = 2 * time.Second
+	defaultGroupDelay = 10 * time.Second
+)
 
 // Run runs c, killing it at the timeout.
+//
+// Its output is read from pipes doctor owns, not through exec.Cmd's
+// copying: that is cut off at WaitDelay, and what the probe wrote but the
+// copy hadn't yet read (under load, all of it) would be lost. Read here, it
+// is kept until the pipes close, as ending the group makes them (settle).
 func (e ExecCommands) Run(ctx context.Context, c *Command) (*service.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, e.Timeout)
 	defer cancel()
@@ -67,47 +80,183 @@ func (e ExecCommands) Run(ctx context.Context, c *Command) (*service.Result, err
 	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
 	inOwnGroup(cmd)
 	cmd.Env = c.Env
-	cmd.WaitDelay = e.WaitDelay
-	if cmd.WaitDelay == 0 {
-		cmd.WaitDelay = defaultWaitDelay
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if c.Done == nil {
-		cmd.Stdin = strings.NewReader(c.Input)
-		cmd.Stdout = &stdout
-		return result(ctx, cmd, c, &outcome{err: cmd.Run(), stdout: stdout.String(), stderr: stderr.String()})
-	}
-	stdin, err := cmd.StdinPipe()
+	// Still exec's own bound on its stdin copy, which a child can block.
+	cmd.WaitDelay = or(e.WaitDelay, defaultWaitDelay)
+	stdout, err := newCapture()
 	if err != nil {
 		return nil, err
 	}
-	out, err := cmd.StdoutPipe()
+	defer stdout.close()
+	stderr, err := newCapture()
 	if err != nil {
+		return nil, err
+	}
+	defer stderr.close()
+	cmd.Stdout, cmd.Stderr = stdout.w, stderr.w
+	var stdin io.WriteCloser
+	if c.Done == nil {
+		cmd.Stdin = strings.NewReader(c.Input)
+	} else if stdin, err = cmd.StdinPipe(); err != nil {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("doctor: running %s: %w", c.Path, err)
 	}
-	// A write error means it already exited; the scan then ends at EOF.
+	stdout.started()
+	stderr.started()
+	stderr.drain()
+	if c.Done == nil {
+		stdout.drain()
+		werr := cmd.Wait()
+		e.settle(cmd, stdout, stderr)
+		return result(ctx, cmd, c, &outcome{err: werr, stdout: stdout.buf.String(), stderr: stderr.buf.String()})
+	}
+	answered := make(chan struct{})
+	stdout.drainLines(c.Done, answered)
+	// A write error means it already exited; the drain then ends at EOF.
 	_, _ = io.WriteString(stdin, c.Input)
+	var werr error
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		werr = cmd.Wait()
+	}()
+	// Not only the end of stdout: a child can hold that open long after
+	// the probe has exited without answering.
+	select {
+	case <-answered:
+	case <-stdout.done:
+	case <-exited:
+	case <-ctx.Done():
+	}
+	// drainLines closes answered before done, so after either this is final.
 	done := false
-	sc := bufio.NewScanner(out)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	for sc.Scan() {
-		stdout.Write(sc.Bytes())
-		stdout.WriteByte('\n')
-		if done = c.Done(stdout.String()); done {
-			break
-		}
+	select {
+	case <-answered:
+		done = true
+	default:
 	}
 	// Closing stdin ends a well-behaved server; cancelling kills one that
-	// isn't. Wait reaps it on every path.
+	// isn't. Wait reaps it on every path, and settle bounds what its
+	// children hold, stdout too.
 	_ = stdin.Close()
 	if done {
 		cancel()
 	}
-	return result(ctx, cmd, c, &outcome{err: cmd.Wait(), stdout: stdout.String(), stderr: stderr.String(), answered: done})
+	<-exited
+	e.settle(cmd, stdout, stderr)
+	// An answer read after the probe exited still counts; drainLines has
+	// ended, so this is safe to read.
+	done = done || stdout.answered
+	return result(ctx, cmd, c, &outcome{err: werr, stdout: stdout.answer(), stderr: stderr.buf.String(), answered: done})
+}
+
+// settle waits, once the probe has exited, for its outputs to close. A
+// child still holding them gets WaitDelay, and is then ended with the
+// probe's group; what it wrote is kept, because the pipes close once the
+// group has gone. One that ignores the end, or left the group, can hold
+// them past that, so after GroupDelay the group is killed and they are
+// closed, and only that child's unread output is lost.
+func (e ExecCommands) settle(cmd *exec.Cmd, caps ...*capture) {
+	if drained(or(e.WaitDelay, defaultWaitDelay), caps) {
+		return
+	}
+	endGroup(cmd)
+	if drained(or(e.GroupDelay, defaultGroupDelay), caps) {
+		return
+	}
+	killGroup(cmd)
+	for _, c := range caps {
+		_ = c.r.Close()
+		<-c.done
+	}
+}
+
+// drained says whether every capture reached its end within d.
+func drained(d time.Duration, caps []*capture) bool {
+	bound := time.NewTimer(d)
+	defer bound.Stop()
+	for _, c := range caps {
+		select {
+		case <-c.done:
+		case <-bound.C:
+			return false
+		}
+	}
+	return true
+}
+
+func or(d, def time.Duration) time.Duration {
+	if d == 0 {
+		return def
+	}
+	return d
+}
+
+// capture is one of a probe's output streams, on a pipe of doctor's own.
+type capture struct {
+	r, w *os.File
+	buf  bytes.Buffer
+	// done closes once drain has read to the end; buf is then complete.
+	done chan struct{}
+	// ans is the output up to the answer, once drainLines saw one.
+	ans      string
+	answered bool
+}
+
+func newCapture() (*capture, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("doctor: making a pipe: %w", err)
+	}
+	return &capture{r: r, w: w, done: make(chan struct{})}, nil
+}
+
+// started drops doctor's copy of the write end, which the probe now has:
+// the pipe then ends when the probe and its children have closed it.
+func (c *capture) started() { _ = c.w.Close() }
+
+func (c *capture) drain() {
+	go func() {
+		defer close(c.done)
+		_, _ = io.Copy(&c.buf, c.r)
+	}()
+}
+
+// drainLines reads lines into buf until isAnswer reports buf holds the
+// answer, keeps that as the output and closes answered, then reads on to
+// the end, discarding the rest.
+func (c *capture) drainLines(isAnswer func(stdout string) bool, answered chan<- struct{}) {
+	go func() {
+		defer close(c.done)
+		sc := bufio.NewScanner(c.r)
+		sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		for sc.Scan() {
+			c.buf.Write(sc.Bytes())
+			c.buf.WriteByte('\n')
+			if isAnswer(c.buf.String()) {
+				c.ans = c.buf.String()
+				c.answered = true
+				close(answered)
+				break
+			}
+		}
+		_, _ = io.Copy(io.Discard, c.r)
+	}()
+}
+
+// answer is the output up to the answer, or all of it without one. Read it
+// once done is closed.
+func (c *capture) answer() string {
+	if c.answered {
+		return c.ans
+	}
+	return c.buf.String()
+}
+
+func (c *capture) close() {
+	_ = c.r.Close()
+	_ = c.w.Close()
 }
 
 // outcome is how a probe ended: Run's or Wait's error, what it printed,
@@ -122,8 +271,8 @@ func result(ctx context.Context, cmd *exec.Cmd, c *Command, o *outcome) (*servic
 	res := &service.Result{Stdout: o.stdout, Stderr: o.stderr}
 	err := o.err
 	if errors.Is(err, exec.ErrWaitDelay) {
-		// It exited 0 with its output complete, but left a child holding
-		// the pipes: that child is ended with its group, and the exit counts.
+		// It exited 0, but left a child holding its stdin: that child is
+		// ended with its group, and the exit counts.
 		endGroup(cmd)
 		err = nil
 	}

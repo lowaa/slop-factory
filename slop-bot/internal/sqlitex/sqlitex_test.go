@@ -2,6 +2,7 @@ package sqlitex_test
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"io/fs"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,6 +122,77 @@ func TestConcurrentWriteTransactionsQueueRatherThanFail(t *testing.T) {
 	for _, err := range errs {
 		require.NoError(t, err)
 	}
+}
+
+// A write transaction queues behind another here, rather than at SQLite's
+// lock, where under load it could wait out busy_timeout and fail.
+func TestAWriteTransactionQueuesBehindAnother(t *testing.T) {
+	t.Parallel()
+	db := sqlitextest.Open(t, migrations(t))
+	// A safety net, never a synchronisation.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	queued := make(chan struct{})
+	sqlitex.OnWriterWait(db, func() { close(queued) })
+
+	release, inFirst := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		first <- db.RunInTx(ctx, nil, func(ctx context.Context, tx bunTx) error {
+			if _, err := tx.NewRaw("INSERT INTO widgets (name) VALUES ('first')").Exec(ctx); err != nil {
+				return err
+			}
+			close(inFirst)
+			<-release
+			return nil
+		})
+	}()
+	<-inFirst
+	second := make(chan error, 1)
+	go func() {
+		second <- db.RunInTx(ctx, nil, func(ctx context.Context, tx bunTx) error {
+			_, err := tx.NewRaw("INSERT INTO widgets (name) VALUES ('second')").Exec(ctx)
+			return err
+		})
+	}()
+	select {
+	case <-queued:
+	case <-ctx.Done():
+		require.FailNow(t, "the second write never queued")
+	}
+	// A read-only transaction doesn't queue: it reads beside the writer.
+	require.NoError(t, db.RunInTx(ctx, &sql.TxOptions{ReadOnly: true}, func(ctx context.Context, tx bunTx) error {
+		var n int
+		return tx.NewRaw("SELECT count(*) FROM widgets").Scan(ctx, &n)
+	}))
+	close(release)
+	require.NoError(t, <-first)
+	require.NoError(t, <-second)
+	var names []string
+	require.NoError(t, db.NewRaw("SELECT name FROM widgets ORDER BY id").Scan(ctx, &names))
+	assert.Equal(t, []string{"first", "second"}, names)
+}
+
+func TestAQueuedWriteEndsWithItsContext(t *testing.T) {
+	t.Parallel()
+	db := sqlitextest.Open(t, migrations(t))
+	ctx := context.Background()
+	release, inFirst := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		first <- db.RunInTx(ctx, nil, func(context.Context, bunTx) error {
+			close(inFirst)
+			<-release
+			return nil
+		})
+	}()
+	<-inFirst
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	err := db.RunInTx(cancelled, nil, func(context.Context, bunTx) error { return nil })
+	require.ErrorIs(t, err, context.Canceled)
+	close(release)
+	require.NoError(t, <-first)
 }
 
 func TestOpenValidatesOptions(t *testing.T) {
