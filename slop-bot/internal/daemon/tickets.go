@@ -47,7 +47,11 @@ type ticketRoutes struct {
 	// budget.
 	budgetMu   sync.Mutex
 	budgetFull bool
-	tellUser   func(context.Context, string)
+	// filing counts agent filings that have passed the budget check and
+	// not yet been created: the store's count can't see them, so two
+	// filings at once would otherwise both take the last place.
+	filing   int
+	tellUser func(context.Context, string)
 }
 
 // errAgentLive refuses a spec change the running agent would never see.
@@ -145,9 +149,13 @@ func (tr *ticketRoutes) create(w http.ResponseWriter, r *http.Request) {
 		if in.Assign {
 			nt.Assignee = tr.user
 		}
-	} else if err := tr.agentFiling(r.Context(), nt); err != nil {
-		fail(w, err)
-		return
+	} else {
+		filed, err := tr.agentFiling(r.Context(), nt)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		defer filed()
 	}
 	t, err := tr.sys.Create(r.Context(), by, nt)
 	if err != nil {
@@ -161,29 +169,44 @@ func (tr *ticketRoutes) create(w http.ResponseWriter, r *http.Request) {
 // files: it counts against a budget that scales with the agent slots, and
 // it is assigned (and so worked) only when autonomy is on; otherwise it
 // waits, unassigned, in the review stream for the user.
-func (tr *ticketRoutes) agentFiling(ctx context.Context, nt *tickets.NewTicket) error {
+//
+// An admitted filing holds its budget place until filed is called, once
+// its create has returned: count and reservation are one step under
+// budgetMu, so filings at once can't overfill the budget. A filing that
+// has just been created is counted twice until then, which can refuse
+// another for that moment, never admit one too many.
+func (tr *ticketRoutes) agentFiling(ctx context.Context, nt *tickets.NewTicket) (filed func(), err error) {
+	tr.budgetMu.Lock()
 	n, err := tr.sys.CountOutstandingAgentCreated(ctx)
 	if err != nil {
-		return err
+		tr.budgetMu.Unlock()
+		return nil, err
 	}
+	n += tr.filing
 	budget := tr.cfg.AutonomyBudget()
-	tr.budgetMu.Lock()
 	full := n >= budget
 	tellNow := full && !tr.budgetFull
 	tr.budgetFull = full
+	if !full {
+		tr.filing++
+	}
 	tr.budgetMu.Unlock()
 	if tellNow && tr.tellUser != nil {
 		tr.tellUser(ctx, fmt.Sprintf("agents have filed %d outstanding tickets, the budget (%d per agent slot): further filings are refused until some finish",
 			n, tr.cfg.Autonomy.TicketsPerAgent))
 	}
 	if full {
-		return errBudget
+		return nil, errBudget
 	}
 	nt.Assignee = ""
 	if tr.autonomy != nil && tr.autonomy(ctx) {
 		nt.Assignee = tr.user
 	}
-	return nil
+	return func() {
+		tr.budgetMu.Lock()
+		defer tr.budgetMu.Unlock()
+		tr.filing--
+	}, nil
 }
 
 func (tr *ticketRoutes) list(w http.ResponseWriter, r *http.Request) {
