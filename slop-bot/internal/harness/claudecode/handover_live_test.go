@@ -41,7 +41,9 @@ func (s *screen) Write(p []byte) (int, error) {
 func (s *screen) text() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return ansi.ReplaceAllString(s.raw.String(), "")
+	// The TUI lays text out with cursor moves, so spacing is lost: match
+	// on the text with all whitespace removed.
+	return strings.Join(strings.Fields(ansi.ReplaceAllString(s.raw.String(), "")), "")
 }
 
 // until waits for the screen, from offset on, to match; it returns where
@@ -112,23 +114,23 @@ func TestLiveHandOverToTheTUIAndBack(t *testing.T) {
 		if i := strings.Index(s, "trust"); i >= 0 {
 			return i
 		}
-		return contains("bypass permissions on")(s)
+		return contains("bypasspermissionson")(s)
 	})
-	if !strings.Contains(scr.text(), "bypass permissions on") {
+	if !strings.Contains(scr.text(), "bypasspermissionson") {
 		typeIn("\x1b[B")
 		typeIn("\r")
-		at = scr.until(t, ctx, at, contains("bypass permissions on"))
+		at = scr.until(t, ctx, at, contains("bypasspermissionson"))
 	}
 
 	// The person works in the TUI, on the same conversation.
 	prompt := "What word did I ask you to remember? Reply with the word, then the number seven times six."
 	typeIn(prompt)
-	at = scr.until(t, ctx, at, contains("seven times six"))
+	at = scr.until(t, ctx, at, contains("seventimessix"))
 	typeIn("\r")
 	at = scr.until(t, ctx, at, contains("42"))
 	assert.Contains(t, strings.ToUpper(scr.text()), "KUMQUAT")
 	typeIn("Also remember the word FIG. Reply with just: DONE")
-	at = scr.until(t, ctx, at, contains("just: DONE"))
+	at = scr.until(t, ctx, at, contains("just:DONE"))
 	typeIn("\r")
 	scr.until(t, ctx, at, contains("DONE"))
 	typeIn("/exit")
