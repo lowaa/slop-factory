@@ -159,23 +159,21 @@ func TestCompare(t *testing.T) {
 		name         string
 		cur          *complexity.Snapshot
 		regressions  []string
+		warnings     []string
 		improvements int
 	}{
 		{name: "same", cur: snap(dist(3, 6, 12, 1), dist(2, 5, 18, 0))},
 		{name: "a mean rises within the tolerance", cur: snap(dist(3.1, 6, 12, 1), dist(2, 5, 18, 0))},
 		{
-			name:        "a mean rises past the tolerance",
-			cur:         snap(dist(3.11, 6, 12, 1), dist(2, 5, 18, 0)),
-			regressions: []string{"cyclomatic mean: 3.11, baseline 3.00"},
+			name:     "a mean past the tolerance only warns",
+			cur:      snap(dist(3.11, 6, 12, 1), dist(2, 5, 18, 0)),
+			warnings: []string{"cyclomatic mean: 3.11, baseline 3.00"},
 		},
 		{
-			name: "p90, max and the count rise",
-			cur:  snap(dist(3, 6, 12, 1), dist(2, 6, 19, 1)),
-			regressions: []string{
-				"cognitive p90: 6, baseline 5",
-				"cognitive max: 19, baseline 18",
-				"cognitive functions over 15: 1, baseline 0",
-			},
+			name:        "p90 and max warn; the over-threshold count regresses",
+			cur:         snap(dist(3, 6, 12, 1), dist(2, 6, 19, 1)),
+			regressions: []string{"cognitive functions over 15: 1, baseline 0"},
+			warnings:    []string{"cognitive p90: 6, baseline 5", "cognitive max: 19, baseline 18"},
 		},
 		{name: "everything falls", cur: snap(dist(2, 5, 11, 0), dist(1, 4, 17, 0)), improvements: 7},
 	}
@@ -184,6 +182,7 @@ func TestCompare(t *testing.T) {
 			t.Parallel()
 			res := m.Compare(base, tc.cur)
 			assert.Equal(t, tc.regressions, res.Regressions)
+			assert.Equal(t, tc.warnings, res.Warnings)
 			assert.Len(t, res.Improvements, tc.improvements, res.Improvements)
 		})
 	}

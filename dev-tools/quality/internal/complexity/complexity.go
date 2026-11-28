@@ -211,10 +211,11 @@ func distribution(values []int, threshold int) Distribution {
 	return d
 }
 
-// Compare implements ratchet.Metric: a mean rising more than
-// MeanTolerance regresses, and so does any rise in a p90, max or
-// over-threshold count. The function count and the longest list are
-// recorded, not gated: a module may grow.
+// Compare implements ratchet.Metric. Only a rise in the over-threshold
+// counts regresses. Mean, p90 and max are reported as warnings: in a module
+// that is growing, nearly every new function moves them, and the
+// per-function limit they would duplicate is already lint's gate (gocognit,
+// revive). The function count and the longest list are recorded only.
 func (m *Metric) Compare(base, cur *Snapshot) *ratchet.Result {
 	res := &ratchet.Result{}
 	compareDist(res, "cyclomatic", &base.Cyclomatic, &cur.Cyclomatic)
@@ -223,9 +224,12 @@ func (m *Metric) Compare(base, cur *Snapshot) *ratchet.Result {
 }
 
 func compareDist(res *ratchet.Result, name string, base, cur *Distribution) {
-	compareValue(res, name+" mean", base.Mean, cur.Mean, MeanTolerance, "%.2f")
-	compareValue(res, name+" p90", float64(base.P90), float64(cur.P90), 0, "%.0f")
-	compareValue(res, name+" max", float64(base.Max), float64(cur.Max), 0, "%.0f")
+	warn := &ratchet.Result{}
+	compareValue(warn, name+" mean", base.Mean, cur.Mean, MeanTolerance, "%.2f")
+	compareValue(warn, name+" p90", float64(base.P90), float64(cur.P90), 0, "%.0f")
+	compareValue(warn, name+" max", float64(base.Max), float64(cur.Max), 0, "%.0f")
+	res.Warnings = append(res.Warnings, warn.Regressions...)
+	res.Improvements = append(res.Improvements, warn.Improvements...)
 	compareValue(res, fmt.Sprintf("%s functions over %d", name, cur.Threshold),
 		float64(base.OverThreshold), float64(cur.OverThreshold), 0, "%.0f")
 }

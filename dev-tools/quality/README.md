@@ -46,7 +46,7 @@ replays in milliseconds (it is left out when test time isn't selected).
 | Measure | Baseline | Regresses when | Notes |
 | --- | --- | --- | --- |
 | coverage | `coverage.txt`: `<package> <percent>` lines, sorted, then `total <percent>` | a package or the total falls more than 0.1 points below its baseline; a package not in the baseline is under 80% | statement coverage, generated files (a `// Code generated ... DO NOT EDIT.` header) excluded |
-| complexity | `complexity.json` | the mean of cyclomatic or cognitive complexity rises more than 0.1; their p90 or max rises at all, or the count of functions over the threshold does | non-test, non-generated functions; thresholds cyclomatic 15, cognitive 20, as lint's |
+| complexity | `complexity.json` | the count of functions over the threshold rises. The mean (by more than 0.1), p90 and max only warn: in a growing module nearly every new function moves them, and the per-function limit is lint's gate | non-test, non-generated functions; thresholds cyclomatic 15, cognitive 20, as lint's |
 | testtime | `testtime.json` | never: report-only | warns when the wall time is over 50% (and over 1s) above the baseline |
 
 **Coverage.** Packages are named relative to the module (`.`,
