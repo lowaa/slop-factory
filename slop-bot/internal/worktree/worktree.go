@@ -223,8 +223,9 @@ func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) 
 	}
 	switch {
 	case reg != nil && reg.locked && reg.lockReason == lockInitializing:
-		return nil, fmt.Errorf("%w: %s: an earlier `git worktree add` was interrupted; clean it up with --force",
-			ErrBroken, wt.Path)
+		return nil, fmt.Errorf("%w: %s: an earlier `git worktree add` was interrupted; "+
+			"remove it by hand: `git -C %s worktree unlock %s && git -C %s worktree remove --force --force %s`",
+			ErrBroken, wt.Path, r.path, wt.Path, r.path, wt.Path)
 	case reg != nil && present:
 		if err := m.checkWorktree(ctx, r.path, wt.Path); err != nil {
 			return nil, err
@@ -235,8 +236,9 @@ func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) 
 	case reg != nil && reg.locked:
 		// Locked and missing is git's way of saying "on storage that isn't
 		// mounted": it may come back, so it isn't stale.
-		return nil, fmt.Errorf("%w: %s is locked (%s) but missing; remount it, or clean it up with --force",
-			ErrBroken, wt.Path, reg.lockReason)
+		return nil, fmt.Errorf("%w: %s is locked (%s) but missing; remount it, or drop its registration by hand: "+
+			"`git -C %s worktree unlock %s && git -C %s worktree prune`",
+			ErrBroken, wt.Path, reg.lockReason, r.path, wt.Path, r.path)
 	case reg != nil:
 		return m.recover(ctx, wt, reg)
 	case present:

@@ -104,6 +104,22 @@ func TestCleanupSafeguards(t *testing.T) {
 			kept: []ReasonKind{Unpushed},
 		},
 		{
+			// Not under slop-bot/t<ticket>/, so Cleanup won't delete it, but
+			// the user still has to hear their work is only local.
+			name: "agent-named branch with unpushed commits is kept",
+			arrange: func(f *fixture, wt *Worktree) {
+				f.run(wt.Path, "switch", "-q", "-c", "fix-ci")
+				f.commit(wt.Path, "work", "unpushed on fix-ci")
+			},
+			kept: []ReasonKind{Unpushed},
+		},
+		{
+			name: "agent-named branch with nothing to lose is removed",
+			arrange: func(f *fixture, wt *Worktree) {
+				f.run(wt.Path, "switch", "-q", "-c", "fix-ci")
+			},
+		},
+		{
 			name: "dirty and unpushed reports both",
 			arrange: func(f *fixture, wt *Worktree) {
 				f.commit(wt.Path, "work", "unpushed")
@@ -317,4 +333,24 @@ func TestForceCleanupRemovesWorkTheUserHasLookedAt(t *testing.T) {
 
 	// Again, with it all gone, is a no-op.
 	require.NoError(t, f.m.ForceCleanup(ctx, "10", next))
+}
+
+// The detached-HEAD rescue can refuse (its branch exists but moved); a forced
+// cleanup has already decided to discard the work, so it must not be blocked.
+func TestForceCleanupIsNotBlockedByTheDetachedRescue(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "a")
+	ctx := context.Background()
+	wt := f.create("11", []string{"a"}, "a")[0]
+	f.run(wt.Path, "switch", "-q", "--detach")
+	head := f.commit(wt.Path, "work", "detached")
+	f.run(wt.RepoPath, "branch", "slop-bot/t11/detached-"+head, "main")
+	require.NoError(t, os.RemoveAll(wt.Path))
+
+	r := f.m.Cleanup(ctx, "11", []*Worktree{wt})[0]
+	require.ErrorIs(t, r.Err, ErrUnsavedWork)
+
+	require.NoError(t, f.m.ForceCleanup(ctx, "11", wt))
+	assert.NotContains(t, f.run(wt.RepoPath, "worktree", "list"), wt.Path)
+	assert.False(t, f.branchExists("a", "slop-bot/t11/detached-"+head))
 }

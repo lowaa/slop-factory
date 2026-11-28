@@ -87,6 +87,11 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"max_live too small":   {"concurrency: {max_active: 4, max_live: 2}\n", "concurrency.max_live: 2 is below"},
 		"bad duration":         {"agents: {stall_after: soon}\n", `"soon" isn't a duration`},
 		"zero budget":          {"autonomy: {tickets_per_agent: -1}\n", "tickets_per_agent: must be at least 1"},
+		"negative stall":       {"agents: {stall_after: -1m}\n", "agents.stall_after: must not be negative"},
+		"negative retention":   {"retention: {events: -1h}\n", "retention.events: must not be negative"},
+		"repo name with slash": {"repos: [{name: org/app, path: /a}]\n", `repos[0].name: repo name "org/app"`},
+		"repo name with space": {"repos: [{name: 'my app', path: /a}]\n", `repo name "my app"`},
+		"repo name with dots":  {"repos: [{name: 'a..b', path: /a}]\n", `repo name "a..b"`},
 		"negative concurrency": {"concurrency: {max_active: -1}\n", "max_active and urgent.max_active must be at least 1"},
 	}
 	for name, tc := range cases {
@@ -109,4 +114,11 @@ func TestLoadReadsTheFile(t *testing.T) {
 
 	_, err = Load(filepath.Join(dir, "missing.yaml"), "/home/u")
 	assert.ErrorContains(t, err, "missing.yaml")
+}
+
+func TestDefaultMaxLiveCoversBothPools(t *testing.T) {
+	t.Parallel()
+	c, err := parse(t, "concurrency: {max_active: 1, urgent: {max_active: 5}}\n")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, c.Concurrency.MaxLive, c.Slots())
 }

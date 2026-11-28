@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -180,11 +181,13 @@ func (c *Config) applyDefaults(home string) {
 	if c.Concurrency.MaxActive == 0 {
 		c.Concurrency.MaxActive = 4
 	}
-	if c.Concurrency.MaxLive == 0 {
-		c.Concurrency.MaxLive = 3 * c.Concurrency.MaxActive
-	}
 	if c.Concurrency.Urgent.MaxActive == 0 {
 		c.Concurrency.Urgent.MaxActive = 1
+	}
+	if c.Concurrency.MaxLive == 0 {
+		// Never below the slots validate requires, so a user who only raised
+		// urgent.max_active isn't told off about a max_live they didn't set.
+		c.Concurrency.MaxLive = max(3*c.Concurrency.MaxActive, c.Slots())
 	}
 	if c.Autonomy.TicketsPerAgent == 0 {
 		c.Autonomy.TicketsPerAgent = 10
@@ -258,6 +261,23 @@ func absPath(p, dir, home string) (string, error) {
 	}
 }
 
+const maxRepoNameLen = 100
+
+// repoNameRe keeps a repo name usable as a path component and a git ref
+// component: the worktree directory is t<ticket>-<name>.
+var repoNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// ValidRepoName is the rule for repo names, shared with the worktree manager
+// so the config can't hold a name the manager always rejects. It lives here
+// because worktree imports config, not the other way round.
+func ValidRepoName(name string) error {
+	if len(name) > maxRepoNameLen || !repoNameRe.MatchString(name) || strings.Contains(name, "..") {
+		return fmt.Errorf("repo name %q: want letters, digits, '.', '_' and '-', at most %d characters",
+			name, maxRepoNameLen)
+	}
+	return nil
+}
+
 func (c *Config) validate() error {
 	var errs []error
 	add := func(format string, a ...any) { errs = append(errs, fmt.Errorf("config: "+format, a...)) }
@@ -276,16 +296,7 @@ func (c *Config) validate() error {
 	if c.Ticketing.System != "local" {
 		add("ticketing.system: %q isn't available (have: local)", c.Ticketing.System)
 	}
-	seen := map[string]bool{}
-	for i, r := range c.Repos {
-		if r.Name == "" {
-			add("repos[%d].name: is empty", i)
-		}
-		if seen[r.Name] {
-			add("repos[%d].name: %q is listed twice", i, r.Name)
-		}
-		seen[r.Name] = true
-	}
+	c.validateRepos(add)
 	if c.Concurrency.MaxActive < 1 || c.Concurrency.Urgent.MaxActive < 1 {
 		add("concurrency: max_active and urgent.max_active must be at least 1")
 	}
@@ -299,7 +310,41 @@ func (c *Config) validate() error {
 	if c.Agents.Nudges < 1 {
 		add("agents.nudges: must be at least 1")
 	}
+	c.validateDurations(add)
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateRepos(add func(format string, a ...any)) {
+	seen := map[string]bool{}
+	for i, r := range c.Repos {
+		if r.Name == "" {
+			add("repos[%d].name: is empty", i)
+		} else if err := ValidRepoName(r.Name); err != nil {
+			add("repos[%d].name: %v", i, err)
+		}
+		if seen[r.Name] {
+			add("repos[%d].name: %q is listed twice", i, r.Name)
+		}
+		seen[r.Name] = true
+	}
+}
+
+func (c *Config) validateDurations(add func(format string, a ...any)) {
+	// A negative stall_after would fire the runner's timer at once, forever.
+	// A slice, not a map, so the errors come in a stable order.
+	for _, d := range []struct {
+		name string
+		d    Duration
+	}{
+		{"agents.stall_after", c.Agents.StallAfter},
+		{"agents.ask_reminder_after", c.Agents.AskReminderAfter},
+		{"retention.transcripts", c.Retention.Transcripts},
+		{"retention.events", c.Retention.Events},
+	} {
+		if d.d < 0 {
+			add("%s: must not be negative", d.name)
+		}
+	}
 }
 
 // Slots is every agent slot, normal and urgent: what the autonomy budget

@@ -55,7 +55,8 @@ type CleanupResult struct {
 // Cleanup removes ticket's worktrees and their local slop-bot/t<ticket>/*
 // branches at the end of the ticket, keeping any that would lose work:
 //   - a worktree with uncommitted changes or untracked files;
-//   - a branch, or a detached HEAD, with commits that are on no remote
+//   - a ticket branch, the checked-out branch (whatever its name) or a
+//     detached HEAD, with commits that are on no remote
 //     (any remote-tracking ref) and not merged into the default branch;
 //   - a locked worktree.
 //
@@ -103,7 +104,7 @@ func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Wor
 		return false, nil, err
 	}
 	defer unlock()
-	st, err := m.inspect(ctx, ticket, wt)
+	st, err := m.inspect(ctx, ticket, wt, true)
 	if err != nil {
 		return false, nil, err
 	}
@@ -145,7 +146,7 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 }
 
 // ForceCleanup removes ticket's worktree and its branches whatever they
-// hold, for `slop-bot worktrees clean <t> --force` once the user has looked.
+// hold, for once the user has looked and decided to discard it.
 // That includes a locked one, one whose creation was interrupted, and one
 // whose .git link is gone. It still refuses a path that isn't this repo's
 // worktree.
@@ -158,7 +159,7 @@ func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *W
 		return err
 	}
 	defer unlock()
-	st, err := m.inspect(ctx, ticket, wt)
+	st, err := m.inspect(ctx, ticket, wt, false)
 	if err != nil {
 		return err
 	}
@@ -253,10 +254,12 @@ type state struct {
 
 // inspect finds wt's registration and the ticket's
 // branches. It errors on a path that exists but isn't this repo's worktree,
-// which is never touched. A deleted worktree's detached HEAD is saved to a
-// ticket branch, since its registration is all that holds those commits.
+// which is never touched. With rescueDetached, a deleted worktree's detached
+// HEAD is saved to a ticket branch, since its registration is all that holds
+// those commits; ForceCleanup skips that, as the rescue can refuse and the
+// user has already chosen to discard the work.
 // The caller has checked wt with owns and holds the repo's lock.
-func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktree) (*state, error) {
+func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktree, rescueDetached bool) (*state, error) {
 	st := &state{path: m.path(ticket, wt.Repo)}
 	var err error
 	if st.reg, err = m.registration(ctx, wt.RepoPath, st.path); err != nil {
@@ -268,7 +271,7 @@ func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktr
 	if st.reg == nil && st.present {
 		return nil, fmt.Errorf("worktree: %w: %s isn't a worktree of %s", ErrCollision, st.path, wt.RepoPath)
 	}
-	if st.reg != nil && !st.present && st.reg.detached {
+	if rescueDetached && st.reg != nil && !st.present && st.reg.detached {
 		if err := m.rescue(ctx, wt.RepoPath, ticket, st.reg.head); err != nil {
 			return nil, err
 		}
@@ -327,8 +330,8 @@ func (m *Manager) unpushed(ctx context.Context, repoPath string, st *state) ([]R
 	for _, b := range st.branches {
 		tips = append(tips, tip{b.oid, "branch " + strings.TrimPrefix(b.ref, "refs/heads/")})
 	}
-	if st.reg != nil && st.present && st.reg.detached && st.reg.head != "" {
-		tips = append(tips, tip{st.reg.head, "detached HEAD " + st.reg.head})
+	if t, ok := checkedOutTip(st); ok {
+		tips = append(tips, tip(t))
 	}
 	var reasons []Reason
 	for _, t := range tips {
@@ -344,6 +347,30 @@ func (m *Manager) unpushed(ctx context.Context, repoPath string, st *state) ([]R
 		}
 	}
 	return reasons, nil
+}
+
+type headTip struct{ oid, what string }
+
+// checkedOutTip is what the worktree has checked out, if nothing in
+// st.branches already covers it: a detached HEAD, or a branch an agent named
+// itself (outside slop-bot/t<ticket>/), which Cleanup leaves in the repo but
+// whose unpushed commits the user should still hear about.
+func checkedOutTip(st *state) (headTip, bool) {
+	if st.reg == nil || !st.present || st.reg.head == "" {
+		return headTip{}, false
+	}
+	if st.reg.detached {
+		return headTip{st.reg.head, "detached HEAD " + st.reg.head}, true
+	}
+	if st.reg.branch == "" {
+		return headTip{}, false
+	}
+	for _, b := range st.branches {
+		if b.ref == "refs/heads/"+st.reg.branch {
+			return headTip{}, false
+		}
+	}
+	return headTip{st.reg.head, "branch " + st.reg.branch}, true
 }
 
 // deleteBranches deletes each branch only if it still points where inspect

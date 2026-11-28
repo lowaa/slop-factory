@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
@@ -19,7 +20,6 @@ const FirstBranch = "work"
 
 const (
 	maxTicketLen = 64
-	maxRepoLen   = 100
 	maxLeafLen   = 100
 )
 
@@ -28,7 +28,6 @@ var (
 	// ticket would make t1-a-b both ticket "1" repo "a-b" and ticket "1-a"
 	// repo "b". No '.' either, so the id is always a safe ref component.
 	ticketRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_]*$`)
-	repoRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	leafRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
 
@@ -42,9 +41,8 @@ func validTicket(t ident.TicketID) error {
 }
 
 func validRepo(name string) error {
-	if len(name) > maxRepoLen || !repoRe.MatchString(name) || strings.Contains(name, "..") {
-		return fmt.Errorf("%w: repo name %q: want letters, digits, '.', '_' and '-', at most %d characters",
-			ErrInvalidName, name, maxRepoLen)
+	if err := config.ValidRepoName(name); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidName, err)
 	}
 	return nil
 }
