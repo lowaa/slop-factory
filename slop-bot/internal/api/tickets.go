@@ -28,6 +28,15 @@ type AgentSpec struct {
 	Effort  string `json:"effort,omitempty"`
 }
 
+// AgentSpecChange is an edit to a ticket's AgentSpec: only the fields given
+// change, so setting one doesn't blank the others. An empty string given
+// clears the field back to the configured default.
+type AgentSpecChange struct {
+	Harness *string `json:"harness,omitempty"`
+	Model   *string `json:"model,omitempty"`
+	Effort  *string `json:"effort,omitempty"`
+}
+
 // TicketRef is the other end of a blocker.
 type TicketRef struct {
 	ID     string `json:"id"`
@@ -97,14 +106,14 @@ type NewTicket struct {
 
 // TicketChange is PATCH /v1/tickets/{id}; absent fields are left alone.
 type TicketChange struct {
-	Title        *string    `json:"title,omitempty"`
-	Body         *string    `json:"body,omitempty"`
-	Status       *string    `json:"status,omitempty"`
-	Agent        *AgentSpec `json:"agent,omitempty"`
-	AutoMerge    *bool      `json:"auto_merge,omitempty"`
-	Urgent       *bool      `json:"urgent,omitempty"`
-	UrgentReason string     `json:"urgent_reason,omitempty"`
-	Repos        *[]string  `json:"repos,omitempty"`
+	Title        *string          `json:"title,omitempty"`
+	Body         *string          `json:"body,omitempty"`
+	Status       *string          `json:"status,omitempty"`
+	Agent        *AgentSpecChange `json:"agent,omitempty"`
+	AutoMerge    *bool            `json:"auto_merge,omitempty"`
+	Urgent       *bool            `json:"urgent,omitempty"`
+	UrgentReason string           `json:"urgent_reason,omitempty"`
+	Repos        *[]string        `json:"repos,omitempty"`
 }
 
 // Assign is POST /v1/tickets/{id}/assign. A blank Assignee unassigns; "me"

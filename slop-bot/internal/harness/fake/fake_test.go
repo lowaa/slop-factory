@@ -2,185 +2,131 @@ package fake_test
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake/faketest"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 )
 
-// The test binary doubles as the fake harness: re-run with this variable
-// set, it is fakeharness. No separate build step, and nothing to go stale.
-const reexec = "SLOP_BOT_FAKE_REEXEC"
-
-func TestMain(m *testing.M) {
-	if os.Getenv(reexec) == "1" {
-		os.Exit(fake.Main(os.Args[1:], os.Stdin, os.Stdout, os.Getenv))
-	}
-	os.Exit(m.Run())
-}
-
-// puppet drives a fake through its controller. One subject runs one
-// conversation at a time (resume is sequential), so the current session is
-// the latest started.
-type puppet struct {
-	ctl *fake.Controller
-	mu  sync.Mutex
-	cur *fake.Session
-}
-
-func (p *puppet) session() *fake.Session {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.cur
-}
-
-func (p *puppet) Started(ctx context.Context) (string, bool, error) {
-	s, err := p.ctl.Next(ctx)
-	if err != nil {
-		return "", false, err
-	}
-	p.mu.Lock()
-	p.cur = s
-	p.mu.Unlock()
-	return s.ID, s.Resumed, nil
-}
-
-// Reply: the fake doesn't act on messages by itself under a controller, so
-// the reply is scripted once the message has arrived (Received consumes it).
-func (p *puppet) Reply(ctx context.Context, text string) error {
-	go func() {
-		s := p.session()
-		r, err := s.Expect(ctx, fake.RepUser)
-		if err != nil {
-			return
-		}
-		pendingUser.Store(s, r)
-		for _, c := range []fake.Command{{Cmd: fake.CmdTurnStart}, {Cmd: fake.CmdText, Text: text}, {Cmd: fake.CmdTurnEnd}} {
-			if _, err := s.Do(ctx, c); err != nil {
-				return
-			}
-		}
-	}()
-	return nil
-}
-
-func (p *puppet) LongTool(ctx context.Context) (func(context.Context) error, error) {
-	s := p.session()
-	started := make(chan error, 1)
-	go func() {
-		r, err := s.Expect(ctx, fake.RepUser)
-		if err == nil {
-			pendingUser.Store(s, r)
-			_, err = s.Do(ctx, fake.Command{Cmd: fake.CmdTurnStart})
-		}
-		if err == nil {
-			_, err = s.Do(ctx, fake.Command{Cmd: fake.CmdToolStart, Tool: "shell"})
-		}
-		started <- err
-	}()
-	return func(ctx context.Context) error {
-		if _, err := s.Do(ctx, fake.Command{Cmd: fake.CmdToolEnd, Tool: "shell"}); err != nil {
-			return err
-		}
-		_, err := s.Do(ctx, fake.Command{Cmd: fake.CmdTurnEnd})
-		return err
-	}, nil
-}
-
-// pendingUser holds a user report a script goroutine consumed, so Received
-// can check it.
-var pendingUser sync.Map
-
-func (p *puppet) Received(ctx context.Context, text string, midTurn bool) error {
-	s := p.session()
-	if v, ok := pendingUser.LoadAndDelete(s); ok && v.(*fake.Report).Text == text {
-		return check(v.(*fake.Report), text, midTurn)
-	}
-	r, err := s.Expect(ctx, fake.RepUser)
-	if err != nil {
-		return err
-	}
-	return check(r, text, midTurn)
-}
-
-func check(r *fake.Report, text string, midTurn bool) error {
-	if r.Text != text || r.MidTurn != midTurn {
-		return fmt.Errorf("received %q (mid-turn %v), want %q (mid-turn %v)", r.Text, r.MidTurn, text, midTurn)
-	}
-	return nil
-}
-
-func (p *puppet) Interrupted(ctx context.Context) error {
-	_, err := p.session().Expect(ctx, fake.RepInterrupt)
-	return err
-}
-
-func (p *puppet) Crash(ctx context.Context) error {
-	_, err := p.session().Do(ctx, fake.Command{Cmd: fake.CmdExit, Code: 3})
-	return err
-}
-
-func subject(t *testing.T) *conformance.Subject {
-	ctl, err := fake.NewController()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ctl.Close() })
-	self, err := os.Executable()
-	require.NoError(t, err)
-	h := &fake.Harness{Binary: self, Control: ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}
-	return &conformance.Subject{
-		Harness: h,
-		Workspace: func(t *testing.T) *harness.Workspace {
-			return &harness.Workspace{Agent: "a1", Ticket: "7", Dir: t.TempDir(), Env: map[string]string{reexec: "1", "GORACE": "atexit_sleep_ms=0"}}
-		},
-		Puppet:  &puppet{ctl: ctl},
-		Timeout: 20 * time.Second,
-	}
-}
+func TestMain(m *testing.M) { faketest.Main(m) }
 
 func TestConformance(t *testing.T) {
 	t.Parallel()
-	conformance.Run(t, subject)
+	conformance.Run(t, faketest.RPCSubject)
+}
+
+// The same suite as fake/rpc: the proof that the core can't tell the two
+// kits apart.
+func TestConformanceTUI(t *testing.T) {
+	t.Parallel()
+	conformance.Run(t, faketest.TUISubject)
 }
 
 // A graceful Stop right after an idle Send must wait for the turn that Send
 // started, even though the harness hasn't reported it yet.
 func TestStopRightAfterSendWaitsForThatTurn(t *testing.T) {
 	t.Parallel()
-	s := subject(t)
+	for name, subject := range map[string]func(*testing.T) *conformance.Subject{
+		"rpc": faketest.RPCSubject,
+		"tui": faketest.TUISubject,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s := subject(t)
+			ctx, cancel := context.WithTimeout(context.Background(), faketest.Timeout)
+			defer cancel()
+			conv, err := s.Harness.Start(ctx, s.Workspace(t), nil)
+			require.NoError(t, err)
+			defer func() { _ = conv.Stop(context.Background(), true) }()
+			p := s.Puppet.(*faketest.Puppet)
+			_, _, err = p.Started(ctx)
+			require.NoError(t, err)
+
+			require.NoError(t, conv.Send(ctx, &harness.Message{Text: "work"}))
+			stopped := make(chan error, 1)
+			go func() { stopped <- conv.Stop(ctx, false) }()
+
+			// The fake hasn't started the turn yet; Stop must still be waiting.
+			sess := p.Session()
+			_, err = sess.Await(ctx, fake.RepUser)
+			require.NoError(t, err)
+			select {
+			case err := <-stopped:
+				require.Failf(t, "stop didn't wait", "returned %v before the turn ran", err)
+			default:
+			}
+			for _, c := range []fake.Command{{Cmd: fake.CmdTurnStart}, {Cmd: fake.CmdTurnEnd}} {
+				_, err := sess.Do(ctx, c)
+				require.NoError(t, err)
+			}
+			require.NoError(t, <-stopped)
+		})
+	}
+}
+
+// The fake keeps a transcript of what it did, in the normalised format,
+// and reports limits as a harness does: what the daemon's transcript and
+// limit paths are tested with.
+func TestTheFakeKeepsATranscriptAndReportsLimits(t *testing.T) {
+	t.Parallel()
+	s := faketest.RPCSubject(t)
+	h := s.Harness.(*fake.Harness)
+	h.TranscriptDir = t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	conv, err := s.Harness.Start(ctx, s.Workspace(t), nil)
+	conv, err := h.Start(ctx, s.Workspace(t), nil)
 	require.NoError(t, err)
 	defer func() { _ = conv.Stop(context.Background(), true) }()
-	p := s.Puppet.(*puppet)
+	p := s.Puppet.(*faketest.Puppet)
 	_, _, err = p.Started(ctx)
 	require.NoError(t, err)
+	sess := p.Session()
 
-	require.NoError(t, conv.Send(ctx, &harness.Message{Text: "work"}))
-	stopped := make(chan error, 1)
-	go func() { stopped <- conv.Stop(ctx, false) }()
-
-	// The fake hasn't started the turn yet; Stop must still be waiting.
-	sess := p.session()
+	require.NoError(t, conv.Send(ctx, &harness.Message{Text: "list it"}))
 	_, err = sess.Expect(ctx, fake.RepUser)
 	require.NoError(t, err)
-	select {
-	case err := <-stopped:
-		require.Failf(t, "stop didn't wait", "returned %v before the turn ran", err)
-	default:
-	}
-	for _, c := range []fake.Command{{Cmd: fake.CmdTurnStart}, {Cmd: fake.CmdTurnEnd}} {
+	resets := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
+	for _, c := range []fake.Command{
+		{Cmd: fake.CmdTurnStart}, {Cmd: fake.CmdToolStart, Tool: "shell", Text: "ls"}, {Cmd: fake.CmdToolEnd, Tool: "shell", Text: "a.txt"},
+		{Cmd: fake.CmdText, Text: "one file"}, {Cmd: fake.CmdLimit, Window: "five_hour", Used: 97.5, ResetsAt: resets.Unix()}, {Cmd: fake.CmdTurnEnd},
+	} {
 		_, err := sess.Do(ctx, c)
 		require.NoError(t, err)
 	}
-	require.NoError(t, <-stopped)
+	var limit *harness.Limit
+	for ev := range conv.Events() {
+		if ev.Kind == harness.LimitReport {
+			limit = ev.Limit
+		}
+		if ev.Kind == harness.TurnEnded {
+			break
+		}
+	}
+	assert.Equal(t, &harness.Limit{Window: "five_hour", UsedPercent: 97.5, ResetsAt: resets}, limit)
+
+	r := h.Transcripts()
+	path, err := r.Locate(conv.Ref().ID)
+	require.NoError(t, err)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	entries, err := r.Parse(data)
+	require.NoError(t, err)
+	for i := range entries {
+		assert.False(t, entries[i].At.IsZero())
+		entries[i].At = time.Time{}
+	}
+	assert.Equal(t, []transcript.Entry{
+		{Kind: transcript.User, Text: "list it"},
+		{Kind: transcript.ToolCall, Tool: "shell", CallID: "call-1", Text: "ls"},
+		{Kind: transcript.ToolResult, Tool: "shell", CallID: "call-1", Text: "a.txt"},
+		{Kind: transcript.Assistant, Text: "one file"},
+	}, entries)
 }

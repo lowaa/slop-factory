@@ -20,7 +20,36 @@ const (
 	PathStatus       = "/v1/status"
 	PathEvents       = "/v1/events"
 	PathAutonomy     = "/v1/autonomy"
+	// PathTranscript streams an agent's transcript as transcript.Entry JSON
+	// lines: ?tail=N, ?since=<RFC 3339>, ?full (untruncated), ?follow.
+	PathTranscript = "/v1/transcript/{target}"
+	// PathWatch streams an agent's conversation events as Event JSON lines.
+	PathWatch = "/v1/watch/{target}"
 )
+
+// WatchStarted is the first event of a watch: whom it is watching. Its
+// payload is a WatchTarget.
+const WatchStarted = "watch.started"
+
+// WatchTarget is WatchStarted's payload.
+type WatchTarget struct {
+	State string `json:"state"`
+	Ended bool   `json:"ended,omitempty"`
+}
+
+// HarnessLimit is one of a harness's plan windows in GET /v1/status.
+type HarnessLimit struct {
+	Harness string `json:"harness"`
+	// Window is which of the plan's windows; "" for a harness with one.
+	Window      string    `json:"window,omitempty"`
+	UsedPercent float64   `json:"used_percent"`
+	ResetsAt    time.Time `json:"resets_at,omitzero"`
+	ReportedAt  time.Time `json:"reported_at"`
+	Threshold   float64   `json:"threshold"`
+	// Held means the window is at the threshold: no new agent starts on
+	// the harness until it resets.
+	Held bool `json:"held,omitempty"`
+}
 
 // Tell is POST /v1/tell.
 type Tell struct {
@@ -111,9 +140,8 @@ type Status struct {
 	Budget      int         `json:"budget"`
 	Outstanding int         `json:"outstanding"`
 	Pools       []PoolUsage `json:"pools,omitempty"`
-	// Allowances are plan allowances per harness; empty until the daemon
-	// tracks them.
-	Allowances []Allowance `json:"allowances,omitempty"`
+	// Limits are the harnesses' plan allowances, as last reported.
+	Limits []HarnessLimit `json:"limits"`
 }
 
 // PoolUsage is how many of a pool's slots are in a turn.
@@ -121,13 +149,6 @@ type PoolUsage struct {
 	Pool   string `json:"pool"`
 	Active int    `json:"active"`
 	Max    int    `json:"max"`
-}
-
-// Allowance is a harness's plan allowance.
-type Allowance struct {
-	Harness     string    `json:"harness"`
-	UsedPercent float64   `json:"used_percent"`
-	ResetsAt    time.Time `json:"resets_at,omitzero"`
 }
 
 // Event is one entry of GET /v1/events.

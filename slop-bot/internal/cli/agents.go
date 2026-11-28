@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +18,8 @@ import (
 func (a *app) agentCmds() []*cobra.Command {
 	return []*cobra.Command{
 		a.tellCmd(), a.inboxCmd(), a.askCmd(), a.asksCmd(), a.discussCmd(), a.discussionsCmd(),
-		a.readyToMergeCmd(), a.doneCmd(), a.statusCmd(), a.eventsCmd(), a.autonomyCmd(),
+		a.readyToMergeCmd(), a.doneCmd(), a.statusCmd(), a.eventsCmd(), a.autonomyCmd(), a.transcriptCmd(), a.watchCmd(),
+		a.attachCmd(), a.detachCmd(),
 	}
 }
 
@@ -104,46 +103,54 @@ func (a *app) printInbox(cmd *cobra.Command, path string, asJSON, sayEmpty bool)
 		return err
 	}
 	for _, m := range msgs {
-		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), m.From, m.Kind, m.Body); err != nil {
+		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), sender(&m), m.Kind, m.Body); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// sender names who a message is from: slop-bot's own system and nudge
+// messages are recorded as from the user.
+func sender(m *api.Message) string {
+	if m.Kind == "system" || m.Kind == "nudge" {
+		return "slop-bot"
+	}
+	return m.From
+}
+
 // followInbox prints new messages as they arrive. It waits on the daemon's
 // event log, from now, and re-reads the inbox when a message is queued,
 // rather than polling.
 func (a *app) followInbox(cmd *cobra.Command, asJSON bool) error {
-	if err := a.printInbox(cmd, api.PathInbox, asJSON, false); err != nil {
-		return err
-	}
 	c, err := a.client()
 	if err != nil {
 		return err
 	}
 	body, err := c.Stream(cmd.Context(), api.PathEvents+"?follow&after=now")
 	if err != nil {
+		// Interrupted while connecting: a stop, as it is once streaming.
+		if cmd.Context().Err() != nil {
+			return nil
+		}
 		return err
 	}
 	defer func() { _ = body.Close() }()
-	sc := bufio.NewScanner(body)
-	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
-	for sc.Scan() {
-		var ev api.Event
-		if json.Unmarshal(sc.Bytes(), &ev) != nil {
-			continue
-		}
-		if ev.Type == "message.queued" || ev.Type == "user.told" || ev.Type == "agent.asked" {
-			if err := a.printInbox(cmd, api.PathInbox, asJSON, false); err != nil {
-				return err
-			}
-		}
+	// "now" is fixed once the stream is open, so a message queued before it
+	// is in this read and one queued after it arrives as an event.
+	if err := a.printInbox(cmd, api.PathInbox, asJSON, false); err != nil {
+		return err
 	}
+	err = eachEvent(body, func(ev *api.Event) error {
+		if ev.Type == "message.queued" || ev.Type == "user.told" || ev.Type == "agent.asked" {
+			return a.printInbox(cmd, api.PathInbox, asJSON, false)
+		}
+		return nil
+	})
 	if cmd.Context().Err() != nil {
 		return nil
 	}
-	return sc.Err()
+	return err
 }
 
 func (a *app) askCmd() *cobra.Command {
@@ -161,7 +168,7 @@ func (a *app) askCmd() *cobra.Command {
 			return a.printOK(cmd, "asked. Carry on with what doesn't depend on the answer, then end your turn: the answer arrives as a message.")
 		},
 	}
-	c.Flags().StringSliceVar(&in.Options, "option", nil, "a choice; repeat")
+	c.Flags().StringArrayVar(&in.Options, "option", nil, "a choice; repeat")
 	c.Flags().StringVar(&in.Recommend, "recommend", "", "the option you recommend")
 	return agentCmd(c)
 }
@@ -210,7 +217,7 @@ func (a *app) discussCmd() *cobra.Command {
 			return a.printOK(cmd, "raised for review. End your turn: the resolution arrives as a message.")
 		},
 	}
-	c.Flags().StringSliceVar(&in.Options, "option", nil, "an option; repeat")
+	c.Flags().StringArrayVar(&in.Options, "option", nil, "an option; repeat")
 	c.Flags().StringVar(&in.Recommend, "recommend", "", "the option you recommend")
 	return agentCmd(c)
 }
@@ -311,6 +318,11 @@ func (a *app) statusCmd() *cobra.Command {
 			on := map[bool]string{true: "on", false: "off"}[st.Autonomy]
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "autonomy %s, agent-filed tickets %d of %d\n", on, st.Outstanding, st.Budget); err != nil {
 				return err
+			}
+			for _, l := range st.Limits {
+				if _, err := io.WriteString(cmd.OutOrStdout(), describeLimit(&l)); err != nil {
+					return err
+				}
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "AGENT\tTICKET\tSTATE\tFOR\tHARNESS\tNOTE")

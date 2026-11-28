@@ -1,0 +1,5 @@
+# Statement coverage: <package> <percent>, then the total. Written by
+# quality.sh; see dev-tools/quality/README.md.
+./cmd/slop-bot 0.0
+./internal/version 100.0
+total 16.7

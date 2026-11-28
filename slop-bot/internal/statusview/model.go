@@ -160,16 +160,23 @@ func (m *Model) headerLine() string {
 		autonomy = "autonomy on"
 	}
 	plan := "plan: n/a"
-	if len(st.Allowances) > 0 {
-		var al []string
-		for _, a := range st.Allowances {
-			s := fmt.Sprintf("%s %.0f%%", a.Harness, a.UsedPercent)
-			if !a.ResetsAt.IsZero() {
-				s += " resets in " + humanDuration(a.ResetsAt.Sub(m.clock.Now()))
+	if len(st.Limits) > 0 {
+		var ls []string
+		for _, l := range st.Limits {
+			name := l.Harness
+			if l.Window != "" {
+				name += " " + l.Window
 			}
-			al = append(al, s)
+			s := fmt.Sprintf("%s %.0f%%", name, l.UsedPercent)
+			if !l.ResetsAt.IsZero() {
+				s += " resets in " + humanDuration(l.ResetsAt.Sub(m.clock.Now()))
+			}
+			if l.Held {
+				s += " HELD"
+			}
+			ls = append(ls, s)
 		}
-		plan = "plan: " + strings.Join(al, ", ")
+		plan = "plan: " + strings.Join(ls, ", ")
 	}
 	return fmt.Sprintf("%s | %s, agent-filed %d/%d | %s", strings.Join(pools, ", "), autonomy, st.Outstanding, st.Budget, plan)
 }

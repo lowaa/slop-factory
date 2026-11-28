@@ -42,7 +42,7 @@ type specFlags struct{ harness, model, effort string }
 
 func (s *specFlags) add(c *cobra.Command) {
 	c.Flags().StringVar(&s.harness, "harness", "", "harness to run it (claude-code, codex, pi, agy); blank: default_harness")
-	c.Flags().StringVar(&s.model, "model", "", "model; blank: the harness's own default")
+	c.Flags().StringVar(&s.model, "model", "", "model; blank: harnesses.<name>.model from the config, else the harness's own default")
 	c.Flags().StringVar(&s.effort, "effort", "", "effort or thinking level; blank: the harness's own default")
 }
 
@@ -187,8 +187,16 @@ func (s *setFlags) change(f *pflag.FlagSet) (*api.TicketChange, error) {
 		ch.Status = &s.status
 	}
 	if f.Changed("harness") || f.Changed("model") || f.Changed("effort") {
-		spec := s.spec.spec()
-		ch.Agent = &spec
+		ch.Agent = &api.AgentSpecChange{}
+		if f.Changed("harness") {
+			ch.Agent.Harness = &s.spec.harness
+		}
+		if f.Changed("model") {
+			ch.Agent.Model = &s.spec.model
+		}
+		if f.Changed("effort") {
+			ch.Agent.Effort = &s.spec.effort
+		}
 	}
 	if f.Changed("auto-merge") {
 		ch.AutoMerge = &s.autoMerge

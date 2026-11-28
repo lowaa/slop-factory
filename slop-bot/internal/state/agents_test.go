@@ -22,7 +22,7 @@ func TestCreateAndGetRoundTripEveryField(t *testing.T) {
 	n := &state.NewAgent{
 		ID: "a1", Ticket: "42", Harness: "agy", Driver: "tui", Model: "m", Effort: "high",
 		TUISession: "slop-a1", Pool: state.PoolUrgent, State: state.StateRefining, Reason: "spawned",
-		TokenHash: control.HashToken("secret"),
+		TokenHash: control.HashToken("secret"), BlockedTold: true,
 		Worktrees: []state.Worktree{
 			{Repo: "go-db", Path: "/w/t42-go-db", Branch: "t42"},
 			{Repo: "slop-factory", Path: "/w/t42-slop-factory", Branch: "t42", Primary: true},
@@ -36,7 +36,7 @@ func TestCreateAndGetRoundTripEveryField(t *testing.T) {
 	want := &state.Agent{
 		ID: "a1", Ticket: "42", Harness: "agy", Driver: "tui", Model: "m", Effort: "high",
 		Mode: state.ModeProgrammatic, TUISession: "slop-a1", Pool: state.PoolUrgent,
-		State: state.StateRefining, StateSince: t0, CreatedAt: t0,
+		State: state.StateRefining, StateSince: t0, CreatedAt: t0, BlockedTold: true,
 		// The primary first: it is the harness's cwd.
 		Worktrees: []state.Worktree{n.Worktrees[1], n.Worktrees[0]},
 	}
@@ -147,6 +147,52 @@ func TestATicketGetsANewAgentOnceItsLastEnded(t *testing.T) {
 	live, err := f.Agents.LiveForTicket(ctx, "1")
 	require.NoError(t, err)
 	assert.Equal(t, ident.AgentID("a2"), live.ID)
+}
+
+func TestReleasedForTicketSeesOnlyARelease(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	f.createAgent(t, "a1", "1")
+	f.setState(t, "a1", state.StateDone)
+	f.createAgent(t, "a2", "2")
+	f.setState(t, "a2", state.StateReleased)
+	f.createAgent(t, "a3", "3")
+	// Given up on by slop-bot, not taken over by a person.
+	f.createAgent(t, "a5", "5")
+	_, err := f.Agents.SetState(ctx, &state.Transition{Agent: "a5", To: state.StateReleased, Reason: "kept dying", GivenUp: true})
+	require.NoError(t, err)
+
+	for ticket, want := range map[ident.TicketID]bool{"1": false, "2": true, "3": false, "4": false, "5": false} {
+		got, err := f.Agents.ReleasedForTicket(ctx, ticket)
+		require.NoError(t, err)
+		assert.Equal(t, want, got, "ticket %s", ticket)
+	}
+}
+
+func TestLatestForTicketIsTheNewestLiveOrEnded(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	_, err := f.Agents.LatestForTicket(ctx, "1")
+	require.ErrorIs(t, err, state.ErrNotFound)
+
+	// Same millisecond: creation order still decides.
+	f.createAgent(t, "a1", "1")
+	f.setState(t, "a1", state.StateDone)
+	f.createAgent(t, "a2", "1")
+	f.createAgent(t, "b1", "2")
+	latest, err := f.Agents.LatestForTicket(ctx, "1")
+	require.NoError(t, err)
+	assert.Equal(t, ident.AgentID("a2"), latest.ID)
+
+	f.setState(t, "a2", state.StateDone)
+	f.clock.Advance(time.Second)
+	f.createAgent(t, "a0", "1")
+	f.setState(t, "a0", state.StateReleased)
+	latest, err = f.Agents.LatestForTicket(ctx, "1")
+	require.NoError(t, err)
+	assert.Equal(t, ident.AgentID("a0"), latest.ID, "ended, but the newest")
 }
 
 func TestSetStateRecordsHistoryAndSince(t *testing.T) {
@@ -278,6 +324,8 @@ func TestAnEndedAgentIsFrozenAndNoLongerLive(t *testing.T) {
 			assert.ErrorIs(t, f.Agents.ResetNudges(ctx, "a1"), state.ErrEnded)
 			_, err = f.Agents.AddNudge(ctx, "a1")
 			assert.ErrorIs(t, err, state.ErrEnded)
+			_, err = f.Agents.AddRecovery(ctx, "a1")
+			assert.ErrorIs(t, err, state.ErrEnded)
 			assert.ErrorIs(t, f.Agents.AddWorktree(ctx, "a1", &state.Worktree{Repo: "r", Path: "/r"}), state.ErrEnded)
 
 			_, err = f.Agents.AgentForTokenHash(ctx, control.HashToken("token-a1"))
@@ -341,11 +389,33 @@ func TestAgentFieldUpdates(t *testing.T) {
 	assert.Equal(t, 3, got.Nudges)
 
 	require.NoError(t, f.Agents.ResetNudges(ctx, "a1"))
+	require.NoError(t, f.Agents.SetDeclared(ctx, "a1", "done", "finished by hand"))
 	got, err = f.Agents.Get(ctx, "a1")
 	require.NoError(t, err)
 	assert.Equal(t, 0, got.Nudges)
+	assert.Equal(t, "done", got.Declared)
+	assert.Equal(t, "finished by hand", got.DeclaredSummary)
+
+	require.NoError(t, f.Agents.SetBlockedTold(ctx, "a1", true))
+	for want := 1; want <= 2; want++ {
+		n, err := f.Agents.AddRecovery(ctx, "a1")
+		require.NoError(t, err)
+		assert.Equal(t, want, n)
+	}
+	got, err = f.Agents.Get(ctx, "a1")
+	require.NoError(t, err)
+	assert.True(t, got.BlockedTold)
+	assert.Equal(t, 2, got.Recoveries)
+	require.NoError(t, f.Agents.SetBlockedTold(ctx, "a1", false))
+	require.NoError(t, f.Agents.ResetRecoveries(ctx, "a1"))
+	got, err = f.Agents.Get(ctx, "a1")
+	require.NoError(t, err)
+	assert.False(t, got.BlockedTold)
+	assert.Equal(t, 0, got.Recoveries)
 
 	assert.ErrorIs(t, f.Agents.SetProgressNote(ctx, "nope", "x"), state.ErrNotFound)
+	_, err = f.Agents.AddRecovery(ctx, "nope")
+	assert.ErrorIs(t, err, state.ErrNotFound)
 	_, err = f.Agents.AddNudge(ctx, "nope")
 	assert.ErrorIs(t, err, state.ErrNotFound)
 	_, err = f.Agents.Get(ctx, "nope")
@@ -462,11 +532,11 @@ func TestTheExpirySweepLosesToAHeartbeatThatBeatIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, expired, 1)
 
-	// Expired, so the heartbeat can't revive it: the CLI must re-acquire.
-	assert.ErrorIs(t, f.Agents.RenewLease(ctx, "a1", &state.Lease{Holder: "cli", ExpiresAt: sweptAt.Add(time.Minute)}), state.ErrConflict)
-	require.NoError(t, f.Agents.AcquireLease(ctx, "a1", &state.Lease{Holder: "cli", ExpiresAt: sweptAt.Add(time.Minute)}))
+	// Expired but not yet swept: its holder is still attached, so the
+	// heartbeat renews it (a machine waking from suspend).
+	require.NoError(t, f.Agents.RenewLease(ctx, "a1", &state.Lease{Holder: "cli", ExpiresAt: sweptAt.Add(time.Minute)}))
 
-	// The sweep, acting on what it read before the re-acquire, loses.
+	// The sweep, acting on what it read before the heartbeat, loses.
 	assert.ErrorIs(t, f.Agents.ReleaseExpiredLease(ctx, "a1", "cli", sweptAt), state.ErrConflict)
 	got, err := f.Agents.Get(ctx, "a1")
 	require.NoError(t, err)

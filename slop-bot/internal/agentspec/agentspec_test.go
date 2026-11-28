@@ -17,11 +17,18 @@ func cfg(t *testing.T) *config.Config {
 	return c
 }
 
-func TestResolveFillsOnlyTheHarness(t *testing.T) {
+func TestResolveFillsTheHarnessAndItsConfiguredModel(t *testing.T) {
 	t.Parallel()
 	got := Resolve(tickets.AgentSpec{}, cfg(t))
-	assert.Equal(t, tickets.AgentSpec{Harness: config.ClaudeCode}, got)
+	assert.Equal(t, tickets.AgentSpec{Harness: config.ClaudeCode}, got, "no configured model leaves it blank")
 	assert.Equal(t, tickets.AgentSpec{Harness: "pi", Model: "m"}, Resolve(tickets.AgentSpec{Harness: "pi", Model: "m"}, cfg(t)))
+
+	c, err := config.Parse([]byte("harnesses: {claude-code: {}, pi: {model: openai/x}}\n"), "/c", "/h")
+	require.NoError(t, err)
+	assert.Equal(t, tickets.AgentSpec{Harness: "pi", Model: "openai/x"}, Resolve(tickets.AgentSpec{Harness: "pi"}, c))
+	assert.Equal(t, tickets.AgentSpec{Harness: "pi", Model: "mine"}, Resolve(tickets.AgentSpec{Harness: "pi", Model: "mine"}, c),
+		"the ticket's own model wins")
+	assert.Equal(t, tickets.AgentSpec{Harness: "claude-code"}, Resolve(tickets.AgentSpec{}, c))
 }
 
 func TestValidate(t *testing.T) {

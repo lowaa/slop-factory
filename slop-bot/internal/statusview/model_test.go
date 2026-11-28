@@ -115,15 +115,18 @@ func TestColumnsTruncateAtANarrowWidth(t *testing.T) {
 	assert.Contains(t, narrow, "\n 1 ", "the ticket id is never cut")
 }
 
-func TestTheHeaderShowsPoolsAutonomyAndAPlaceholderForAllowances(t *testing.T) {
+func TestTheHeaderShowsPoolsAutonomyAndAPlaceholderForLimits(t *testing.T) {
 	t.Parallel()
 	out := newModel(t, 200, 20, snapshot()).View().Content
 	assert.Contains(t, out, "pool 3/4, urgent 0/1 | autonomy on, agent-filed 2/10 | plan: n/a")
 
 	st := snapshot()
-	st.Allowances = []api.Allowance{{Harness: "claude-code", UsedPercent: 42, ResetsAt: now.Add(3 * time.Hour)}}
+	st.Limits = []api.HarnessLimit{
+		{Harness: "claude-code", Window: "5h", UsedPercent: 42, ResetsAt: now.Add(3 * time.Hour)},
+		{Harness: "codex", UsedPercent: 97, Held: true},
+	}
 	out = newModel(t, 200, 20, st).View().Content
-	assert.Contains(t, out, "plan: claude-code 42% resets in 3h0m")
+	assert.Contains(t, out, "plan: claude-code 5h 42% resets in 3h0m, codex 97% HELD")
 }
 
 func TestBeforeTheFirstSnapshot(t *testing.T) {

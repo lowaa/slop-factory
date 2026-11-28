@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -52,6 +53,14 @@ type Config struct {
 	Harnesses          map[string]*HarnessConfig `yaml:"harnesses"`
 	Agents             Agents                    `yaml:"agents"`
 	Retention          Retention                 `yaml:"retention"`
+	Doctor             Doctor                    `yaml:"doctor"`
+}
+
+// Doctor is what `slop-bot doctor` checks beyond slop-bot's own needs.
+type Doctor struct {
+	// Require are binaries the user's workflow needs on PATH (gh, linters):
+	// slop-bot doesn't use them, but its agents will.
+	Require []string `yaml:"require"`
 }
 
 // Ticketing picks the TicketingSystem. It's edited by hand for now.
@@ -100,7 +109,18 @@ type HarnessConfig struct {
 	// Permissive runs the harness without permission prompts. Default true:
 	// nobody is watching a headless agent's dialogs.
 	Permissive *bool `yaml:"permissive"`
+	// Model is what agents run on when their ticket names none. Blank
+	// leaves it to the harness (pi's adapter then picks a known-good one).
+	Model string `yaml:"model"`
+	// LimitThreshold is the percentage of the plan's allowance at which no
+	// new agent is started on this harness until the window resets. 0, or
+	// unset, is DefaultLimitThreshold.
+	LimitThreshold float64 `yaml:"limit_threshold"`
 }
+
+// DefaultLimitThreshold leaves a little of the allowance for the agents
+// already running, and for the user's own interactive use.
+const DefaultLimitThreshold = 95
 
 // Agents holds the lifecycle timings.
 type Agents struct {
@@ -110,6 +130,10 @@ type Agents struct {
 	StallAfter Duration `yaml:"stall_after"`
 	// AskReminderAfter is when the user is reminded of an unanswered ask.
 	AskReminderAfter Duration `yaml:"ask_reminder_after"`
+	// AttachLease is how long an attach outlives its CLI's last heartbeat:
+	// across a daemon restart, the attached CLI has this long to reconnect
+	// before the agent is handed back.
+	AttachLease Duration `yaml:"attach_lease"`
 }
 
 // Retention is how long finished records are kept.
@@ -140,7 +164,13 @@ func Load(path, home string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}
-	return Parse(raw, filepath.Dir(path), home)
+	// Absolute, so a relative --config still resolves relative entries to
+	// absolute paths: worktree paths are compared with git's, which are.
+	dir, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	return Parse(raw, dir, home)
 }
 
 // Parse is Load on bytes. dir resolves relative paths: the config file's
@@ -177,18 +207,29 @@ func (c *Config) applyDefaults(home string) {
 	if c.Ticketing.System == "" {
 		c.Ticketing.System = "local"
 	}
+	c.defaultConcurrency()
+	if c.Autonomy.TicketsPerAgent == 0 {
+		c.Autonomy.TicketsPerAgent = 10
+	}
+	c.defaultHarnesses()
+	c.defaultDurations()
+}
+
+func (c *Config) defaultConcurrency() {
 	if c.Concurrency.MaxActive == 0 {
 		c.Concurrency.MaxActive = 4
-	}
-	if c.Concurrency.MaxLive == 0 {
-		c.Concurrency.MaxLive = 3 * c.Concurrency.MaxActive
 	}
 	if c.Concurrency.Urgent.MaxActive == 0 {
 		c.Concurrency.Urgent.MaxActive = 1
 	}
-	if c.Autonomy.TicketsPerAgent == 0 {
-		c.Autonomy.TicketsPerAgent = 10
+	if c.Concurrency.MaxLive == 0 {
+		// Never below the slots validate requires, so a user who only raised
+		// urgent.max_active isn't told off about a max_live they didn't set.
+		c.Concurrency.MaxLive = max(3*c.Concurrency.MaxActive, c.Slots())
 	}
+}
+
+func (c *Config) defaultHarnesses() {
 	if len(c.Harnesses) == 0 {
 		c.Harnesses = map[string]*HarnessConfig{c.DefaultHarness: {}}
 	}
@@ -203,8 +244,10 @@ func (c *Config) applyDefaults(home string) {
 		if h.Permissive == nil {
 			h.Permissive = ptr(true)
 		}
+		if h.LimitThreshold == 0 {
+			h.LimitThreshold = DefaultLimitThreshold
+		}
 	}
-	c.defaultDurations()
 }
 
 func (c *Config) defaultDurations() {
@@ -216,6 +259,9 @@ func (c *Config) defaultDurations() {
 	}
 	if c.Agents.AskReminderAfter == 0 {
 		c.Agents.AskReminderAfter = Duration(24 * time.Hour)
+	}
+	if c.Agents.AttachLease == 0 {
+		c.Agents.AttachLease = Duration(30 * time.Second)
 	}
 	if c.Retention.Transcripts == 0 {
 		c.Retention.Transcripts = Duration(30 * 24 * time.Hour)
@@ -259,47 +305,88 @@ func absPath(p, dir, home string) (string, error) {
 }
 
 func (c *Config) validate() error {
-	var errs []error
-	add := func(format string, a ...any) { errs = append(errs, fmt.Errorf("config: "+format, a...)) }
+	v := &validation{}
+	c.validateHarnesses(v)
+	c.validateRepos(v)
+	c.validateLimits(v)
+	for i, bin := range c.Doctor.Require {
+		if strings.TrimSpace(bin) == "" {
+			v.add("doctor.require[%d]: is empty", i)
+		}
+	}
+	return errors.Join(v.errs...)
+}
+
+// validation collects every problem, so one load names them all.
+type validation struct{ errs []error }
+
+func (v *validation) add(format string, a ...any) {
+	v.errs = append(v.errs, fmt.Errorf("config: "+format, a...))
+}
+
+func (c *Config) validateHarnesses(v *validation) {
 	for name, h := range c.Harnesses {
 		known, ok := drivers[name]
 		switch {
 		case !ok:
-			add("harnesses.%s: unknown harness (known: claude-code, codex, pi, agy)", name)
+			v.add("harnesses.%s: unknown harness (known: claude-code, codex, pi, agy)", name)
 		case !slices.Contains(known, h.Driver):
-			add("harnesses.%s.driver: %q isn't a driver for %s (have: %s)", name, h.Driver, name, strings.Join(known, ", "))
+			v.add("harnesses.%s.driver: %q isn't a driver for %s (have: %s)", name, h.Driver, name, strings.Join(known, ", "))
+		}
+		if h.LimitThreshold <= 0 || h.LimitThreshold > 100 {
+			v.add("harnesses.%s.limit_threshold: %v isn't a percentage above 0, up to 100", name, h.LimitThreshold)
 		}
 	}
 	if _, ok := c.Harnesses[c.DefaultHarness]; !ok {
-		add("default_harness: %q isn't configured under harnesses", c.DefaultHarness)
+		v.add("default_harness: %q isn't configured under harnesses", c.DefaultHarness)
 	}
 	if c.Ticketing.System != "local" {
-		add("ticketing.system: %q isn't available (have: local)", c.Ticketing.System)
+		v.add("ticketing.system: %q isn't available (have: local)", c.Ticketing.System)
 	}
+}
+
+func (c *Config) validateRepos(v *validation) {
 	seen := map[string]bool{}
 	for i, r := range c.Repos {
 		if r.Name == "" {
-			add("repos[%d].name: is empty", i)
+			v.add("repos[%d].name: is empty", i)
+		} else if err := CheckRepoName(r.Name); err != nil {
+			v.add("repos[%d].name: %v", i, err)
 		}
 		if seen[r.Name] {
-			add("repos[%d].name: %q is listed twice", i, r.Name)
+			v.add("repos[%d].name: %q is listed twice", i, r.Name)
 		}
 		seen[r.Name] = true
 	}
+}
+
+// validateLimits checks the numbers: concurrency, budgets and retention.
+func (c *Config) validateLimits(v *validation) {
 	if c.Concurrency.MaxActive < 1 || c.Concurrency.Urgent.MaxActive < 1 {
-		add("concurrency: max_active and urgent.max_active must be at least 1")
+		v.add("concurrency: max_active and urgent.max_active must be at least 1")
 	}
 	if c.Concurrency.MaxLive < c.Concurrency.MaxActive+c.Concurrency.Urgent.MaxActive {
-		add("concurrency.max_live: %d is below max_active + urgent.max_active (%d)",
+		v.add("concurrency.max_live: %d is below max_active + urgent.max_active (%d)",
 			c.Concurrency.MaxLive, c.Concurrency.MaxActive+c.Concurrency.Urgent.MaxActive)
 	}
 	if c.Autonomy.TicketsPerAgent < 1 {
-		add("autonomy.tickets_per_agent: must be at least 1")
+		v.add("autonomy.tickets_per_agent: must be at least 1")
+	}
+	if c.Retention.Transcripts < 0 || c.Retention.Events < 0 {
+		v.add("retention: transcripts and events must be positive durations")
+	}
+	// Heartbeats come every third of the lease; much shorter and a busy
+	// daemon would hand back attaches whose CLI is fine.
+	if c.Agents.AttachLease.D() < time.Second {
+		v.add("agents.attach_lease: %s is below 1s", c.Agents.AttachLease.D())
 	}
 	if c.Agents.Nudges < 1 {
-		add("agents.nudges: must be at least 1")
+		v.add("agents.nudges: must be at least 1")
 	}
-	return errors.Join(errs...)
+	// A negative one would fire the runner's timer at once, forever.
+	if c.Agents.StallAfter < 0 || c.Agents.AskReminderAfter < 0 {
+		v.add("agents: stall_after and ask_reminder_after must not be negative")
+	}
 }
 
 // Slots is every agent slot, normal and urgent: what the autonomy budget
@@ -308,6 +395,22 @@ func (c *Config) Slots() int { return c.Concurrency.MaxActive + c.Concurrency.Ur
 
 // AutonomyBudget is the most outstanding agent-created tickets allowed.
 func (c *Config) AutonomyBudget() int { return c.Autonomy.TicketsPerAgent * c.Slots() }
+
+const maxRepoName = 100
+
+var repoNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// CheckRepoName is the rule for a repo's name. The name becomes part of a
+// directory name (a ticket's worktree is t<ticket>-<repo>), so it must be
+// safe there; checking it at load shows a bad one at startup, not when a
+// ticket first needs the repo.
+func CheckRepoName(name string) error {
+	if len(name) > maxRepoName || !repoNameRe.MatchString(name) || strings.Contains(name, "..") {
+		return fmt.Errorf("%q: want a letter or digit first, then letters, digits, '.', '_' or '-', "+
+			"no \"..\", at most %d characters", name, maxRepoName)
+	}
+	return nil
+}
 
 // Repo looks a repo up by name.
 func (c *Config) Repo(name string) (*Repo, bool) {

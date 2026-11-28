@@ -44,14 +44,20 @@ func (a *app) serviceManager(cmd *cobra.Command, binary string) (service.Manager
 	if err != nil {
 		return nil, nil, err
 	}
+	m, err := a.newManager(p, binary, configFile, cmd.ErrOrStderr())
+	return m, p, err
+}
+
+// newManager builds the Manager over already-resolved paths; logs at warn
+// and above go to logs.
+func (a *app) newManager(p *paths.Paths, binary, configFile string, logs io.Writer) (service.Manager, error) {
 	path, _ := a.deps.Env.Lookup("PATH")
-	m, err := service.New(&service.Options{
+	return service.New(&service.Options{
 		Paths: p, Home: a.deps.Env.Home, UID: a.deps.Env.UID, GOOS: a.deps.Env.GOOS,
 		Binary: binary, PATH: path, ConfigFile: configFile,
 		Runner: a.deps.ServiceRunner,
-		Logger: slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelWarn})),
+		Logger: slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
-	return m, p, err
 }
 
 // serviceConfigFile is --config made absolute, so the service runs with
@@ -111,14 +117,8 @@ func printInstalled(out io.Writer, p *paths.Paths, res *service.Installed) error
 	for _, e := range res.Env {
 		w.printf("  %s=%s  (%s)\n", e.Name, e.Value, envOrigin(p, e.Name))
 	}
-	switch res.Linger {
-	case service.LingerOff:
-		w.printf("linger: off. systemd stops slop-bot when your last session ends; " +
-			"to keep it running with nobody logged in (a headless box), run: loginctl enable-linger\n")
-	case service.LingerOn:
-		w.printf("linger: on. slop-bot keeps running with nobody logged in\n")
-	case service.LingerUnknown:
-		w.printf("linger: unknown (loginctl couldn't say). On a headless box, check `loginctl show-user $USER -p Linger`\n")
+	if line := lingerLine(res.Linger); line != "" {
+		w.printf("%s\n", line)
 	}
 	for _, warn := range res.Warnings {
 		w.printf("warning: %s\n", warn)
@@ -127,6 +127,21 @@ func printInstalled(out io.Writer, p *paths.Paths, res *service.Installed) error
 	// came up: a bad config or a held lock only shows after.
 	w.printf("check it came up: slop-bot health (or slop-bot service status)\n")
 	return w.err
+}
+
+// lingerLine explains the linger state; "" on macOS, which has none.
+func lingerLine(l service.Linger) string {
+	switch l {
+	case service.LingerOff:
+		return "linger: off. systemd stops slop-bot when your last session ends; " +
+			"to keep it running with nobody logged in (a headless box), run: loginctl enable-linger"
+	case service.LingerOn:
+		return "linger: on. slop-bot keeps running with nobody logged in"
+	case service.LingerUnknown:
+		return "linger: unknown (loginctl couldn't say). On a headless box, check `loginctl show-user $USER -p Linger`"
+	default:
+		return ""
+	}
 }
 
 // envOrigin says where a written variable's value came from.

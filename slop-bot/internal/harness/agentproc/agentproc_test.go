@@ -3,11 +3,13 @@ package agentproc
 import (
 	"bufio"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +36,19 @@ func TestPipesAndExitCode(t *testing.T) {
 	assert.Equal(t, 3, p.ExitCode())
 	assert.NoError(t, p.Err())
 	assert.Equal(t, "oops\n", p.Stderr())
+}
+
+func TestOutputWrittenBeforeExitIsStillReadableAfterIt(t *testing.T) {
+	t.Parallel()
+	// Done is awaited before any read, so the output sits unread while Wait
+	// runs; a Wait that closed the read end would lose it.
+	p, err := Start(context.Background(), sh(t, `echo first; echo last`))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stdout.Close() })
+	<-p.Done()
+	out, err := io.ReadAll(p.Stdout)
+	require.NoError(t, err)
+	assert.Equal(t, "first\nlast\n", string(out))
 }
 
 func TestKillReachesTheWholeGroup(t *testing.T) {
@@ -85,6 +100,7 @@ func TestAgentEnv(t *testing.T) {
 		"PATH=/bin", "HOME=/h", "GOPATH=/go", "SSH_AUTH_SOCK=/s",
 		"ANTHROPIC_API_KEY=placeholder", "OPENAI_API_KEY=placeholder", "GEMINI_API_KEY=placeholder",
 		"CLAUDE_CODE_SESSION_ID=parent", "CLAUDECODE=1",
+		"CLAUDE_CODE_OAUTH_TOKEN=tok", "CLAUDE_CODE_USE_BEDROCK=1",
 		"SLOP_BOT_AGENT_TOKEN=someone-elses", "malformed",
 	}
 	got := AgentEnv(&EnvOptions{
@@ -94,6 +110,7 @@ func TestAgentEnv(t *testing.T) {
 	})
 	assert.Equal(t, []string{
 		"PATH=/bin", "GOPATH=/go", "SSH_AUTH_SOCK=/s",
+		"CLAUDE_CODE_OAUTH_TOKEN=tok", "CLAUDE_CODE_USE_BEDROCK=1",
 		"HOME=/override", "SLOP_BOT_AGENT_TOKEN=mine",
 	}, got, "the user's toolchain variables pass; API keys, a parent harness's variables and another token don't")
 
@@ -112,4 +129,41 @@ func TestWorkspaceEnvLayersTheWorkspaceOverTheHarness(t *testing.T) {
 	ws.APIKeyOptIn = true
 	assert.Contains(t, WorkspaceEnv(base, ws, nil), "OPENAI_API_KEY=placeholder")
 	assert.NotEmpty(t, WorkspaceEnv(nil, &harness.Workspace{}, nil), "nil base is the process's own environment")
+}
+
+func TestOutputWrittenJustBeforeExitIsStillReadable(t *testing.T) {
+	t.Parallel()
+	p, err := Start(context.Background(), sh(t, `echo last words; exit 0`))
+	require.NoError(t, err)
+	// The reader only starts once the process has been waited on: the
+	// harness's final line must still be there.
+	<-p.Done()
+	b, err := io.ReadAll(p.Stdout)
+	require.NoError(t, err)
+	assert.Equal(t, "last words\n", string(b))
+}
+
+func TestAChildHoldingStderrDoesntHideTheExit(t *testing.T) {
+	t.Parallel()
+	// The harness exits, leaving a child that keeps stderr open.
+	p, err := start(context.Background(), sh(t, `sleep 1000 >/dev/null & echo $!; echo bye >&2; exit 4`), time.Millisecond)
+	require.NoError(t, err)
+	line, err := bufio.NewReader(p.Stdout).ReadString('\n')
+	require.NoError(t, err)
+	var orphan int
+	_, err = fmtSscan(strings.TrimSpace(line), &orphan)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = syscall.Kill(orphan, syscall.SIGKILL) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), testWait)
+	defer cancel()
+	select {
+	case <-p.Done():
+	case <-ctx.Done():
+		t.Fatal("the exit was never reported")
+	}
+	assert.Equal(t, 4, p.ExitCode())
+	// No assertion on the stderr tail: once the drain bound passes, how much
+	// of it was copied is a race, and TestPipesAndExitCode covers it.
+	assert.NoError(t, p.Err())
 }

@@ -73,7 +73,7 @@ func (s *systemd) Install(ctx context.Context) (*Installed, error) {
 func (s *systemd) checkManagerReadsUnitDir(ctx context.Context) error {
 	res, err := s.systemctl(ctx, "show-environment")
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrNoServiceManager, err)
 	}
 	managers := filepath.Join(s.set.Home, ".config")
 	for _, line := range strings.Split(res.Stdout, "\n") {
@@ -88,6 +88,8 @@ func (s *systemd) checkManagerReadsUnitDir(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (s *systemd) Preflight(ctx context.Context) error { return s.checkManagerReadsUnitDir(ctx) }
 
 func (s *systemd) Uninstall(ctx context.Context) error {
 	if err := s.requireInstalled(); err != nil {

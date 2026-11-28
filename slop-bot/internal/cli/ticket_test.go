@@ -84,6 +84,20 @@ func TestABadAgentSpecIsRefusedAtFilingAndEdit(t *testing.T) {
 	assert.Contains(t, h.err.String(), `harness "cursor"`)
 }
 
+func TestSettingOneAgentFieldKeepsTheOthers(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	startDaemon(t, h)
+
+	tk := h.ticket(t, "ticket", "create", "--title", "x", "--harness", "pi", "--model", "m1")
+	set := h.ticket(t, "ticket", "set", tk.ID, "--effort", "low")
+	assert.Equal(t, api.AgentSpec{Harness: "pi", Model: "m1", Effort: "low"}, set.Agent)
+	assert.Equal(t, set.Agent, h.ticket(t, "ticket", "show", tk.ID).Agent, "persisted, not just echoed")
+
+	cleared := h.ticket(t, "ticket", "set", tk.ID, "--model", "")
+	assert.Equal(t, api.AgentSpec{Harness: "pi", Effort: "low"}, cleared.Agent, "an explicit empty clears just that field")
+}
+
 func TestTicketErrorsCarryTheReason(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

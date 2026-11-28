@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agentproc"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/rpcdriver"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 )
 
 // Name and Driver of the fake, as tests register it.
@@ -23,8 +25,10 @@ type Harness struct {
 	Binary string
 	// Control is the Controller's socket, or "" for an autonomous fake.
 	Control string
-	Logger  *slog.Logger
-	Clock   clock.Clock
+	// TranscriptDir is where the fake keeps its transcripts; "" keeps none.
+	TranscriptDir string
+	Logger        *slog.Logger
+	Clock         clock.Clock
 }
 
 // Name implements harness.AIHarness.
@@ -40,25 +44,55 @@ func (h *Harness) Capabilities() harness.Capabilities {
 
 // Start implements harness.AIHarness.
 func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
+	return rpcdriver.Start(ctx, &rpcdriver.Options{
+		Harness: Name, Driver: Driver, Codec: codec{}, Spec: launch(h.Binary, h.Control, h.TranscriptDir, ws, resume),
+		Logger: h.Logger, Clock: h.Clock,
+		// The hand-over: the same fake in its TUI mode, on the same
+		// conversation, as `claude --resume <id>` is Claude Code's.
+		Attach: func(id string) *harness.LaunchSpec {
+			return launch(h.Binary, h.Control, h.TranscriptDir, ws, &harness.ConversationRef{Harness: Name, Driver: Driver, ID: id}, "--tui")
+		},
+	})
+}
+
+// launch is the fake's command line, in either mode (extra comes first).
+// transcripts, when set, is where the fake keeps its transcript.
+func launch(binary, control, transcripts string, ws *harness.Workspace, resume *harness.ConversationRef, extra ...string) *harness.LaunchSpec {
 	set := map[string]string{}
 	for k, v := range ws.Env {
 		set[k] = v
 	}
-	if h.Control != "" {
-		set[EnvControl] = h.Control
+	if control != "" {
+		set[EnvControl] = control
 	}
-	var args []string
+	if transcripts != "" {
+		set[EnvTranscripts] = transcripts
+	}
+	args := extra
 	if resume != nil {
-		args = []string{"--resume", resume.ID}
+		args = append(args, "--resume", resume.ID)
 	}
-	spec := &harness.LaunchSpec{
-		Path: h.Binary,
+	return &harness.LaunchSpec{
+		Path: binary,
 		Args: args,
 		Env:  agentproc.AgentEnv(&agentproc.EnvOptions{Base: os.Environ(), APIKeyOptIn: ws.APIKeyOptIn, Set: set}),
 		Dir:  ws.Dir,
 	}
-	return rpcdriver.Start(ctx, &rpcdriver.Options{
-		Harness: Name, Driver: Driver, Codec: codec{}, Spec: spec,
-		Logger: h.Logger, Clock: h.Clock,
-	})
+}
+
+// Transcripts implements transcript.Provider: the fake keeps its transcript
+// in the normalised format itself.
+func (h *Harness) Transcripts() transcript.Reader { return &transcriptReader{dir: h.TranscriptDir} }
+
+type transcriptReader struct{ dir string }
+
+func (r *transcriptReader) Locate(id string) (string, error) {
+	if r.dir == "" {
+		return "", transcript.ErrNotFound
+	}
+	return transcript.Find(id, func(id string) string { return filepath.Join(r.dir, id+".jsonl") })
+}
+
+func (r *transcriptReader) Parse(data []byte) ([]transcript.Entry, error) {
+	return transcript.Decode(data)
 }

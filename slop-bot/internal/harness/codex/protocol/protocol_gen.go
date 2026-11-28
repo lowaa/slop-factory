@@ -404,7 +404,7 @@ type FileUpdateChange struct {
 	Path string          `json:"path"`
 }
 
-type FunctionCallOutputBody struct{}
+type FunctionCallOutputBody = json.RawMessage
 
 type GitInfo struct {
 	Branch    string `json:"branch,omitempty"`
@@ -754,7 +754,7 @@ type ResponseItem struct {
 	InternalChatMessageMetadataPassthrough *InternalChatMessageMetadataPassthrough `json:"internal_chat_message_metadata_passthrough,omitempty"`
 	Name                                   string                                  `json:"name,omitempty"`
 	Namespace                              string                                  `json:"namespace,omitempty"`
-	Output                                 *FunctionCallOutputBody                 `json:"output,omitempty"`
+	Output                                 FunctionCallOutputBody                  `json:"output,omitempty"`
 	Phase                                  MessagePhase                            `json:"phase,omitempty"`
 	Reasoning                              *ConfigurationReasoning                 `json:"reasoning,omitempty"`
 	Recipient                              string                                  `json:"recipient,omitempty"`
@@ -1030,7 +1030,7 @@ type ThreadItem struct {
 	Moderation *AgentMessageModeration `json:"moderation,omitempty"`
 	Name       string                  `json:"name,omitempty"`
 	Namespace  string                  `json:"namespace,omitempty"`
-	Output     *FunctionCallOutputBody `json:"output,omitempty"`
+	Output     FunctionCallOutputBody  `json:"output,omitempty"`
 	Path       LegacyAppPathString     `json:"path,omitempty"`
 	Phase      MessagePhase            `json:"phase,omitempty"`
 	// Trusted first-party plugin id when this command resolves to one plugin script.

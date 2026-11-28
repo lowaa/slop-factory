@@ -111,23 +111,8 @@ func (g *generator) kindOf(n *node) kind {
 	if isStringEnum(n) {
 		return kindEnum
 	}
-	vs, _ := variants(n)
-	if len(vs) > 0 {
-		strs := 0
-		for _, v := range vs {
-			if isStringEnum(v) {
-				strs++
-			}
-		}
-		switch {
-		case strs == len(vs) && len(n.Properties) == 0:
-			return kindEnum
-		case strs > 0:
-			return kindMixed
-		case len(vs) == 1 && len(n.Properties) == 0:
-			return g.kindOf(g.resolve(vs[0]))
-		}
-		return kindStruct
+	if vs, _ := variants(n); len(vs) > 0 {
+		return g.unionKind(n, vs)
 	}
 	if len(n.Properties) > 0 {
 		return kindStruct
@@ -136,6 +121,54 @@ func (g *generator) kindOf(n *node) kind {
 		return kindStruct
 	}
 	return kindAlias
+}
+
+// unionKind is kindOf for a node with variants.
+func (g *generator) unionKind(n *node, vs []*node) kind {
+	strs := 0
+	for _, v := range vs {
+		if isStringEnum(v) {
+			strs++
+		}
+	}
+	switch {
+	case strs == len(vs) && len(n.Properties) == 0:
+		return kindEnum
+	case strs > 0:
+		return kindMixed
+	case len(vs) == 1 && len(n.Properties) == 0:
+		return g.kindOf(g.resolve(vs[0]))
+	case g.rawUnion(n, vs):
+		return kindAlias
+	}
+	return kindStruct
+}
+
+// rawUnion is a union none of whose alternatives is an object (a string or
+// an array, say). Flattening it into a struct would generate one that can't
+// decode any of its values, so it is kept as raw JSON.
+func (g *generator) rawUnion(n *node, vs []*node) bool {
+	if len(vs) < 2 || len(n.Properties) > 0 {
+		return false
+	}
+	for _, v := range vs {
+		if isStringEnum(v) || g.objectLike(v) {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *generator) objectLike(n *node) bool {
+	n = g.resolve(n)
+	if n == nil || n.boolean != nil || len(n.Properties) > 0 {
+		return n != nil
+	}
+	if types, _ := n.Type.nonNull(); slices.Contains(types, "object") {
+		return true
+	}
+	vs, _ := variants(n)
+	return slices.ContainsFunc(vs, g.objectLike)
 }
 
 // resolve follows a bare $ref to its definition.
@@ -190,7 +223,13 @@ func (g *generator) declare(name string, n *node) {
 		g.writeStruct(&b, name, n)
 	default:
 		t, _ := g.goType(n, name+"Value")
-		fmt.Fprintf(&b, "type %s %s\n", name, t)
+		// An alias, not a new type: a defined type from RawMessage drops its
+		// Marshal/UnmarshalJSON methods and so can't hold arbitrary JSON.
+		sep := " "
+		if t == rawType {
+			sep = " = "
+		}
+		fmt.Fprintf(&b, "type %s%s%s\n", name, sep, t)
 	}
 	g.decls[name] = b.String()
 }
@@ -358,15 +397,7 @@ func (g *generator) signature(n *node) (string, bool) {
 	case n.boolean != nil:
 		return "raw", false
 	case n.Ref != "":
-		name := refName(n.Ref)
-		def := g.defs[name]
-		switch {
-		case def != nil && g.kindOf(def) == kindEnum:
-			return "enum:" + name, false
-		case def != nil && g.kindOf(def) == kindAlias && isPlainString(def):
-			return "str:" + name, false
-		}
-		return "ref:" + name, false
+		return g.refSignature(refName(n.Ref)), false
 	case len(n.AllOf) == 1:
 		return g.signature(n.AllOf[0])
 	}
@@ -381,17 +412,32 @@ func (g *generator) signature(n *node) (string, bool) {
 	if len(types) != 1 {
 		return "raw", nullable
 	}
-	switch types[0] {
+	return g.typeSignature(n, types[0]), nullable
+}
+
+func (g *generator) refSignature(name string) string {
+	def := g.defs[name]
+	switch {
+	case def != nil && g.kindOf(def) == kindEnum:
+		return "enum:" + name
+	case def != nil && g.kindOf(def) == kindAlias && isPlainString(def):
+		return "str:" + name
+	}
+	return "ref:" + name
+}
+
+func (g *generator) typeSignature(n *node, typ string) string {
+	switch typ {
 	case "array":
 		s, _ := g.signature(n.Items)
-		return "[]" + s, nullable
+		return "[]" + s
 	case "object":
 		if len(n.Properties) > 0 {
-			return "inline", nullable
+			return "inline"
 		}
-		return "map", nullable
+		return "map"
 	}
-	return types[0], nullable
+	return typ
 }
 
 // writeDiscriminators gives a union's `type` values constants, when each
@@ -441,6 +487,9 @@ func (g *generator) goType(n *node, hint string) (string, bool) {
 		if len(vs) == 1 && len(n.Properties) == 0 {
 			t, _ := g.goType(vs[0], hint)
 			return t, nullable
+		}
+		if g.rawUnion(n, vs) {
+			return rawType, nullable
 		}
 		return g.inline(hint, n), nullable
 	}

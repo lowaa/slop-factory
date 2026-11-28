@@ -20,6 +20,9 @@ type Server struct {
 	// leaves request contexts live, so long-lived streams (events --follow)
 	// would hold Stop until its deadline.
 	cancel context.CancelFunc
+	// stopping is closed when Stop begins, before request contexts end, so
+	// a handler can tell the daemon stopping from its client going away.
+	stopping chan struct{}
 
 	stopOnce sync.Once
 	stopErr  error
@@ -27,7 +30,7 @@ type Server struct {
 
 // NewServer makes a server whose routes are added with Handle before Start.
 func NewServer(logger *slog.Logger) *Server {
-	return &Server{mux: http.NewServeMux(), logger: logger}
+	return &Server{mux: http.NewServeMux(), logger: logger, stopping: make(chan struct{})}
 }
 
 // Handle registers a route, e.g. "GET /v1/health".
@@ -56,6 +59,9 @@ func (s *Server) Start(l *Listener, resolver TokenResolver) {
 	}()
 }
 
+// Stopping is closed once Stop has begun.
+func (s *Server) Stopping() <-chan struct{} { return s.stopping }
+
 // Stop stops accepting, waits for in-flight requests until ctx ends, then
 // closes what's left, and returns once serving ended. Calling it again
 // returns the first call's result.
@@ -64,6 +70,7 @@ func (s *Server) Stop(ctx context.Context) error {
 		return nil
 	}
 	s.stopOnce.Do(func() {
+		close(s.stopping)
 		s.cancel()
 		err := s.srv.Shutdown(ctx)
 		if err != nil {

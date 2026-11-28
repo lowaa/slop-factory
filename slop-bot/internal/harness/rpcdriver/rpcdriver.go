@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
@@ -60,6 +61,9 @@ type Codec interface {
 	Decode(line []byte, w *Wire) ([]harness.Event, error)
 }
 
+// DefaultKillGrace is Options.KillGrace's default.
+const DefaultKillGrace = 5 * time.Second
+
 // Options configure one conversation.
 type Options struct {
 	Harness, Driver string
@@ -67,6 +71,9 @@ type Options struct {
 	Spec            *harness.LaunchSpec
 	Logger          *slog.Logger
 	Clock           clock.Clock
+	// KillGrace is how long a SIGTERM gets before SIGKILL; zero means
+	// DefaultKillGrace.
+	KillGrace time.Duration
 	// Attach is the hand-over plan's TUI command, given the conversation id.
 	Attach func(id string) *harness.LaunchSpec
 }
@@ -141,6 +148,7 @@ func (c *Conversation) nextLine(ctx context.Context) ([]byte, error) {
 // in practice are summaries (pi's agent_end repeats the whole run) that no
 // codec needs.
 func (c *Conversation) read() {
+	defer func() { _ = c.proc.Stdout.Close() }()
 	r := bufio.NewReaderSize(c.proc.Stdout, 64<<10)
 	for {
 		line, err := readLine(r, maxLine)
@@ -310,12 +318,18 @@ func (c *Conversation) Stop(ctx context.Context, force bool) error {
 	return c.kill()
 }
 
+// kill asks the group to stop, and only after KillGrace has passed with no
+// exit does it force it, so the harness can flush its session state.
 func (c *Conversation) kill() error {
 	_ = c.proc.Signal(syscall.SIGTERM)
+	grace := c.opts.KillGrace
+	if grace == 0 {
+		grace = DefaultKillGrace
+	}
 	select {
 	case <-c.exited:
 		return nil
-	default:
+	case <-clock.Or(c.opts.Clock).After(grace):
 	}
 	c.proc.Kill()
 	<-c.exited

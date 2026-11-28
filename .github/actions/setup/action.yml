@@ -2,7 +2,7 @@ name: setup
 description: Toolchains the test.sh entrypoints expect on the host. Docker is already on the Linux runners (the macOS ones have none).
 inputs:
   go:
-    description: Install Go (the version slop-haus/server/go.mod names)
+    description: Install Go (the version the root go.work names)
     default: "false"
   node:
     description: Install Node.js 22
@@ -13,13 +13,16 @@ inputs:
   npm-ci:
     description: "none, root (every workspace) or tools (the root's own devDependencies only, e.g. bats)"
     default: "none"
+  shellspec:
+    description: Install shellspec, the shell tests' runner (dev-tools/quality/README.md)
+    default: "false"
 runs:
   using: composite
   steps:
     - if: inputs.go == 'true'
       uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
-        go-version-file: slop-haus/server/go.mod
+        go-version-file: go.work
         cache-dependency-path: "**/go.sum"
     - if: inputs.node == 'true' || inputs.npm-ci != 'none'
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -36,3 +39,19 @@ runs:
     - if: inputs.npm-ci == 'tools'
       shell: bash
       run: npm ci --workspaces=false --ignore-scripts --no-audit --no-fund
+    # The release's dist tarball, pinned by its sha256: the release publishes
+    # no checksum of its own, so this one is from the tarball the dev hosts
+    # installed. shasum, not sha256sum: the macOS runners have only the former.
+    - if: inputs.shellspec == 'true'
+      shell: bash
+      env:
+        SHELLSPEC_VERSION: "0.28.1"
+        SHELLSPEC_SHA256: 350d3de04ba61505c54eda31a3c2ee912700f1758b1a80a284bc08fd8b6c5992
+      run: |
+        dir="${RUNNER_TEMP}/shellspec-${SHELLSPEC_VERSION}"
+        mkdir -p "${dir}"
+        curl -fsSL --retry 3 -o "${dir}/shellspec-dist.tar.gz" \
+          "https://github.com/shellspec/shellspec/releases/download/${SHELLSPEC_VERSION}/shellspec-dist.tar.gz"
+        echo "${SHELLSPEC_SHA256}  ${dir}/shellspec-dist.tar.gz" | shasum -a 256 -c -
+        tar -xzf "${dir}/shellspec-dist.tar.gz" -C "${dir}"
+        echo "${dir}/shellspec" >> "${GITHUB_PATH}"

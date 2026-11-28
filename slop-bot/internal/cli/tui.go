@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	tea "charm.land/bubbletea/v2"
@@ -67,6 +68,19 @@ func (f *statusFeed) Run(ctx context.Context, send func(tea.Msg)) error {
 	if err := f.snapshot(ctx, send); err != nil {
 		return err
 	}
+	err = eachEvent(body, func(*api.Event) error { return f.snapshot(ctx, send) })
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return errors.New("the daemon closed the event stream")
+}
+
+// eachEvent calls fn for every event on an event stream until the stream
+// ends; a nil error means it ended cleanly.
+func eachEvent(body io.Reader, fn func(*api.Event) error) error {
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 	for sc.Scan() {
@@ -74,17 +88,11 @@ func (f *statusFeed) Run(ctx context.Context, send func(tea.Msg)) error {
 		if json.Unmarshal(sc.Bytes(), &ev) != nil {
 			continue
 		}
-		if err := f.snapshot(ctx, send); err != nil {
+		if err := fn(&ev); err != nil {
 			return err
 		}
 	}
-	if ctx.Err() != nil {
-		return nil
-	}
-	if err := sc.Err(); err != nil {
-		return err
-	}
-	return errors.New("the daemon closed the event stream")
+	return sc.Err()
 }
 
 func (f *statusFeed) snapshot(ctx context.Context, send func(tea.Msg)) error {

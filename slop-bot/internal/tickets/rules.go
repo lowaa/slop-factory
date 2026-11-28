@@ -3,6 +3,7 @@ package tickets
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -33,6 +34,8 @@ var (
 	ErrCycle = errors.New("tickets: blocker would create a cycle")
 	// ErrBlocked refuses starting the work on a ticket with open blockers.
 	ErrBlocked = errors.New("tickets: ticket has open blockers")
+	// ErrStatusChanged refuses a change whose IfStatus no longer holds.
+	ErrStatusChanged = errors.New("tickets: the ticket's status changed")
 
 	ErrInvalidCursor  = errors.New("tickets: invalid cursor")
 	ErrAlreadyStarted = errors.New("tickets: already started")
@@ -128,14 +131,28 @@ func InheritedAutoMerge(by ident.Principal, nt *NewTicket, parent *Ticket) bool 
 	return parent.AutoMerge
 }
 
+// InheritedRepos is the repos a ticket filed by `by` gets: what it was
+// filed with, or, for an agent's filing that names none, the creating
+// ticket's. A follow-up is nearly always in the code its filer was in, and
+// without repos its agent would get no worktree to work in.
+func InheritedRepos(by ident.Principal, nt *NewTicket, parent *Ticket) []string {
+	if by.IsUser() || len(nt.Repos) > 0 || parent == nil {
+		return nt.Repos
+	}
+	return slices.Clone(parent.Repos)
+}
+
 // CheckChange judges change to cur by `by`.
 func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketChange) error {
 	if err := CheckPrincipal(by); err != nil {
 		return err
 	}
+	if change.IfStatus != nil && *change.IfStatus != cur.Status {
+		return fmt.Errorf("%w: it is %s, not %s", ErrStatusChanged, cur.Status, *change.IfStatus)
+	}
 	// A retried status call (an agent sending done twice) changes nothing,
 	// so it isn't refused for the ticket having become uneditable.
-	if change.Status != nil && *change.Status == cur.Status && *change == (TicketChange{Status: change.Status}) {
+	if change.Status != nil && *change.Status == cur.Status && *change == (TicketChange{Status: change.Status, IfStatus: change.IfStatus}) {
 		return nil
 	}
 	if !by.IsUser() {
@@ -207,13 +224,19 @@ func changesScope(c *TicketChange) bool {
 // checkStatusAuthority is who may move a ticket's status. The user may make
 // any move. An agent moves its own ticket's, and may only cancel one it
 // filed: moving a filing on to open or in_progress itself would skip the
-// refinement another agent is meant to give it.
+// refinement another agent is meant to give it. Leaving discussion is the
+// user's too: a discussion is a risky decision waiting for a person, and an
+// agent that took its ticket out (or walked it on to done) would skip the
+// review the discussion exists for.
 func checkStatusAuthority(by ident.Principal, cur *Ticket, to Status) error {
 	if by.IsUser() || to == cur.Status {
 		return nil
 	}
 	if cur.Status.Terminal() {
 		return fmt.Errorf("%w: reopening %s", ErrUserOnly, cur.ID)
+	}
+	if cur.Status == StatusDiscussion {
+		return fmt.Errorf("%w: taking %s out of discussion", ErrUserOnly, cur.ID)
 	}
 	if by.Ticket != cur.ID && to != StatusCancelled {
 		return fmt.Errorf("%w (%s to %s)", ErrStatusNotPermitted, cur.ID, to)

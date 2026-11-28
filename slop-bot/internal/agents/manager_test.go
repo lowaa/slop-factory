@@ -3,9 +3,11 @@ package agents_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets/local"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
@@ -38,23 +41,96 @@ func TestMain(m *testing.M) {
 
 var t0 = time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC)
 
-// fakeHarness runs the fake for every harness name, with the re-exec env.
-type fakeHarness struct{ h *fake.Harness }
-
-func (f *fakeHarness) Harness(name string) (harness.AIHarness, bool) {
-	if name != config.ClaudeCode {
-		return nil, false
-	}
-	return &envHarness{f.h}, true
+// fakeHarness runs the fake, with the re-exec env, for claude-code, or for
+// each of names when given.
+type fakeHarness struct {
+	h     *fake.Harness
+	names []string
+	hooks *harnessHooks
 }
 
-// envHarness adds the re-exec variables to every workspace.
-type envHarness struct{ *fake.Harness }
+func (f *fakeHarness) Harness(name string) (harness.AIHarness, bool) {
+	names := f.names
+	if names == nil {
+		names = []string{config.ClaudeCode}
+	}
+	if !slices.Contains(names, name) {
+		return nil, false
+	}
+	return &envHarness{Harness: f.h, hooks: f.hooks}, true
+}
+
+// harnessHooks let a test break the harness where the fake can't: a start
+// that fails or hangs, a Send that fails or blocks, a driver that can't
+// steer. Unset hooks change nothing.
+type harnessHooks struct {
+	mu sync.Mutex
+	// start runs before each start (resume is nil for a new agent); an
+	// error fails it.
+	start func(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) error
+	// send runs before each Send; an error fails it, nothing sent.
+	send    func(ctx context.Context, agent ident.AgentID, msg *harness.Message) error
+	noSteer bool
+}
+
+func (h *harnessHooks) set(f func(h *harnessHooks)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	f(h)
+}
+
+func (h *harnessHooks) get() (start func(context.Context, *harness.Workspace, *harness.ConversationRef) error,
+	send func(context.Context, ident.AgentID, *harness.Message) error, noSteer bool) {
+	if h == nil {
+		return nil, nil, false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.start, h.send, h.noSteer
+}
+
+// envHarness adds the re-exec variables to every workspace, and the hooks.
+type envHarness struct {
+	*fake.Harness
+	hooks *harnessHooks
+}
+
+func (e *envHarness) Capabilities() harness.Capabilities {
+	c := e.Harness.Capabilities()
+	if _, _, noSteer := e.hooks.get(); noSteer {
+		c.MidTurnSteer = false
+	}
+	return c
+}
 
 func (e *envHarness) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
+	if start, _, _ := e.hooks.get(); start != nil {
+		if err := start(ctx, ws, resume); err != nil {
+			return nil, err
+		}
+	}
 	ws.Env[reexec] = "1"
 	ws.Env["GORACE"] = "atexit_sleep_ms=0"
-	return e.Harness.Start(ctx, ws, resume)
+	conv, err := e.Harness.Start(ctx, ws, resume)
+	if err != nil {
+		return nil, err
+	}
+	return &hookedConversation{Conversation: conv, agent: ws.Agent, hooks: e.hooks}, nil
+}
+
+type hookedConversation struct {
+	harness.Conversation
+	agent ident.AgentID
+	hooks *harnessHooks
+}
+
+func (c *hookedConversation) Send(ctx context.Context, msg *harness.Message) error {
+	if _, send, _ := c.hooks.get(); send != nil {
+		if err := send(ctx, c.agent, msg); err != nil {
+			return err
+		}
+	}
+	return c.Conversation.Send(ctx, msg)
 }
 
 // recordingWorktrees stands in for git: worktree behaviour is tested
@@ -63,6 +139,7 @@ type recordingWorktrees struct {
 	mu       sync.Mutex
 	created  []ident.TicketID
 	cleanups []ident.TicketID
+	removed  []string
 	dir      string
 }
 
@@ -87,9 +164,51 @@ func (w *recordingWorktrees) Cleanup(_ context.Context, ticket ident.TicketID, w
 	w.cleanups = append(w.cleanups, ticket)
 	out := make([]*worktree.CleanupResult, 0, len(wts))
 	for _, wt := range wts {
+		// The real manager runs git in RepoPath: cleanup must be handed it.
+		if wt.RepoPath == "" {
+			out = append(out, &worktree.CleanupResult{Worktree: wt, Err: errors.New("no repo path")})
+			continue
+		}
+		w.removed = append(w.removed, wt.Path)
 		out = append(out, &worktree.CleanupResult{Worktree: wt, Removed: true})
 	}
 	return out
+}
+
+// racingTickets runs a test's hook just before the next status update the
+// manager makes, then reports how that update went.
+type racingTickets struct {
+	tickets.TicketingSystem
+	mu     sync.Mutex
+	before func()
+	result chan error
+}
+
+// arm makes the next status update run before first, and report on result.
+func (r *racingTickets) arm(before func()) <-chan error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.before, r.result = before, make(chan error, 1)
+	return r.result
+}
+
+func (r *racingTickets) Update(ctx context.Context, by ident.Principal, id ident.TicketID, change *tickets.TicketChange) (*tickets.Ticket, error) {
+	r.mu.Lock()
+	before, result := r.before, r.result
+	if change.Status != nil {
+		r.before, r.result = nil, nil
+	} else {
+		before, result = nil, nil
+	}
+	r.mu.Unlock()
+	if before != nil {
+		before()
+	}
+	t, err := r.TicketingSystem.Update(ctx, by, id, change)
+	if result != nil {
+		result <- err
+	}
+	return t, err
 }
 
 type fixture struct {
@@ -97,22 +216,36 @@ type fixture struct {
 	ctl     *fake.Controller
 	state   *state.State
 	tickets *local.System
+	// racing is the ticketing system the manager sees: tickets, with a hook
+	// that can land a write between the manager's read and its update.
+	racing  *racingTickets
+	hooks   *harnessHooks
 	clock   *clock.Fake
 	wts     *recordingWorktrees
 	cfg     *config.Config
 	paths   *paths.Paths
 	mgr     *agents.Manager
 	cursor  int64
+	archive *transcript.Archive
+	// transcripts is where the fakes keep theirs.
+	transcripts string
 }
 
 func newFixture(t *testing.T, cfgYAML string) *fixture {
+	t.Helper()
+	return newFixtureFor(t, cfgYAML, nil)
+}
+
+// newFixtureFor runs the fake for each harness in names (claude-code when
+// nil).
+func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	t.Helper()
 	dir := t.TempDir()
 	ctx := context.Background()
 	quiet := slog.New(slog.DiscardHandler)
 	ctl, err := fake.NewController()
 	require.NoError(t, err)
-	cfg, err := config.Parse([]byte(cfgYAML), dir, dir)
+	cfg, err := config.Parse([]byte(cfgYAML+"\nrepos: [{name: app, path: "+filepath.Join(dir, "repo")+"}]\n"), dir, dir)
 	require.NoError(t, err)
 	p, err := paths.Resolve(&paths.Env{
 		Lookup: func(k string) (string, bool) {
@@ -134,8 +267,13 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 	require.NoError(t, ts.Start(ctx, ""))
 	self, err := os.Executable()
 	require.NoError(t, err)
-	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, clock: clk, cfg: cfg, paths: p,
-		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}}
+	archive, err := transcript.NewArchive(&transcript.ArchiveOptions{
+		Dir: p.TranscriptsDir(), Index: st.Transcripts, Retain: cfg.Retention.Transcripts.D(), Clock: clk,
+	})
+	require.NoError(t, err)
+	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, racing: &racingTickets{TicketingSystem: ts}, clock: clk, cfg: cfg, paths: p,
+		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}, hooks: &harnessHooks{}, archive: archive, transcripts: filepath.Join(dir, "fake-transcripts")}
+	require.NoError(t, os.MkdirAll(f.transcripts, 0o700))
 	t.Cleanup(func() {
 		if t.Failed() {
 			evs, _ := st.Events.ReadAfter(context.Background(), 0, 500)
@@ -144,7 +282,7 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 			}
 		}
 	})
-	f.mgr = f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: ctl.Socket(), Logger: quiet, Clock: clock.Real{}}})
+	f.mgr = f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: f.transcripts, Logger: quiet, Clock: clock.Real{}}, names: names, hooks: f.hooks})
 	require.NoError(t, f.mgr.Start(ctx))
 	t.Cleanup(func() { _ = f.mgr.Stop(context.Background()) })
 	// Cleanups run last-first: closing the controller first makes every
@@ -154,10 +292,30 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 	return f
 }
 
+// restartWith stops the manager, which drains (end any turn in flight
+// first, or it waits), runs between while no manager runs, and starts a new
+// one over the same state.
+func (f *fixture) restartWith(between func()) *agents.Manager {
+	f.t.Helper()
+	require.NoError(f.t, f.mgr.Stop(f.ctx()))
+	if between != nil {
+		between()
+	}
+	self, err := os.Executable()
+	require.NoError(f.t, err)
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
+	require.NoError(f.t, m.Start(context.Background()))
+	f.t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	f.t.Cleanup(func() { _ = f.ctl.Close() })
+	f.mgr = m
+	return m
+}
+
 func (f *fixture) newManager(h agents.Harnesses) *agents.Manager {
 	m, err := agents.New(&agents.Options{
-		Config: f.cfg, Paths: f.paths, State: f.state, Tickets: f.tickets, Harnesses: h,
+		Config: f.cfg, Paths: f.paths, State: f.state, Tickets: f.racing, Harnesses: h,
 		Worktrees: f.wts, User: "ada", Logger: slog.New(slog.NewTextHandler(testWriter{f.t}, nil)), Clock: f.clock, CLI: "/usr/bin/slop-bot",
+		Transcripts: transcript.NewLibrary(h, f.archive),
 	})
 	require.NoError(f.t, err)
 	return m
@@ -333,6 +491,7 @@ func TestDoneFinishesTheTicketAndCleansUp(t *testing.T) {
 	require.NotEmpty(t, got.Comments)
 	assert.Contains(t, got.Comments[len(got.Comments)-1].Body, "Exported as CSV.")
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
+	assert.Len(t, f.wts.removed, 1, "the worktree was removed, not kept with an error")
 	ended, err := f.state.Agents.Get(context.Background(), a.ID)
 	require.NoError(t, err)
 	assert.Equal(t, state.StateDone, ended.State)
@@ -489,7 +648,7 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 
 	self, err := os.Executable()
 	require.NoError(t, err)
-	m := f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: f.ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
 	require.NoError(t, m.Start(context.Background()))
 	t.Cleanup(func() { _ = m.Stop(context.Background()) })
 	t.Cleanup(func() { _ = f.ctl.Close() })
@@ -523,4 +682,37 @@ func TestCancellingATicketEndsItsAgentMidTurn(t *testing.T) {
 	// The turn never ends: the cancel cuts it off rather than waiting.
 	f.await(agents.EventFinished, nil)
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
+}
+
+func TestWalkingATicketForwardNeverUndoesAMoveMadeSince(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	tk := f.file("t", nil)
+	s := f.session()
+	f.user(s)
+	f.do(s, fake.Command{Cmd: fake.CmdTurnStart})
+	f.await(agents.EventState, toState(state.StateRefining))
+	a, err := f.state.Agents.LiveForTicket(context.Background(), tk.ID)
+	require.NoError(t, err)
+
+	// The user opens the ticket; the scheduler reads it as open and walks
+	// it on, but the agent parks it in discussion between that read and
+	// the scheduler's write.
+	discussion := tickets.StatusDiscussion
+	result := f.racing.arm(func() {
+		_, err := f.tickets.Update(context.Background(), ident.AgentPrincipal(a.ID, tk.ID), tk.ID, &tickets.TicketChange{Status: &discussion})
+		require.NoError(t, err)
+	})
+	open := tickets.StatusOpen
+	_, err = f.tickets.Update(context.Background(), ident.UserPrincipal(), tk.ID, &tickets.TicketChange{Status: &open})
+	require.NoError(t, err)
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, tickets.ErrStatusChanged)
+	case <-f.ctx().Done():
+		t.Fatal("the scheduler never walked the ticket forward")
+	}
+	got, err := f.tickets.Get(context.Background(), tk.ID)
+	require.NoError(t, err)
+	assert.Equal(t, tickets.StatusDiscussion, got.Status)
 }

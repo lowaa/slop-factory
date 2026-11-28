@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,10 @@ type e2e struct {
 	ctl  *fake.Controller
 	self string
 	seq  int64
+	// stop stops the daemon, waiting for it to exit.
+	stop func()
+	// transcripts is where the fakes keep theirs.
+	transcripts string
 }
 
 func newE2E(t *testing.T) *e2e {
@@ -76,7 +81,19 @@ func newE2E(t *testing.T) *e2e {
 // newE2EWithConfig is newE2E with the config file replaced, when given.
 func newE2EWithConfig(t *testing.T, cfg string) *e2e {
 	t.Helper()
-	h := newHarness(t)
+	return newE2EOn(t, cfg, nil)
+}
+
+// newE2EOn is newE2EWithConfig with the daemon on clk, when given.
+func newE2EOn(t *testing.T, cfg string, clk clock.Clock) *e2e {
+	t.Helper()
+	return newE2EFrom(t, newHarness(t), cfg, clk)
+}
+
+// newE2EFrom is newE2EOn with h's other deps as the test set them.
+func newE2EFrom(t *testing.T, h *harness, cfg string, clk clock.Clock) *e2e {
+	t.Helper()
+	h.deps.clock = clk
 	if cfg != "" {
 		require.NoError(t, os.WriteFile(h.config, []byte(cfg), 0o600))
 	}
@@ -84,15 +101,17 @@ func newE2EWithConfig(t *testing.T, cfg string) *e2e {
 	require.NoError(t, err)
 	self, err := os.Executable()
 	require.NoError(t, err)
+	transcripts := filepath.Join(h.home, "fake-transcripts")
+	require.NoError(t, os.MkdirAll(transcripts, 0o700))
 	h.deps.harnesses = daemon.Harnesses{"claude-code": &e2eHarness{
-		Harness: &fake.Harness{Binary: self, Control: ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}},
+		Harness: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}},
 		h:       h,
 	}}
-	startDaemon(t, h)
+	stop := startDaemon(t, h)
 	// Closing the controller first makes the fakes exit, so the daemon's
 	// drain doesn't wait on turns the test left open.
 	t.Cleanup(func() { _ = ctl.Close() })
-	return &e2e{t: t, h: h, ctl: ctl, self: self}
+	return &e2e{t: t, h: h, ctl: ctl, self: self, stop: stop, transcripts: transcripts}
 }
 
 func (e *e2e) ctx() context.Context {
@@ -212,7 +231,7 @@ func TestAnAgentCantActAsTheUser(t *testing.T) {
 
 func TestTheBriefingListsTheAgentCommands(t *testing.T) {
 	t.Parallel()
-	ref := AgentReference(New(&Deps{Stdout: os.Stdout, Stderr: os.Stderr}))
+	ref := AgentReference((&app{deps: &Deps{Stdout: os.Stdout, Stderr: os.Stderr}}).root())
 	for _, want := range []string{"slop-bot ask <question>", "slop-bot tell <agent|ticket|user> <text>", "slop-bot done --summary <text>",
 		"slop-bot ticket create --title <title>", "slop-bot status set <note>", "slop-bot ready-to-merge", "slop-bot discuss <decision>", "slop-bot inbox"} {
 		assert.Contains(t, ref, "`"+want+"`")

@@ -2,9 +2,10 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/agents"
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
@@ -22,6 +23,7 @@ var agentErrors = append([]control.ErrorMapping{
 	{Err: agents.ErrNotYourTicket, Status: http.StatusForbidden},
 	{Err: agents.ErrHasAutoMerge, Status: http.StatusConflict},
 	{Err: agents.ErrNotInDiscusson, Status: http.StatusConflict},
+	{Err: agents.ErrCantFinish, Status: http.StatusConflict},
 }, ticketErrors...)
 
 // agentRoutes is the agents' verbs, messaging, status and the event log.
@@ -56,6 +58,10 @@ func (ar *agentRoutes) tell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	by := control.PrincipalFrom(r.Context())
+	if in.All && in.Interrupt {
+		fail(w, errors.Join(errBadRequest, errors.New("--interrupt can't be combined with --all: a broadcast never interrupts")))
+		return
+	}
 	if in.All {
 		n, err := ar.d.agents.TellAll(r.Context(), by, in.Text)
 		if err != nil {
@@ -81,7 +87,8 @@ func apiMessages(msgs []state.Message) []api.Message {
 	return out
 }
 
-// inbox is the caller's unread messages, marked read as they're returned;
+// inbox is the caller's unread messages (an agent's: those not yet pushed
+// to it), marked read as they're returned;
 // with ?log, the history instead (user only).
 func (ar *agentRoutes) inbox(w http.ResponseWriter, r *http.Request) {
 	by := control.PrincipalFrom(r.Context())
@@ -105,7 +112,13 @@ func (ar *agentRoutes) inbox(w http.ResponseWriter, r *http.Request) {
 		control.WriteJSON(w, http.StatusOK, apiMessages(log))
 		return
 	}
-	unread, err := msgs.Unread(r.Context(), me)
+	// An agent has had its delivered messages pushed into its conversation;
+	// replaying them would repeat old instructions.
+	list := msgs.Unread
+	if !by.IsUser() {
+		list = msgs.Pending
+	}
+	unread, err := list(r.Context(), me)
 	if err != nil {
 		agentFail(w, err)
 		return
@@ -234,7 +247,11 @@ func (ar *agentRoutes) status(w http.ResponseWriter, r *http.Request) {
 		agentFail(w, err)
 		return
 	}
-	out := api.Status{Agents: []api.AgentStatus{}, Autonomy: ar.d.autonomy(r.Context()), Budget: ar.d.opts.Config.AutonomyBudget()}
+	out := api.Status{Agents: []api.AgentStatus{}, Autonomy: ar.d.autonomy(r.Context()), Budget: ar.d.opts.Config.AutonomyBudget(), Limits: []api.HarnessLimit{}}
+	for _, l := range ar.d.agents.Limits() {
+		out.Limits = append(out.Limits, api.HarnessLimit{Harness: l.Harness, Window: l.Window, UsedPercent: l.UsedPercent, ResetsAt: l.ResetsAt,
+			ReportedAt: l.ReportedAt, Threshold: l.Threshold, Held: l.Held})
+	}
 	if out.Outstanding, err = ar.d.tickets.CountOutstandingAgentCreated(r.Context()); err != nil {
 		agentFail(w, err)
 		return
@@ -273,38 +290,38 @@ func (ar *agentRoutes) events(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_, follow := r.URL.Query()["follow"]
-	w.Header().Set("Content-Type", "application/x-ndjson")
-	enc := json.NewEncoder(w)
-	flusher, _ := w.(http.Flusher)
-	// Headers go out now: a follower must know the stream is open before
-	// the first event, or it can't tell "no events yet" from "not connected".
-	if flusher != nil {
-		flusher.Flush()
+	read := ar.d.state.Events.ReadAfter
+	if follow {
+		read = ar.d.state.Events.Follow
 	}
+	by := control.PrincipalFrom(r.Context())
+	out := newStream(w)
+	// Send the headers now: a follower that has this response knows its
+	// starting point is fixed, even if no event comes for a while.
+	out.flush()
 	for {
-		var evs []state.Event
-		var err error
-		if follow {
-			evs, err = ar.d.state.Events.Follow(r.Context(), after, 500)
-		} else {
-			evs, err = ar.d.state.Events.ReadAfter(r.Context(), after, 500)
-		}
+		evs, err := read(r.Context(), after, 500)
 		if err != nil {
 			return
 		}
-		for _, e := range evs {
-			after = e.Seq
-			if enc.Encode(api.Event{Seq: e.Seq, At: e.At, Type: string(e.Type), Agent: string(e.Agent), Ticket: string(e.Ticket), Payload: e.Payload}) != nil {
+		for i := range evs {
+			after = evs[i].Seq
+			if visibleTo(by, &evs[i]) && out.event(&evs[i]) != nil {
 				return
 			}
 		}
-		if flusher != nil {
-			flusher.Flush()
-		}
+		out.flush()
 		if !follow && len(evs) < 500 {
 			return
 		}
 	}
+}
+
+// visibleTo hides other agents' conversation events from an agent: they
+// carry its text and tools, and one agent has no need to read another's
+// reasoning (`watch` and `transcript` are the user's).
+func visibleTo(by ident.Principal, e *state.Event) bool {
+	return by.IsUser() || !strings.HasPrefix(string(e.Type), agents.EventHarness) || e.Agent == by.Agent
 }
 
 // autonomy is whether agent-filed tickets are worked without a person: the

@@ -50,7 +50,7 @@ func (s *System) insertTicket(ctx context.Context, tx bun.Tx, a *actor, nt *tick
 	row := &ticketRow{CreatedByAgent: a.agent, ParentID: a.ticket, CreatedAt: now, UpdatedAt: now}
 	err := row.fromTicket(&tickets.Ticket{
 		Title: nt.Title, Body: nt.Body, Status: tickets.InitialStatus(nt),
-		AssigneeID: nt.Assignee, Agent: nt.Agent, Repos: nt.Repos,
+		AssigneeID: nt.Assignee, Agent: nt.Agent, Repos: tickets.InheritedRepos(a.by, nt, parent),
 		AutoMerge: tickets.InheritedAutoMerge(a.by, nt, parent),
 		Urgent:    nt.Urgent, UrgentReason: tickets.UrgentReason(nt.Urgent, nt.UrgentReason),
 	})

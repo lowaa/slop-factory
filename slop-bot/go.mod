@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.12.0
 	github.com/charmbracelet/x/exp/golden v0.1.0
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261126095604-0c8f306be07e
+	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/lowaa/slop-factory/go-clock v0.0.0-20261118121736-c1a6832892a8
 	github.com/mattn/go-runewidth v0.0.31
@@ -21,6 +22,7 @@ require (
 	github.com/uptrace/bun/dialect/sqlitedialect v1.3.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 	modernc.org/sqlite v1.63.0
 )
 

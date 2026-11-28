@@ -110,8 +110,12 @@ func TestNewBranch(t *testing.T) {
 	assert.Equal(t, pr1, f.run(wt.Path, "rev-parse", "slop-bot/t3/work"), "the previous PR's branch is untouched")
 	assert.Equal(t, "work", wt.Branch[len("slop-bot/t3/"):], "the caller's Worktree isn't mutated")
 
-	_, err = f.m.NewBranch(ctx, next, "fix-tests")
+	again, err := f.m.NewBranch(ctx, next, "fix-tests")
 	require.ErrorIs(t, err, gitx.ErrBranchExists)
+	assert.Nil(t, again, "git never switched, so no new Worktree")
+	again, err = f.m.NewBranch(ctx, next, "work")
+	require.ErrorIs(t, err, gitx.ErrBranchExists)
+	assert.Nil(t, again)
 
 	for _, bad := range []string{"", "-x", "a..b", "a/", "a.lock", "a b", "a~1", "x//y", strings.Repeat("x", 101)} {
 		_, err = f.m.NewBranch(ctx, next, bad)
@@ -199,7 +203,7 @@ func TestCreateRefusesAPathThatIsNotOurs(t *testing.T) {
 	require.ErrorIs(t, err, ErrCollision)
 }
 
-// A worktree deleted by hand leaves a stale registration; Create prunes it
+// A worktree deleted by hand leaves a stale registration; Create drops it
 // and re-adds the worktree on the branch that's still there, work and all.
 func TestCreateRecoversFromAStaleRegistration(t *testing.T) {
 	t.Parallel()

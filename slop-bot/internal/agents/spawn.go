@@ -20,9 +20,21 @@ import (
 // errMisconfigured is a ticket whose agent spec can't run here.
 var errMisconfigured = errors.New("agents: misconfigured")
 
-// spawn starts an agent for t, which the scheduler found eligible.
-func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool) error {
-	spec := agentspec.Resolve(t.Agent, m.opts.Config)
+// recoveryLimit is how many times in a row an agent whose harness died is
+// resumed before slop-bot gives up on it: enough for a crash or two, not
+// for a harness that dies on every start.
+const recoveryLimit = 3
+
+// spawn starts an agent for t, which the scheduler found eligible, with
+// spec: t's own, resolved, or the fallback specFor chose. It runs
+// on its own goroutine (goStart), under a context Stop cancels.
+func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool, spec tickets.AgentSpec) {
+	if err := m.spawnAgent(ctx, t, pool, spec); err != nil && !errors.Is(err, errMisconfigured) {
+		m.opts.Logger.Warn("agents: spawning", "ticket", t.ID, "err", err)
+	}
+}
+
+func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.Pool, spec tickets.AgentSpec) error {
 	h, ok := m.opts.Harnesses.Harness(spec.Harness)
 	if err := agentspec.Validate(spec, m.opts.Config); err != nil || !ok {
 		if err == nil {
@@ -41,6 +53,9 @@ func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool)
 	var wts []*worktree.Worktree
 	if len(t.Repos) > 0 {
 		if wts, err = m.opts.Worktrees.Create(ctx, t.ID, t.Repos, t.Repos[0]); err != nil {
+			// What Create made before failing is nobody's yet: clean it up
+			// rather than leave it for a cleanup that has no record of it.
+			m.reportCleanup(ctx, "", t.ID, m.opts.Worktrees.Cleanup(context.WithoutCancel(ctx), t.ID, wts))
 			return m.misconfigure(ctx, t, fmt.Errorf("creating worktrees: %w", err))
 		}
 	}
@@ -50,27 +65,37 @@ func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool)
 		ID: id, Ticket: t.ID, Harness: spec.Harness, Driver: h.Driver(), Model: spec.Model, Effort: spec.Effort,
 		Pool: pool, State: state.StateStarting, Reason: "spawned", TokenHash: control.HashToken(token),
 		Worktrees: stateWorktrees(wts),
+		// The kick-off says so.
+		BlockedTold: len(t.BlockedBy) > 0,
 	}); err != nil {
 		return err
 	}
 	ws, err := m.workspace(id, t, spec, wts, token)
 	if err != nil {
-		m.abandon(ctx, id, err)
+		m.failStart(ctx, id, t, err)
 		return err
 	}
 	conv, err := h.Start(ctx, ws, nil)
 	if err != nil {
-		m.abandon(ctx, id, err)
+		m.failStart(ctx, id, t, err)
 		return fmt.Errorf("agents: starting %s for ticket %s: %w", h.Name(), t.ID, err)
 	}
-	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
+	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
-	return r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: kickoff(t)})
+	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: kickoff(t)}); err != nil {
+		m.abortStart(ctx, r, t, err)
+		return err
+	}
+	// In step with whatever the ticket did while the agent started, and an
+	// open ticket's work starts now: no event may come to say so.
+	m.sync(ctx, t.ID)
+	return nil
 }
 
 // misconfigure parks a ticket whose spec can't run, and tells the user how
 // to fix it: never a crashed agent.
 func (m *Manager) misconfigure(ctx context.Context, t *tickets.Ticket, cause error) error {
+	ctx = context.WithoutCancel(ctx)
 	st := tickets.StatusMisconfigured
 	if _, err := m.opts.Tickets.Update(ctx, ident.UserPrincipal(), t.ID, &tickets.TicketChange{Status: &st}); err != nil {
 		m.opts.Logger.Warn("agents: marking a ticket misconfigured", "ticket", t.ID, "err", err)
@@ -81,30 +106,132 @@ func (m *Manager) misconfigure(ctx context.Context, t *tickets.Ticket, cause err
 	return fmt.Errorf("%w: ticket %s: %w", errMisconfigured, t.ID, cause)
 }
 
-// abandon ends an agent that never got going, so its slot frees.
-func (m *Manager) abandon(ctx context.Context, id ident.AgentID, cause error) {
-	if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: id, To: state.StateCrashed, Reason: cause.Error()}); err != nil {
-		m.opts.Logger.Warn("agents: abandoning", "agent", id, "err", err)
+// failStart ends an agent that never got going: it is released and its
+// worktrees cleaned up, so the ticket isn't wedged behind a live agent
+// nothing runs. A harness that won't start is a spec that can't run here,
+// so the ticket is parked as misconfigured rather than retried in a loop;
+// a start cut short by the daemon stopping is retried on the next start.
+func (m *Manager) failStart(ctx context.Context, id ident.AgentID, t *tickets.Ticket, cause error) {
+	stopped := m.base.Err() != nil
+	ctx = context.WithoutCancel(ctx)
+	m.event(ctx, EventSpawnFailed, id, t.ID, map[string]string{"error": cause.Error()})
+	a, err := m.opts.State.Agents.Get(ctx, id)
+	if err != nil {
+		m.opts.Logger.Warn("agents: reading an agent that failed to start", "agent", id, "err", err)
+		return
 	}
-	m.event(ctx, EventSpawnFailed, id, "", map[string]string{"error": cause.Error()})
-	m.tellUser(ctx, id, fmt.Sprintf("agent %s failed to start: %v", id, cause))
+	if stopped {
+		m.endRecord(ctx, a, state.StateReleased, "the daemon stopped while it started")
+		return
+	}
+	m.endRecord(ctx, a, state.StateReleased, "failed to start: "+cause.Error())
+	_ = m.misconfigure(ctx, t, fmt.Errorf("its agent failed to start: %w", cause))
+}
+
+// abortStart is failStart for an agent whose harness started but couldn't
+// be given its first message: the harness is stopped first.
+func (m *Manager) abortStart(ctx context.Context, r *runner, t *tickets.Ticket, cause error) {
+	r.mu.Lock()
+	r.stopping, r.ending = true, true
+	r.mu.Unlock()
+	stopCtx := context.WithoutCancel(ctx)
+	_ = r.conv.Stop(stopCtx, true)
+	<-r.exited
+	m.forget(r.id)
+	m.failStart(ctx, r.id, t, cause)
+}
+
+// recover resumes an agent whose harness died, up to recoveryLimit times in
+// a row; past that, or when the resume fails, slop-bot gives up on it.
+func (m *Manager) recover(ctx context.Context, id ident.AgentID) {
+	a, err := m.opts.State.Agents.Get(ctx, id)
+	if err != nil || a.EndedAt != nil {
+		return
+	}
+	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
+	if err == nil && t.Status.Terminal() {
+		m.endRecord(ctx, a, state.StateDone, endReason(t.Status))
+		return
+	}
+	n, err := m.opts.State.Agents.AddRecovery(ctx, id)
+	if err != nil {
+		m.opts.Logger.Warn("agents: counting a recovery", "agent", id, "err", err)
+		return
+	}
+	if n > recoveryLimit {
+		m.giveUp(ctx, a, fmt.Sprintf("its harness died %d times in a row", n))
+		return
+	}
+	if err := m.resume(ctx, a, recoveredNote); err != nil {
+		if m.base.Err() != nil {
+			return // the daemon is stopping: the next start tries again
+		}
+		m.giveUp(ctx, a, fmt.Sprintf("it couldn't be resumed: %v", err))
+	}
+}
+
+// giveUp releases an agent slop-bot can't run any more, cleaning up its
+// worktrees (any holding work are kept, and the user told), and parks its
+// ticket so a new agent isn't started straight into the same failure. The
+// user decides what next.
+func (m *Manager) giveUp(ctx context.Context, a *state.Agent, why string) {
+	ctx = context.WithoutCancel(ctx)
+	m.endRecord(ctx, a, state.StateReleased, why)
+	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
+	if err != nil {
+		m.opts.Logger.Warn("agents: reading the ticket of an agent given up on", "agent", a.ID, "err", err)
+		return
+	}
+	if t.Status == tickets.StatusPreparing || t.Status == tickets.StatusOpen {
+		_ = m.misconfigure(ctx, t, fmt.Errorf("its agent %s was released: %s", a.ID, why))
+		return
+	}
+	m.tellUser(ctx, a.ID, fmt.Sprintf("agent %s (ticket %s) was released: %s. Ticket %s is %s with no agent: "+
+		"`slop-bot ticket set %s --status open` starts a new one.", a.ID, t.ID, why, t.ID, t.Status, t.ID))
+}
+
+// endRecord ends an agent that has no runner, from its record: it moves to
+// st (an ending state), its worktrees are cleaned up and its slot queue
+// entry goes.
+func (m *Manager) endRecord(ctx context.Context, a *state.Agent, st state.AgentState, reason string) {
+	ctx = context.WithoutCancel(ctx)
+	m.cleanup(ctx, a.ID, a.Ticket)
+	if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: st, Reason: reason, GivenUp: true}); err != nil {
+		m.opts.Logger.Warn("agents: ending an agent", "agent", a.ID, "err", err)
+	}
+	m.retain(ctx, a.ID)
+	typ := EventFinished
+	if st == state.StateReleased {
+		typ = EventReleased
+	}
+	m.event(ctx, typ, a.ID, a.Ticket, map[string]string{"reason": reason})
+	m.forget(a.ID)
 }
 
 // adoption is a conversation the Manager is taking on, new or resumed.
 type adoption struct {
 	id     ident.AgentID
 	ticket ident.TicketID
-	pool   state.Pool
-	conv   harness.Conversation
-	caps   harness.Capabilities
-	st     state.AgentState
+	// harness is the configured name, whose plan limits the agent reports.
+	harness string
+	pool    state.Pool
+	conv    harness.Conversation
+	caps    harness.Capabilities
+	st      state.AgentState
+	// decl and summary carry what the agent declared from inside a TUI
+	// across the hand-back.
+	decl      declared
+	summary   string
+	holdsSlot bool
 }
 
 func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 	id := a.id
 	conv := a.conv
-	r := &runner{m: m, id: id, ticket: a.ticket, pool: a.pool, conv: conv, caps: a.caps, st: a.st, exited: make(chan struct{})}
+	r := &runner{m: m, id: id, ticket: a.ticket, harness: a.harness, pool: a.pool, conv: conv, caps: a.caps, st: a.st,
+		decl: a.decl, summary: a.summary, holdsSlot: a.holdsSlot, exited: make(chan struct{})}
 	m.mu.Lock()
+	r.stopping = m.stopping
 	m.runners[id] = r
 	m.mu.Unlock()
 	if err := m.opts.State.Agents.SetConversationID(ctx, id, conv.Ref().ID); err != nil {
@@ -182,6 +309,21 @@ func refs(rs []tickets.TicketRef) string {
 	return strings.Join(ids, ", ")
 }
 
+// worktreesOf rebuilds an agent's recorded worktrees. state.db keeps the
+// repo's name, not its path: the path comes from this machine's repo
+// lookup, which the worktree manager needs to run git in the repo.
+func (m *Manager) worktreesOf(a *state.Agent) []*worktree.Worktree {
+	out := make([]*worktree.Worktree, 0, len(a.Worktrees))
+	for _, w := range a.Worktrees {
+		wt := &worktree.Worktree{Ticket: a.Ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary}
+		if r, ok := m.opts.Config.Repo(w.Repo); ok {
+			wt.RepoPath = r.Path
+		}
+		out = append(out, wt)
+	}
+	return out
+}
+
 func stateWorktrees(wts []*worktree.Worktree) []state.Worktree {
 	out := make([]state.Worktree, 0, len(wts))
 	for _, w := range wts {
@@ -190,72 +332,144 @@ func stateWorktrees(wts []*worktree.Worktree) []state.Worktree {
 	return out
 }
 
+// What a resumed agent is told, by why it was resumed.
+const (
+	restartedNote = "slop-bot restarted, so your last turn may have been cut short. Check where you got to, then carry on."
+	recoveredNote = "Your session ended unexpectedly and slop-bot resumed it, so your last turn may have been cut short. " +
+		"Check where you got to, then carry on."
+)
+
 // resumeAll restarts, by conversation id, every agent that was running when
-// the daemon last stopped.
+// the daemon last stopped, each on its own goroutine. An agent whose ticket
+// finished meanwhile is ended instead; one whose harness had died is
+// recovered; one that never got a conversation is released, and its ticket
+// gets a new agent.
 func (m *Manager) resumeAll(ctx context.Context) error {
 	live, err := m.opts.State.Agents.ListLive(ctx)
 	if err != nil {
 		return err
 	}
 	for _, a := range live {
-		if a.Mode == state.ModeAttached || a.ConversationID == "" ||
-			a.State == state.StateCrashed || a.State == state.StateExited {
+		if a.Mode == state.ModeAttached {
+			m.adoptAttached(ctx, a)
 			continue
 		}
-		if err := m.resume(ctx, a); err != nil {
-			m.opts.Logger.Warn("agents: resuming", "agent", a.ID, "err", err)
-			m.tellUser(ctx, a.ID, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after a restart: %v", a.ID, a.Ticket, err))
+		t, err := m.opts.Tickets.Get(ctx, a.Ticket)
+		switch {
+		case err == nil && t.Status.Terminal():
+			m.endForTicket(ctx, a, nil, t.Status)
+		case a.ConversationID == "":
+			m.endRecord(ctx, a, state.StateReleased, "it never started a conversation to resume")
+		case a.State == state.StateCrashed || a.State == state.StateExited:
+			m.goStart(a.Ticket, a.Pool, false, func(ctx context.Context) { m.recover(ctx, a.ID) })
+		default:
+			m.goStart(a.Ticket, a.Pool, false, func(ctx context.Context) {
+				if err := m.resume(ctx, a, restartedNote); err != nil && m.base.Err() == nil {
+					m.opts.Logger.Warn("agents: resuming", "agent", a.ID, "err", err)
+					m.giveUp(ctx, a, fmt.Sprintf("it couldn't be resumed after a restart: %v", err))
+				}
+			})
 		}
 	}
 	return nil
 }
 
-func (m *Manager) resume(ctx context.Context, a *state.Agent) error {
+// adoptAttached takes on an agent a person had attached when the daemon
+// last stopped. It has no conversation of ours: it holds its slot and
+// takes its verbs from the TUI until its CLI reconnects and hands it back,
+// or its lease expires.
+func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
+	if a.State != state.StateAttached {
+		// The daemon stopped between taking the lease and moving the state.
+		if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: state.StateAttached, Reason: "attached at restart"}); err != nil {
+			m.opts.Logger.Warn("agents: recording an attach", "agent", a.ID, "err", err)
+		}
+	}
+	r := &runner{m: m, id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, st: state.StateAttached,
+		decl: declared(a.Declared), summary: a.DeclaredSummary, exited: make(chan struct{})}
+	close(r.exited)
+	m.mu.Lock()
+	m.runners[a.ID] = r
+	m.mu.Unlock()
+}
+
+// resume restarts a's conversation by id. A waiting agent stays waiting;
+// one that was mid-work, or whose harness died, is told why its last turn
+// may have been cut short. Messages that were waiting for it go now.
+func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error {
+	if a.State == state.StateAttached {
+		// Attached but holding no lease: the daemon stopped mid hand-back.
+		// It resumes like any agent cut off mid-work.
+		if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: state.StateStarting, Reason: "an interrupted hand-back"}); err != nil {
+			return err
+		}
+		a.State = state.StateStarting
+	}
+	conv, caps, err := m.startConversation(ctx, a)
+	if err != nil {
+		return err
+	}
+	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps, st: a.State})
+	st, cutShort := resumedState(a.State)
+	r.setState(ctx, st, "resumed")
+	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
+	if cutShort || note == recoveredNote {
+		r.m.enqueueNotice(ctx, r, note)
+	}
+	m.sync(ctx, a.Ticket)
+	// Whatever was queued before the restart: an answer waiting for a slot,
+	// a nudge. The slot queue lived in memory, so this rebuilds it.
+	m.deliverPending(ctx, r)
+	return nil
+}
+
+// resumedState is the state a resumed agent starts in, and whether its
+// last turn may have been cut short. A waiting agent goes on waiting; a
+// dead one is idle until it is told it was resumed.
+func resumedState(was state.AgentState) (state.AgentState, bool) {
+	switch was {
+	case state.StateWaitingUser, state.StateDiscussion, state.StateWaitingMerge, state.StateIdle:
+		return was, false
+	case state.StateCrashed, state.StateExited:
+		return state.StateIdle, true
+	}
+	return was, true
+}
+
+// startConversation resumes a's conversation by id, with a fresh token:
+// state.db holds only token hashes, so the old one can't be handed on.
+func (m *Manager) startConversation(ctx context.Context, a *state.Agent) (harness.Conversation, harness.Capabilities, error) {
 	h, ok := m.opts.Harnesses.Harness(a.Harness)
 	if !ok {
-		return fmt.Errorf("harness %q isn't available", a.Harness)
+		return nil, harness.Capabilities{}, fmt.Errorf("harness %q isn't available", a.Harness)
 	}
 	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
 	if err != nil {
-		return err
+		return nil, harness.Capabilities{}, err
 	}
-	// state.db holds only token hashes, so the resumed agent gets a new one.
-	token, err := control.NewToken()
+	token, err := m.rotateToken(ctx, a.ID)
 	if err != nil {
-		return err
+		return nil, harness.Capabilities{}, err
 	}
-	if err := m.opts.State.Agents.RotateTokenHash(ctx, a.ID, control.HashToken(token)); err != nil {
-		return err
-	}
-	var wts []*worktree.Worktree
-	for _, w := range a.Worktrees {
-		wts = append(wts, &worktree.Worktree{Ticket: a.Ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary})
-	}
-	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, wts, token)
+	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, m.worktreesOf(a), token)
 	if err != nil {
-		return err
+		return nil, harness.Capabilities{}, err
 	}
 	conv, err := h.Start(ctx, ws, &harness.ConversationRef{Harness: a.Harness, Driver: a.Driver, ID: a.ConversationID})
 	if err != nil {
-		return err
+		return nil, harness.Capabilities{}, err
 	}
-	m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, pool: a.Pool, conv: conv, caps: h.Capabilities(), st: a.State})
-	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
-	// A waiting agent stays waiting; one that was mid-work is told why its
-	// last turn may have been cut short.
-	switch a.State {
-	case state.StateWaitingUser, state.StateDiscussion, state.StateWaitingMerge, state.StateIdle:
-		return nil
-	}
-	_, err = m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{
-		From: state.UserParty, To: state.AgentParty(a.ID), Kind: state.KindSystem,
-		Body: "slop-bot restarted, so your last turn may have been cut short. Check where you got to, then carry on.",
-	})
+	return conv, h.Capabilities(), nil
+}
+
+// rotateToken gives the agent a new token, retiring the old one.
+func (m *Manager) rotateToken(ctx context.Context, id ident.AgentID) (string, error) {
+	token, err := control.NewToken()
 	if err != nil {
-		return err
+		return "", err
 	}
-	if r, ok := m.runner(a.ID); ok {
-		m.deliverPending(ctx, r)
+	if err := m.opts.State.Agents.RotateTokenHash(ctx, id, control.HashToken(token)); err != nil {
+		return "", err
 	}
-	return nil
+	return token, nil
 }

@@ -59,7 +59,7 @@ func (c *Controller) accept() {
 		c.mu.Lock()
 		c.conns = append(c.conns, conn)
 		c.mu.Unlock()
-		s := &Session{conn: conn, enc: json.NewEncoder(conn), reports: make(chan Report, 64)}
+		s := &Session{conn: conn, enc: json.NewEncoder(conn), reports: make(chan Report, 64), acks: make(chan Report, 1)}
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
@@ -97,18 +97,26 @@ func (c *Controller) Close() error {
 
 // Session is one running fake harness.
 type Session struct {
-	conn    net.Conn
-	enc     *json.Encoder
+	conn net.Conn
+	enc  *json.Encoder
+	// mu serialises Do: one command in flight, so its ack is its own.
 	mu      sync.Mutex
 	reports chan Report
+	// acks carries the ack and ran reports apart from the rest: what the
+	// fake received arrives whenever slop-bot acts, which may be while a
+	// command is in flight.
+	acks chan Report
 	// ID and Resumed come from the fake's started report.
 	ID      string
 	Resumed bool
+	// TUI says the fake runs in TUI mode, as an attach hands it over.
+	TUI bool
 }
 
 func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 	defer func() { _ = s.conn.Close() }()
 	defer close(s.reports)
+	defer close(s.acks)
 	sc := bufio.NewScanner(s.conn)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 	first := true
@@ -119,7 +127,7 @@ func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 		}
 		if first && r.Rep == RepStarted {
 			first = false
-			s.ID, s.Resumed = r.ID, r.Resumed
+			s.ID, s.Resumed, s.TUI = r.ID, r.Resumed, r.TUI
 			select {
 			case started <- s:
 			case <-closed:
@@ -127,8 +135,12 @@ func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 			}
 			continue
 		}
+		to := s.reports
+		if r.Rep == RepAck || r.Rep == RepRan {
+			to = s.acks
+		}
 		select {
-		case s.reports <- r:
+		case to <- r:
 		case <-closed:
 			return
 		}
@@ -139,23 +151,43 @@ func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 // to report the result, which it returns).
 func (s *Session) Do(ctx context.Context, c Command) (*Report, error) {
 	s.mu.Lock()
-	err := s.enc.Encode(c)
-	s.mu.Unlock()
-	if err != nil {
+	defer s.mu.Unlock()
+	if err := s.enc.Encode(c); err != nil {
 		return nil, err
 	}
-	want := RepAck
-	if c.Cmd == CmdRun {
-		want = RepRan
-	}
-	r, err := s.Expect(ctx, want)
-	if err != nil {
-		return nil, err
+	var r Report
+	select {
+	case got, ok := <-s.acks:
+		if !ok {
+			return nil, fmt.Errorf("fake: session ended waiting for %s's ack", c.Cmd)
+		}
+		r = got
+	case <-ctx.Done():
+		return nil, fmt.Errorf("fake: waiting for %s's ack: %w", c.Cmd, ctx.Err())
 	}
 	if r.Err != "" {
-		return r, fmt.Errorf("fake: %s: %s", c.Cmd, r.Err)
+		return &r, fmt.Errorf("fake: %s: %s", c.Cmd, r.Err)
 	}
-	return r, nil
+	return &r, nil
+}
+
+// Await waits for the next report of kind rep, passing over the others: in
+// TUI mode, what a test doesn't assert on (pastes, keys, hooks) arrives in
+// between.
+func (s *Session) Await(ctx context.Context, rep string) (*Report, error) {
+	for {
+		select {
+		case r, ok := <-s.reports:
+			if !ok {
+				return nil, fmt.Errorf("fake: session ended waiting for %s", rep)
+			}
+			if r.Rep == rep {
+				return &r, nil
+			}
+		case <-ctx.Done():
+			return nil, fmt.Errorf("fake: waiting for %s: %w", rep, ctx.Err())
+		}
+	}
 }
 
 // Expect waits for the next report of kind rep. Reports of other kinds that
