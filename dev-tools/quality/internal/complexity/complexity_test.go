@@ -188,7 +188,7 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-func TestPruneOnlyTightens(t *testing.T) {
+func TestPruneTightensCountsAndAcceptsTheRest(t *testing.T) {
 	t.Parallel()
 	m := &complexity.Metric{}
 	base := &complexity.Snapshot{Count: 4, Cyclomatic: dist(3, 6, 12, 1), Cognitive: dist(2, 5, 18, 0)}
@@ -198,7 +198,7 @@ func TestPruneOnlyTightens(t *testing.T) {
 	}
 	got := m.Prune(base, cur)
 	assert.Equal(t, &complexity.Snapshot{
-		Count: 9, Cyclomatic: dist(2.5, 6, 10, 1), Cognitive: dist(2, 4, 18, 0),
+		Count: 9, Cyclomatic: dist(2.5, 7, 10, 1), Cognitive: dist(2.5, 4, 19, 0),
 		Longest: cur.Longest,
 	}, got)
 }

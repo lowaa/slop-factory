@@ -1,7 +1,7 @@
 # Statement coverage: <package> <percent>, then the total. Written by
 # quality.sh; see dev-tools/quality/README.md.
 ./cmd/quality 96.4
-./internal/complexity 93.5
+./internal/complexity 93.8
 ./internal/coverage 98.7
 ./internal/gosrc 97.6
 ./internal/ratchet 85.9

@@ -213,6 +213,8 @@ Describe 'quality_lib.sh'
 
     It 'builds the CLI from its own go.sum when none is given'
       unset QUALITY_BIN
+      # test.sh exports GOWORK=off; unset it, so only quality_lib.sh can set it.
+      unset GOWORK
       When call quality_go "$(project)" --only=complexity
       The status should be success
       The result of function go_calls should match pattern 'go build -o */quality ./cmd/quality'

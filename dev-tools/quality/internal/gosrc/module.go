@@ -185,3 +185,31 @@ func IsGeneratedFile(p string) (bool, error) {
 	}
 	return ast.IsGenerated(f), nil
 }
+
+// HasCode reports whether any of the module-relative files has a function
+// body: the only thing a cover profile measures. A package of only
+// declarations (types, constants) has none, so no profile ever lists it,
+// and its absence from one says nothing.
+func (m *Module) HasCode(relFiles []string) (bool, error) {
+	fset := token.NewFileSet()
+	for _, rel := range relFiles {
+		f, err := parser.ParseFile(fset, filepath.Join(m.Dir, filepath.FromSlash(rel)), nil, parser.SkipObjectResolution)
+		if err != nil {
+			return false, err
+		}
+		found := false
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncDecl:
+				found = found || n.Body != nil
+			case *ast.FuncLit:
+				found = true
+			}
+			return !found
+		})
+		if found {
+			return true, nil
+		}
+	}
+	return false, nil
+}

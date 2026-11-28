@@ -1,6 +1,8 @@
-# Projects in dev-tools/lint/projects.txt without a quality.sh yet. This
-# list only shrinks: a new project gets its quality.sh when it lands, and a
-# project that gets one leaves the list (spec/every_project_spec.sh).
+# Projects in dev-tools/lint/projects.txt without a quality.sh yet. For Go
+# projects this list only shrinks: a new Go project gets its quality.sh when
+# it lands, and one that gets one leaves the list
+# (spec/every_project_spec.sh). quality_lib.sh measures only Go so far, so
+# other projects stay listed until it can measure them.
 artifact-store
 go-auth
 go-clock

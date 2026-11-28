@@ -3,7 +3,7 @@
 - Don't change git config, remotes or `gh auth`
 
 # Tests
-- Before pushing: `dev-tools/lint/lint.sh --changed` (every linter CI runs on the change, the repo-wide ones included), then the touched project's `test.sh`, `scan.sh` and `quality.sh`; a new project gets all three (`dev-tools/security/README.md`, `dev-tools/quality/README.md`) and a `dev-tools/lint/projects.txt` line
+- Before pushing: `dev-tools/lint/lint.sh --changed` (every linter CI runs on the change, the repo-wide ones included), then the touched project's `test.sh`, `scan.sh` and `quality.sh` (if it has one: `dev-tools/quality/pending.txt` lists those without); a new Go project gets all three (`dev-tools/security/README.md`, `dev-tools/quality/README.md`) and a `dev-tools/lint/projects.txt` line
 - Negative-test non-trivial tests: break the code, watch the test fail
 - Filter runs to the test you're iterating on
 - No timing-based waits: synchronise on events, locks or channels. Override long production timeouts in tests; discuss any test that must be slow

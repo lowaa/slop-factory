@@ -33,8 +33,10 @@ func profile(t *testing.T, mode string, lines ...string) string {
 func scratchModule(t *testing.T) *gosrc.Module {
 	t.Helper()
 	m, err := gosrc.LoadModule(testmod.Write(t, map[string]string{
-		"a/a.go":      "package a\n",
-		"b/b.go":      "package b\n",
+		"a/a.go": "package a\n",
+		"b/b.go": "package b\n\nfunc B() {}\n",
+		// Only declarations: nothing a profile could measure.
+		"c/c.go":      "package c\n\ntype T struct{}\n",
 		"a/zz_gen.go": testmod.Generated + "package a\n",
 	}))
 	require.NoError(t, err)
@@ -74,7 +76,17 @@ func TestMeasureNamesPackagesNoProfileReached(t *testing.T) {
 	m := &coverage.Metric{Module: scratchModule(t), Profiles: []string{profile(t, "set", "a/a.go:1.1,2.2 1 1")}}
 	s, err := m.Measure()
 	require.NoError(t, err)
-	assert.Equal(t, map[string]bool{"./b": true}, s.Unmeasured)
+	assert.Equal(t, map[string]bool{"./b": true}, s.Unmeasured, "c has only declarations, so its absence is no gap")
+}
+
+func TestANewPackageInNoProfileRegresses(t *testing.T) {
+	t.Parallel()
+	m := &coverage.Metric{}
+	base := snap(90, map[string]float64{"./a": 90})
+	cur := snap(90, map[string]float64{"./a": 90})
+	cur.Unmeasured = map[string]bool{"./c": true}
+	res := m.Compare(base, cur)
+	assert.Equal(t, []string{"./c: a new package in no cover profile: a profile of only some packages' tests?"}, res.Regressions)
 }
 
 func TestMetricNamesItsBaseline(t *testing.T) {

@@ -32,10 +32,9 @@ const (
 	CognitiveThreshold = 20
 	// LongestN is how many of the longest functions the baseline records.
 	LongestN = 10
-	// MeanTolerance is how far a mean may rise before it regresses. Removing
-	// a simple function raises the mean as surely as adding a complex one
-	// does: without it, deleting a duplicated helper failed the check. As
-	// with coverage's, it can't accumulate: the baseline never rises.
+	// MeanTolerance is how far a mean may rise before it warns. Removing a
+	// simple function raises the mean as surely as adding a complex one
+	// does, so a small rise isn't worth a warning.
 	MeanTolerance = 0.1
 )
 
@@ -246,8 +245,10 @@ func compareValue(res *ratchet.Result, key string, base, cur, tolerance float64,
 	}
 }
 
-// Prune implements ratchet.Metric: each gated value falls to the current
-// one where it is lower; the recorded ones take the current values.
+// Prune implements ratchet.Metric: the gated over-threshold counts fall to
+// the current ones where lower; everything else, warn-only, takes the
+// current values, so a pruned baseline stops warning about what it has
+// accepted.
 func (m *Metric) Prune(base, cur *Snapshot) *Snapshot {
 	return &Snapshot{
 		Count:      cur.Count,
@@ -260,9 +261,9 @@ func (m *Metric) Prune(base, cur *Snapshot) *Snapshot {
 func pruneDist(base, cur *Distribution) Distribution {
 	return Distribution{
 		Threshold:     cur.Threshold,
-		Mean:          math.Min(base.Mean, cur.Mean),
-		P90:           min(base.P90, cur.P90),
-		Max:           min(base.Max, cur.Max),
+		Mean:          cur.Mean,
+		P90:           cur.P90,
+		Max:           cur.Max,
 		OverThreshold: min(base.OverThreshold, cur.OverThreshold),
 	}
 }

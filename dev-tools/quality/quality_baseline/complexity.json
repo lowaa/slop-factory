@@ -1,15 +1,15 @@
 {
-  "functions": 82,
+  "functions": 83,
   "cyclomatic": {
     "threshold": 15,
-    "mean": 3.4,
+    "mean": 3.55,
     "p90": 8,
     "max": 10,
     "over_threshold": 0
   },
   "cognitive": {
     "threshold": 20,
-    "mean": 2.88,
+    "mean": 3.05,
     "p90": 9,
     "max": 13,
     "over_threshold": 0
@@ -21,6 +21,13 @@
       "lines": 38,
       "cyclomatic": 10,
       "cognitive": 10
+    },
+    {
+      "file": "internal/coverage/coverage.go",
+      "function": "(*Metric).Compare",
+      "lines": 38,
+      "cyclomatic": 9,
+      "cognitive": 13
     },
     {
       "file": "cmd/quality/app.go",
@@ -49,13 +56,6 @@
       "lines": 31,
       "cyclomatic": 9,
       "cognitive": 12
-    },
-    {
-      "file": "internal/coverage/coverage.go",
-      "function": "(*Metric).Compare",
-      "lines": 30,
-      "cyclomatic": 7,
-      "cognitive": 10
     },
     {
       "file": "internal/testtime/testtime.go",

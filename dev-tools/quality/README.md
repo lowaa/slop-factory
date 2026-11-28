@@ -70,12 +70,12 @@ in the baseline for the diff to show, but not gated: a module may grow.
 Directories named `testdata` or `vendor`, starting `.` or `_`, and nested
 modules (which measure themselves) are skipped.
 
-These rules are simple and strict: any rise in a gated number fails, but
-for a mean's 0.1. A mean moves when simple functions go as much as when
-complex ones arrive: folding a duplicated helper into one raised this
-module's means by 0.02, which without the tolerance failed. Like coverage's,
-it can't accumulate. When a bigger rise is the right call, rebaseline that
-measure alone (`--rebaseline --only=complexity`) and say why in the commit.
+Only the over-threshold counts are gated: a rise fails, and is fixed
+rather than rebaselined (it is a function lint also flags). The mean (past
+0.1), p90 and max only warn, because in a growing module nearly every new
+function moves them. `--prune` accepts their current values, so a pruned
+baseline stops repeating warnings it has seen; nothing about them needs a
+rebaseline.
 
 **Test time.** The wall time is from the first `go test -json` event to the
 last (packages run in parallel, so their times don't add), and the ten

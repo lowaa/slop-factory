@@ -187,7 +187,7 @@ which moves whenever code is added anywhere.
 | Baseline | Holds |
 | --- | --- |
 | `<module>/lint_baseline/<tool>.txt` | a Go module's findings, paths relative to it |
-| `<app>/deadcode/baseline.txt`, `allowlist.txt` | deadcode's (`slop-haus/server`, `slop-review`) |
+| `<app>/deadcode/baseline.txt`, `allowlist.txt` | deadcode's (`slop-haus/server`, `slop-review`, `slop-bot`) |
 | `slop-haus/frontend/lint_baseline/oxlint.txt`, `js-components/lint_baseline/oxlint.txt` | oxlint's per area |
 | `<project>/lint_baseline/ruff.txt` | a Python project's, paths relative to it |
 | `dev-tools/lint/baseline/knip.txt`, `jscpd.txt`, `shellcheck.txt`, `shfmt.txt` | the repo-wide ones, paths from the root |

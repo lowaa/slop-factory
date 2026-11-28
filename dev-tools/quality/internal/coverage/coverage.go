@@ -159,8 +159,16 @@ func (m *Metric) unmeasured(measured func(pkg string) bool) (map[string]bool, er
 		return nil, err
 	}
 	out := map[string]bool{}
-	for dir := range src {
-		if pkg := gosrc.Package(dir); !measured(pkg) {
+	for dir, files := range src {
+		pkg := gosrc.Package(dir)
+		if measured(pkg) {
+			continue
+		}
+		code, err := m.Module.HasCode(files)
+		if err != nil {
+			return nil, err
+		}
+		if code {
 			out[pkg] = true
 		}
 	}
@@ -231,6 +239,14 @@ func (m *Metric) Compare(base, cur *Snapshot) *ratchet.Result {
 				"%s: in the source but in no cover profile: a profile of only some packages' tests?", pkg))
 		default:
 			res.Improvements = append(res.Improvements, fmt.Sprintf("%s: gone, its baseline entry is stale", pkg))
+		}
+	}
+	// A new package that no profile measured would otherwise pass unseen,
+	// and the total be ratcheted without it.
+	for _, pkg := range sortedKeys(cur.Unmeasured) {
+		if _, known := base.Packages[pkg]; !known {
+			res.Regressions = append(res.Regressions, fmt.Sprintf(
+				"%s: a new package in no cover profile: a profile of only some packages' tests?", pkg))
 		}
 	}
 	compareOne(res, totalKey, base.Total, cur.Total)
