@@ -27,7 +27,7 @@ func (m *Manager) adoptSession(ctx context.Context, a *state.Agent) (s *started,
 	if !found || !isAdopter {
 		return nil, false, nil
 	}
-	conv, err := ad.AdoptAgent(ctx, a.ID)
+	conv, err := ad.AdoptAgent(ctx, a.ID, a.ConversationID)
 	switch {
 	case errors.Is(err, harness.ErrNoSession):
 		return nil, false, nil

@@ -65,8 +65,10 @@ type Conversation interface {
 // flight carries on rather than being cut short.
 type Adopter interface {
 	// AdoptAgent takes over agent's session, which outlived the daemon that
-	// started it: ErrNoSession if it didn't.
-	AdoptAgent(ctx context.Context, agent ident.AgentID) (Conversation, error)
+	// started it: ErrNoSession if it didn't. known is the conversation id
+	// the caller has on record for agent ("" for none): what the session
+	// is taken to be when it has lost its own record of it.
+	AdoptAgent(ctx context.Context, agent ident.AgentID, known string) (Conversation, error)
 }
 
 // Lasting is a conversation whose session can outlive it (see Adopter).

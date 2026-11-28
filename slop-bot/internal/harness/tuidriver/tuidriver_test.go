@@ -257,7 +257,7 @@ func TestAdoptAfterADaemonRestart(t *testing.T) {
 
 	// A new daemon: a fresh kit over the same tmux server.
 	restarted := *r.Harness
-	adopted, err := restarted.AdoptAgent(r.ctx, "a1")
+	adopted, err := restarted.AdoptAgent(r.ctx, "a1", "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = adopted.Stop(context.Background(), true) })
 	assert.Equal(t, ref, adopted.Ref(), "the conversation id comes back from the session")

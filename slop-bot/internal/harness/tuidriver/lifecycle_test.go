@@ -28,10 +28,38 @@ func TestAResumedConversationIsAdoptedWithItsID(t *testing.T) {
 	// The harness repeats the id it resumed, so no hook brings a new one.
 	resumed := r.launch(t, &ref)
 	require.NoError(t, resumed.Close())
-	adopted, err := r.Harness.AdoptAgent(r.ctx, "a1")
+	adopted, err := r.Harness.AdoptAgent(r.ctx, "a1", "")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = adopted.Stop(context.Background(), true) })
 	assert.Equal(t, ref, adopted.Ref())
+}
+
+// A session whose id tag is missing (the tag write failed, and it is only
+// retried on a hook) is adopted with the id the caller has on record, and
+// its tag repaired; with no id from either, adoption fails rather than
+// hand back a conversation with none, which the caller would store over
+// the real one.
+func TestAnUntaggedSessionIsAdoptedWithTheKnownID(t *testing.T) {
+	t.Parallel()
+	r := start(t)
+	ref := r.conv.Ref()
+	require.NotEmpty(t, ref.ID)
+	require.NoError(t, r.conv.Close())
+	session := fake.SessionName("a1")
+	// The tuidriver's tag for the conversation id.
+	const tag = "slop-bot-conversation"
+	require.NoError(t, r.Host.SetTag(r.ctx, session, tag, ""))
+
+	_, err := r.Harness.AdoptAgent(r.ctx, "a1", "")
+	require.Error(t, err, "no id from the session or the caller")
+
+	adopted, err := r.Harness.AdoptAgent(r.ctx, "a1", ref.ID)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = adopted.Stop(context.Background(), true) })
+	assert.Equal(t, ref, adopted.Ref())
+	got, err := r.Host.Tag(r.ctx, session, tag)
+	require.NoError(t, err)
+	assert.Equal(t, ref.ID, got, "the tag is written again")
 }
 
 func TestStopDoesNotTypeWhileAPersonIsAttached(t *testing.T) {

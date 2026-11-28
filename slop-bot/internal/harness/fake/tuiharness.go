@@ -40,8 +40,8 @@ func (h *TUIHarness) Start(ctx context.Context, ws *harness.Workspace, resume *h
 }
 
 // AdoptAgent implements harness.Adopter.
-func (h *TUIHarness) AdoptAgent(ctx context.Context, agent ident.AgentID) (harness.Conversation, error) {
-	return h.Adopt(ctx, h.Profile(), sessionPrefix, agent)
+func (h *TUIHarness) AdoptAgent(ctx context.Context, agent ident.AgentID, known string) (harness.Conversation, error) {
+	return h.Adopt(ctx, h.Profile(), sessionPrefix, agent, known)
 }
 
 // SessionName is the fake's session for an agent.

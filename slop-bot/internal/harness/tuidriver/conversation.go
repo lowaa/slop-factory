@@ -39,6 +39,9 @@ var (
 	// for Adopt, but this Conversation no longer drives it.
 	ErrClosed = errors.New("tuidriver: the conversation was closed")
 	errExited = errors.New("tuidriver: the session has exited")
+	// errUntagged is a session to adopt that records no conversation id,
+	// when the caller knows none either.
+	errUntagged = errors.New("tuidriver: the session records no conversation id")
 )
 
 // Options configure one conversation.
@@ -247,8 +250,12 @@ func (c *Conversation) boundedContext() context.Context {
 
 // Adopt takes over a session that outlived the daemon that started it, by
 // its name (opts.Session). Its state is read off the screen: it starts with
-// Ready, then TurnStarted if a turn is running.
-func Adopt(ctx context.Context, opts *Options) (*Conversation, error) {
+// Ready, then TurnStarted if a turn is running. Its conversation id is the
+// session's tag; known, the caller's record of it, stands in for a tag that
+// is missing (its write failed, and only a hook would have retried it),
+// and the tag is written again. With neither, adoption fails: a
+// conversation with no id would be stored over the caller's.
+func Adopt(ctx context.Context, opts *Options, known string) (*Conversation, error) {
 	o, err := opts.normalised()
 	if err != nil {
 		return nil, err
@@ -260,16 +267,24 @@ func Adopt(ctx context.Context, opts *Options) (*Conversation, error) {
 	if err != nil {
 		return nil, err
 	}
+	tagged := id
+	if id == "" {
+		id = known
+	}
+	if id == "" {
+		return nil, fmt.Errorf("%w: %s", errUntagged, o.Session)
+	}
 	screen, err := o.Host.Capture(ctx, o.Session)
 	if err != nil {
 		return nil, err
 	}
 	c := newConversation(o)
-	c.id = id
+	c.id, c.tagged = id, tagged
 	if err := c.route(); err != nil {
 		c.cancel()
 		return nil, err
 	}
+	c.recordID(ctx) // a no-op unless the tag was missing
 	c.apply(func() []harness.Event {
 		evs := []harness.Event{c.markReady()}
 		if o.Profile.Markers.classify(screen) == screenBusy {

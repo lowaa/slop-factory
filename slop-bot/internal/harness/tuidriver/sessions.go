@@ -54,10 +54,11 @@ func (s *Sessions) Start(ctx context.Context, p *Profile, prefix string, ws *har
 }
 
 // Adopt takes over agent's session, p's, named with prefix, which outlived
-// the daemon that started it: harness.ErrNoSession if there is none.
-func (s *Sessions) Adopt(ctx context.Context, p *Profile, prefix string, agent ident.AgentID) (harness.Conversation, error) {
+// the daemon that started it: harness.ErrNoSession if there is none. known
+// is the caller's record of its conversation id (see Adopt).
+func (s *Sessions) Adopt(ctx context.Context, p *Profile, prefix string, agent ident.AgentID, known string) (harness.Conversation, error) {
 	session := SessionName(prefix, agent)
-	conv, err := Adopt(ctx, s.Options(p, session))
+	conv, err := Adopt(ctx, s.Options(p, session), known)
 	if errors.Is(err, sessionhost.ErrNoSession) || errors.Is(err, sessionhost.ErrNoServer) {
 		return nil, fmt.Errorf("%w: %s: %w", harness.ErrNoSession, session, err)
 	}

@@ -36,12 +36,12 @@ func TestOwnsSession(t *testing.T) {
 func TestAdoptWithoutASessionIsErrNoSession(t *testing.T) {
 	t.Parallel()
 	r := start(t)
-	_, err := r.Harness.AdoptAgent(r.ctx, "a2")
+	_, err := r.Harness.AdoptAgent(r.ctx, "a2", "")
 	require.ErrorIs(t, err, harness.ErrNoSession)
 
 	// Nor once the server has gone.
 	require.NoError(t, r.conv.Close())
 	require.NoError(t, r.Host.KillServer(context.Background()))
-	_, err = r.Harness.AdoptAgent(r.ctx, "a1")
+	_, err = r.Harness.AdoptAgent(r.ctx, "a1", "")
 	require.ErrorIs(t, err, harness.ErrNoSession)
 }

@@ -54,8 +54,8 @@ func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harn
 }
 
 // AdoptAgent implements harness.Adopter.
-func (h *Harness) AdoptAgent(ctx context.Context, agent ident.AgentID) (harness.Conversation, error) {
-	return h.Adopt(ctx, h.Profile(), SessionPrefix, agent)
+func (h *Harness) AdoptAgent(ctx context.Context, agent ident.AgentID, known string) (harness.Conversation, error) {
+	return h.Adopt(ctx, h.Profile(), SessionPrefix, agent, known)
 }
 
 // ForgetWorkspace removes what Start wrote for ws, its sidecar folder, once
