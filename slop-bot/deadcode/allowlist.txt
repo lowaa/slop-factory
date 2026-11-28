@@ -44,5 +44,6 @@ internal/harness/sessionhost/tmuxtest/ package #36
 internal/scriptedmodel/server.go Server.Append #36
 internal/service/servicetest/ package #36
 internal/sqlitex/sqlitextest/ package #36
+internal/testexec/ package #36
 internal/tickets/conformance/ package #36
 internal/tickets/status.go Statuses #36
