@@ -147,14 +147,9 @@ func TestOutputWrittenJustBeforeExitIsStillReadable(t *testing.T) {
 func TestAChildHoldingStderrDoesntHideTheExit(t *testing.T) {
 	t.Parallel()
 	// The harness exits, leaving a child that keeps stderr open.
-	p, err := start(context.Background(), sh(t, `sleep 1000 >/dev/null & echo $!; echo bye >&2; exit 4`), time.Millisecond)
+	p, err := start(context.Background(), sh(t, `sleep 1000 >/dev/null & echo $!; read _; echo bye >&2; exit 4`), time.Millisecond)
 	require.NoError(t, err)
-	line, err := bufio.NewReader(p.Stdout).ReadString('\n')
-	require.NoError(t, err)
-	var orphan int
-	_, err = fmtSscan(strings.TrimSpace(line), &orphan)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = syscall.Kill(orphan, syscall.SIGKILL) })
+	readOrphan(t, p, bufio.NewReader(p.Stdout))
 
 	ctx, cancel := context.WithTimeout(context.Background(), testWait)
 	defer cancel()
@@ -173,15 +168,10 @@ func TestAChildHoldingStdoutDoesntHideTheEnd(t *testing.T) {
 	t.Parallel()
 	// The harness exits, leaving a child that keeps stdout open: the reader
 	// must still reach the end, and the child must be gone.
-	p, err := start(context.Background(), sh(t, `sleep 1000 & echo $!; exit 0`), time.Millisecond)
+	p, err := start(context.Background(), sh(t, `sleep 1000 & echo $!; read _; exit 0`), time.Millisecond)
 	require.NoError(t, err)
 	r := bufio.NewReader(p.Stdout)
-	line, err := r.ReadString('\n')
-	require.NoError(t, err)
-	var orphan int
-	_, err = fmtSscan(strings.TrimSpace(line), &orphan)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = syscall.Kill(orphan, syscall.SIGKILL) })
+	orphan := readOrphan(t, p, r)
 
 	ended := make(chan error, 1)
 	go func() {
@@ -199,4 +189,21 @@ func TestAChildHoldingStdoutDoesntHideTheEnd(t *testing.T) {
 		t.Fatal("the reader never reached the end of stdout")
 	}
 	assert.Eventually(t, func() bool { return syscall.Kill(orphan, 0) != nil }, testWait, testTick, "the child holding stdout is gone")
+}
+
+// readOrphan reads the pid the script echoes of the child it leaves behind,
+// arranges for that child to be killed, and only then lets the script exit
+// (it waits on a line of stdin): past the 1ms drain bound after the exit the
+// read end is closed, which would otherwise race this read.
+func readOrphan(t *testing.T, p *Process, r *bufio.Reader) int {
+	t.Helper()
+	line, err := r.ReadString('\n')
+	require.NoError(t, err)
+	var orphan int
+	_, err = fmtSscan(strings.TrimSpace(line), &orphan)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = syscall.Kill(orphan, syscall.SIGKILL) })
+	_, err = p.Stdin.Write([]byte("go\n"))
+	require.NoError(t, err)
+	return orphan
 }
