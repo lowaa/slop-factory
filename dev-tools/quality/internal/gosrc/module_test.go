@@ -45,6 +45,44 @@ func TestRelFileKeepsOnlyTheModulesOwnFiles(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestRelFileLeavesOutNestedModules(t *testing.T) {
+	t.Parallel()
+	m, err := gosrc.LoadModule(testmod.Write(t, map[string]string{
+		"sub/go.mod":    "module " + testmod.Path + "/sub\n",
+		"sub/deep/d.go": "package deep\n",
+		"own/o.go":      "package own\n",
+	}))
+	require.NoError(t, err)
+	for _, f := range []string{"sub/s.go", "sub/deep/d.go"} {
+		_, ok := m.RelFile(testmod.Path + "/" + f)
+		assert.False(t, ok, f)
+	}
+	rel, ok := m.RelFile(testmod.Path + "/own/o.go")
+	assert.True(t, ok)
+	assert.Equal(t, "own/o.go", rel)
+}
+
+func TestSourceFiles(t *testing.T) {
+	t.Parallel()
+	m, err := gosrc.LoadModule(testmod.Write(t, map[string]string{
+		"main.go":         "package main\n",
+		"p/p.go":          "package p\n",
+		"p/p_test.go":     "package p\n",
+		"p/zz_gen.go":     testmod.Generated + "package p\n",
+		"p/testdata/x.go": "package x\n",
+		"vendor/v/v.go":   "package v\n",
+		".hidden/h.go":    "package h\n",
+		"_skip/s.go":      "package s\n",
+		"nested/go.mod":   "module example.com/nested\n",
+		"nested/n.go":     "package n\n",
+		"p/notes.txt":     "not go",
+	}))
+	require.NoError(t, err)
+	got, err := m.SourceFiles()
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]string{".": {"main.go"}, "p": {"p/p.go"}}, got)
+}
+
 func TestPackageNamesAreModuleRelative(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, ".", gosrc.PackageOf("main.go"))

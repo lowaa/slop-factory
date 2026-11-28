@@ -1,34 +1,20 @@
 {
-  "functions": 75,
+  "functions": 82,
   "cyclomatic": {
     "threshold": 15,
     "mean": 3.4,
-    "p90": 9,
-    "max": 11,
+    "p90": 8,
+    "max": 10,
     "over_threshold": 0
   },
   "cognitive": {
     "threshold": 20,
     "mean": 2.88,
-    "p90": 10,
-    "max": 18,
+    "p90": 9,
+    "max": 13,
     "over_threshold": 0
   },
   "longest": [
-    {
-      "file": "internal/coverage/coverage.go",
-      "function": "(*Metric).snapshot",
-      "lines": 43,
-      "cyclomatic": 11,
-      "cognitive": 18
-    },
-    {
-      "file": "internal/complexity/complexity.go",
-      "function": "(*Metric).sourceDirs",
-      "lines": 39,
-      "cyclomatic": 11,
-      "cognitive": 15
-    },
     {
       "file": "cmd/quality/app.go",
       "function": "(*App).measure",
@@ -65,10 +51,24 @@
       "cognitive": 12
     },
     {
+      "file": "internal/coverage/coverage.go",
+      "function": "(*Metric).Compare",
+      "lines": 30,
+      "cyclomatic": 7,
+      "cognitive": 10
+    },
+    {
       "file": "internal/testtime/testtime.go",
       "function": "(*Metric).Measure",
       "lines": 30,
       "cyclomatic": 10,
+      "cognitive": 12
+    },
+    {
+      "file": "internal/gosrc/module.go",
+      "function": "(*Module).SourceFiles",
+      "lines": 27,
+      "cyclomatic": 8,
       "cognitive": 12
     },
     {

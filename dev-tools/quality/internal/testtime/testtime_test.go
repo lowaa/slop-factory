@@ -117,3 +117,24 @@ func TestPrintFailures(t *testing.T) {
 	testtime.PrintFailures(events, &out)
 	assert.Equal(t, "    want 1, got 2\nFAIL\tp\nq/q.go:1:1: syntax error\n", out.String())
 }
+
+// A timeout's panic is the running test's output, and only the package
+// fails: what go test -json writes for one.
+func TestPrintFailuresShowsTestsAFailedPackageLeftRunning(t *testing.T) {
+	t.Parallel()
+	events, err := testtime.ReadEvents(strings.NewReader(`{"Action":"run","Package":"p","Test":"TestDone"}
+{"Action":"output","Package":"p","Test":"TestDone","Output":"done fine\n"}
+{"Action":"pass","Package":"p","Test":"TestDone"}
+{"Action":"run","Package":"p","Test":"TestHang"}
+{"Action":"output","Package":"p","Test":"TestHang","Output":"panic: test timed out after 2s\n"}
+{"Action":"output","Package":"p","Test":"TestHang","Output":"\trunning tests:\n"}
+{"Action":"run","Package":"p","Test":"TestHang/sub"}
+{"Action":"output","Package":"p","Test":"TestHang/sub","Output":"sub log\n"}
+{"Action":"output","Package":"p","Output":"FAIL\tp\t2.005s\n"}
+{"Action":"fail","Package":"p","Elapsed":2.005}
+`))
+	require.NoError(t, err)
+	var out strings.Builder
+	testtime.PrintFailures(events, &out)
+	assert.Equal(t, "panic: test timed out after 2s\n\trunning tests:\nsub log\nFAIL\tp\t2.005s\n", out.String())
+}

@@ -30,10 +30,14 @@ const (
 	eps = 1e-9
 )
 
-// Snapshot is coverage percentages, rounded to one decimal.
+// Snapshot is coverage percentages, rounded to one decimal. Unmeasured
+// lists the packages that have source but are in no profile at all, which
+// a baseline never holds: they tell a package that is gone from one a
+// partial profile (a --coverprofile of some packages' tests) left out.
 type Snapshot struct {
-	Packages map[string]float64
-	Total    float64
+	Packages   map[string]float64
+	Total      float64
+	Unmeasured map[string]bool
 }
 
 // Converter turns a GOCOVERDIR into a text profile.
@@ -88,39 +92,55 @@ func (m *Metric) Measure() (*Snapshot, error) {
 	return m.snapshot(blocks)
 }
 
-func (m *Metric) snapshot(blocks *blockSet) (*Snapshot, error) {
-	type counts struct{ covered, total int }
+type counts struct{ covered, total int }
+
+func (c *counts) add(b *block) {
+	c.total += b.stmts
+	if b.covered {
+		c.covered += b.stmts
+	}
+}
+
+// count totals the module's own, hand-written files' statements by package.
+func (m *Metric) count(blocks *blockSet) (map[string]*counts, error) {
 	perPkg := map[string]*counts{}
-	var all counts
 	for file, fileBlocks := range blocks.files {
 		rel, ok := m.Module.RelFile(file)
 		if !ok {
 			continue
 		}
 		gen, err := m.Module.IsGenerated(rel)
-		if err != nil {
-			return nil, err
-		}
-		if gen {
+		if err != nil || gen {
+			if err != nil {
+				return nil, err
+			}
 			continue
 		}
 		pkg := gosrc.PackageOf(rel)
-		c := perPkg[pkg]
-		if c == nil {
-			c = &counts{}
-			perPkg[pkg] = c
+		if perPkg[pkg] == nil {
+			perPkg[pkg] = &counts{}
 		}
 		for _, b := range fileBlocks {
-			c.total += b.stmts
-			all.total += b.stmts
-			if b.covered {
-				c.covered += b.stmts
-				all.covered += b.stmts
-			}
+			perPkg[pkg].add(b)
 		}
 	}
-	s := &Snapshot{Packages: map[string]float64{}}
+	return perPkg, nil
+}
+
+func (m *Metric) snapshot(blocks *blockSet) (*Snapshot, error) {
+	perPkg, err := m.count(blocks)
+	if err != nil {
+		return nil, err
+	}
+	unmeasured, err := m.unmeasured(func(pkg string) bool { return perPkg[pkg] != nil })
+	if err != nil {
+		return nil, err
+	}
+	s := &Snapshot{Packages: map[string]float64{}, Unmeasured: unmeasured}
+	var all counts
 	for pkg, c := range perPkg {
+		all.covered += c.covered
+		all.total += c.total
 		// A package of only declarations has nothing to cover.
 		if c.total > 0 {
 			s.Packages[pkg] = percent(c.covered, c.total)
@@ -130,6 +150,21 @@ func (m *Metric) snapshot(blocks *blockSet) (*Snapshot, error) {
 		s.Total = percent(all.covered, all.total)
 	}
 	return s, nil
+}
+
+// unmeasured is the packages with source that no profile measured.
+func (m *Metric) unmeasured(measured func(pkg string) bool) (map[string]bool, error) {
+	src, err := m.Module.SourceFiles()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for dir := range src {
+		if pkg := gosrc.Package(dir); !measured(pkg) {
+			out[pkg] = true
+		}
+	}
+	return out, nil
 }
 
 func percent(covered, total int) float64 {
@@ -188,7 +223,13 @@ func (m *Metric) Compare(base, cur *Snapshot) *ratchet.Result {
 		compareOne(res, pkg, b, v)
 	}
 	for _, pkg := range sortedKeys(base.Packages) {
-		if _, ok := cur.Packages[pkg]; !ok {
+		_, ok := cur.Packages[pkg]
+		switch {
+		case ok:
+		case cur.Unmeasured[pkg]:
+			res.Regressions = append(res.Regressions, fmt.Sprintf(
+				"%s: in the source but in no cover profile: a profile of only some packages' tests?", pkg))
+		default:
 			res.Improvements = append(res.Improvements, fmt.Sprintf("%s: gone, its baseline entry is stale", pkg))
 		}
 	}
@@ -207,9 +248,17 @@ func compareOne(res *ratchet.Result, key string, base, cur float64) {
 }
 
 // Prune implements ratchet.Metric: each value rises to the current one,
-// gone packages leave, and new packages that pass the floor join.
+// gone packages leave, and new packages that pass the floor join. An
+// unmeasured package keeps its entry: it isn't gone. Nor does the total
+// move then: a total of some packages is no bar for all of them.
 func (m *Metric) Prune(base, cur *Snapshot) *Snapshot {
 	out := &Snapshot{Packages: map[string]float64{}, Total: max(base.Total, cur.Total)}
+	for pkg := range cur.Unmeasured {
+		if b, known := base.Packages[pkg]; known {
+			out.Packages[pkg] = b
+			out.Total = base.Total
+		}
+	}
 	for pkg, v := range cur.Packages {
 		b, known := base.Packages[pkg]
 		switch {

@@ -190,23 +190,67 @@ func (m *Metric) Report(cur *Snapshot) ([]byte, error) { return ratchet.EncodeJS
 
 // PrintFailures writes the output of every failed test and package, and
 // every build failure, from a `go test -json` stream: what plain `go test`
-// would have shown for them.
+// would have shown for them. A test that never finished (a timeout, a
+// panic in a goroutine, os.Exit) has no fail event of its own, only its
+// package does, so a failed package also shows its unfinished tests.
 func PrintFailures(events []Event, w io.Writer) {
-	type key struct{ pkg, test string }
-	output := map[key][]string{}
-	for _, e := range events {
-		switch e.Action {
-		case "output":
-			k := key{e.Package, e.Test}
-			output[k] = append(output[k], e.Output)
-		case "build-output":
-			_, _ = io.WriteString(w, e.Output)
-		case "fail":
-			k := key{e.Package, e.Test}
-			for _, line := range output[k] {
-				_, _ = io.WriteString(w, line)
+	p := &failurePrinter{w: w, output: map[testKey][]string{}, running: map[string][]string{}}
+	for i := range events {
+		p.event(&events[i])
+	}
+}
+
+type testKey struct{ pkg, test string }
+
+type failurePrinter struct {
+	w      io.Writer
+	output map[testKey][]string
+	// running is each package's started tests, in order, until they end.
+	running map[string][]string
+}
+
+func (p *failurePrinter) event(e *Event) {
+	k := testKey{e.Package, e.Test}
+	switch e.Action {
+	case "run":
+		p.running[e.Package] = append(p.running[e.Package], e.Test)
+	case "output":
+		p.output[k] = append(p.output[k], e.Output)
+	case "build-output":
+		_, _ = io.WriteString(p.w, e.Output)
+	case "pass", "skip":
+		p.end(k, false)
+	case "fail":
+		if e.Test == "" {
+			for _, t := range p.running[e.Package] {
+				p.flush(testKey{e.Package, t})
 			}
-			delete(output, k)
+			delete(p.running, e.Package)
+		}
+		p.end(k, true)
+	}
+}
+
+func (p *failurePrinter) end(k testKey, show bool) {
+	if show {
+		p.flush(k)
+	}
+	delete(p.output, k)
+	if k.test == "" {
+		return
+	}
+	running := p.running[k.pkg]
+	for i, t := range running {
+		if t == k.test {
+			p.running[k.pkg] = append(running[:i:i], running[i+1:]...)
+			break
 		}
 	}
+}
+
+func (p *failurePrinter) flush(k testKey) {
+	for _, line := range p.output[k] {
+		_, _ = io.WriteString(p.w, line)
+	}
+	delete(p.output, k)
 }

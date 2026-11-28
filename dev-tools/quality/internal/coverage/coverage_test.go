@@ -66,6 +66,29 @@ func TestMeasureMergesProfilesExcludingGeneratedAndForeignFiles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]float64{"./a": 100, "./b": 75}, s.Packages)
 	assert.InDelta(t, 87.5, s.Total, 1e-9) // 7 of 8
+	assert.Empty(t, s.Unmeasured)
+}
+
+func TestMeasureNamesPackagesNoProfileReached(t *testing.T) {
+	t.Parallel()
+	m := &coverage.Metric{Module: scratchModule(t), Profiles: []string{profile(t, "set", "a/a.go:1.1,2.2 1 1")}}
+	s, err := m.Measure()
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"./b": true}, s.Unmeasured)
+}
+
+func TestMetricNamesItsBaseline(t *testing.T) {
+	t.Parallel()
+	m := &coverage.Metric{}
+	assert.Equal(t, "coverage", m.Name())
+	assert.Equal(t, "coverage.txt", m.File())
+	assert.True(t, m.Gated())
+	s := snap(50, map[string]float64{"./a": 50})
+	report, err := m.Report(s)
+	require.NoError(t, err)
+	encoded, err := m.Encode(s)
+	require.NoError(t, err)
+	assert.Equal(t, encoded, report)
 }
 
 func TestMeasureRoundsToOneDecimal(t *testing.T) {
@@ -77,6 +100,24 @@ func TestMeasureRoundsToOneDecimal(t *testing.T) {
 	s, err := m.Measure()
 	require.NoError(t, err)
 	assert.InDelta(t, 33.3, s.Packages["./a"], 1e-9)
+}
+
+func TestMeasureFailsOnAFileItCannotRead(t *testing.T) {
+	t.Parallel()
+	mod := scratchModule(t)
+	testmod.WriteFiles(t, mod.Dir, map[string]string{"a/bad.go": "not go at all"})
+	_, err := (&coverage.Metric{Module: mod, Profiles: []string{profile(t, "set", "a/bad.go:1.1,2.2 1 1")}}).Measure()
+	assert.Error(t, err)
+}
+
+func TestMeasureFailsOnASourceTreeItCannotWalk(t *testing.T) {
+	t.Parallel()
+	mod := scratchModule(t)
+	locked := filepath.Join(mod.Dir, "locked")
+	require.NoError(t, os.Mkdir(locked, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) }) // #nosec G302 -- so t.TempDir can remove it
+	_, err := (&coverage.Metric{Module: mod, Profiles: []string{profile(t, "set", "a/a.go:1.1,2.2 1 1")}}).Measure()
+	assert.ErrorContains(t, err, "permission denied")
 }
 
 func TestMeasureWithoutInputFails(t *testing.T) {
@@ -195,6 +236,12 @@ func TestCompare(t *testing.T) {
 		},
 		{name: "a new package at the floor", cur: snap(80, map[string]float64{"./a": 90, "./b": 70, "./c": 80}), improvements: 1},
 		{name: "a package gone", cur: snap(80, map[string]float64{"./a": 90}), improvements: 1},
+		{
+			name:         "a package in no profile",
+			cur:          &coverage.Snapshot{Total: 90, Packages: map[string]float64{"./a": 90}, Unmeasured: map[string]bool{"./b": true}},
+			regressions:  []string{"./b: in the source but in no cover profile: a profile of only some packages' tests?"},
+			improvements: 1, // the total
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,6 +260,14 @@ func TestPruneOnlyTightens(t *testing.T) {
 	cur := snap(79.9, map[string]float64{"./up": 75, "./down": 85, "./new": 95, "./weak": 10})
 	got := m.Prune(base, cur)
 	assert.Equal(t, snap(80, map[string]float64{"./up": 75, "./down": 90, "./new": 95}), got)
+}
+
+func TestPruneKeepsAnUnmeasuredPackage(t *testing.T) {
+	t.Parallel()
+	base := snap(50, map[string]float64{"./a": 90, "./b": 10})
+	cur := &coverage.Snapshot{Total: 90, Packages: map[string]float64{"./a": 90}, Unmeasured: map[string]bool{"./b": true, "./c": true}}
+	got := (&coverage.Metric{}).Prune(base, cur)
+	assert.Equal(t, snap(50, map[string]float64{"./a": 90, "./b": 10}), got)
 }
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {

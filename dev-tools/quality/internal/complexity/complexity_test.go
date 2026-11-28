@@ -32,7 +32,7 @@ func Branchy(a int) int {
 	return 0
 }
 
-// gocognit:ignore
+//gocognit:ignore
 func Rec(n int) int {
 	if n == 0 {
 		return 0
@@ -90,7 +90,7 @@ func TestMeasuresEachFunction(t *testing.T) {
 	// from the distribution.
 	assert.Equal(t, 2, fns["p/p.go Rec"].Cognitive)
 	assert.Contains(t, fns, "p/p.go (*T).M")
-	assert.Contains(t, fns, "p/p.go T.V")
+	assert.Contains(t, fns, "p/p.go (T).V")
 	assert.Contains(t, fns, "p/p.go (*G).X")
 	assert.Equal(t, 6, s.Count)
 }

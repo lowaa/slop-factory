@@ -14,12 +14,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/fzipp/gocyclo"
 	"github.com/uudashr/gocognit"
@@ -86,78 +83,26 @@ func (m *Metric) File() string { return "complexity.json" }
 // Gated implements ratchet.Metric.
 func (m *Metric) Gated() bool { return true }
 
-// Measure walks the module's non-test, non-generated Go files, less
-// testdata, vendor, hidden directories and nested modules (which measure
-// themselves).
+// Measure measures the module's own source (gosrc.Module.SourceFiles).
 func (m *Metric) Measure() (*Snapshot, error) {
-	dirs, err := m.sourceDirs()
+	byDir, err := m.Module.SourceFiles()
 	if err != nil {
 		return nil, err
 	}
+	dirs := make([]string, 0, len(byDir))
+	for d := range byDir {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
 	var fns []Function
 	for _, dir := range dirs {
-		got, err := m.measureDir(dir)
+		got, err := m.measureDir(byDir[dir])
 		if err != nil {
 			return nil, err
 		}
 		fns = append(fns, got...)
 	}
 	return summarise(fns), nil
-}
-
-// sourceDirs maps each directory to its Go files, module-relative.
-func (m *Metric) sourceDirs() ([][]string, error) {
-	byDir := map[string][]string{}
-	err := filepath.WalkDir(m.Module.Dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return m.skipDir(p, d)
-		}
-		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
-			return nil
-		}
-		rel, err := filepath.Rel(m.Module.Dir, p)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		gen, err := m.Module.IsGenerated(rel)
-		if err != nil || gen {
-			return err
-		}
-		dir := filepath.Dir(rel)
-		byDir[dir] = append(byDir[dir], rel)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(byDir))
-	for k := range byDir {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([][]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, byDir[k])
-	}
-	return out, nil
-}
-
-func (m *Metric) skipDir(p string, d fs.DirEntry) error {
-	if p == m.Module.Dir {
-		return nil
-	}
-	name := d.Name()
-	if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
-		return filepath.SkipDir
-	}
-	if _, err := os.Stat(filepath.Join(p, "go.mod")); err == nil {
-		return filepath.SkipDir
-	}
-	return nil
 }
 
 // measureDir measures one package's files together, so gocognit sees
@@ -196,18 +141,19 @@ func (m *Metric) measureDir(relFiles []string) ([]Function, error) {
 	return fns, nil
 }
 
-// funcName is "F", "T.M" or "(*T).M", as lint names functions.
+// funcName is "F", "(T).M" or "(*T).M", as gocognit names functions in
+// lint's findings.
 func funcName(fn *ast.FuncDecl) string {
 	if fn.Recv == nil || len(fn.Recv.List) == 0 {
 		return fn.Name.Name
 	}
-	return recvName(fn.Recv.List[0].Type) + "." + fn.Name.Name
+	return "(" + recvName(fn.Recv.List[0].Type) + ")." + fn.Name.Name
 }
 
 func recvName(e ast.Expr) string {
 	switch t := e.(type) {
 	case *ast.StarExpr:
-		return "(*" + recvName(t.X) + ")"
+		return "*" + recvName(t.X)
 	case *ast.IndexExpr:
 		return recvName(t.X)
 	case *ast.IndexListExpr:
