@@ -175,6 +175,10 @@ type Usage struct {
 	CacheWriteTokens int64
 	// CostUSD is the harness's own figure, where it gives one.
 	CostUSD float64
+	// CostEstimated means CostUSD is the harness's estimate from list
+	// prices, not what was billed: on a subscription login nothing is
+	// charged per token, so it must not be summed as spend.
+	CostEstimated bool
 }
 
 // Limit is the plan allowance a harness reports.

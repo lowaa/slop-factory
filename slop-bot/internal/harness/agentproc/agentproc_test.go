@@ -101,3 +101,15 @@ func TestAgentEnv(t *testing.T) {
 	assert.Contains(t, withKeys, "ANTHROPIC_API_KEY=placeholder")
 	assert.NotContains(t, withKeys, "CLAUDECODE=1", "opting into API keys doesn't let the parent harness's variables through")
 }
+
+func TestWorkspaceEnvLayersTheWorkspaceOverTheHarness(t *testing.T) {
+	t.Parallel()
+	base := func() []string { return []string{"PATH=/bin", "OPENAI_API_KEY=placeholder", "MODE=user"} }
+	ws := &harness.Workspace{Env: map[string]string{"SLOP_BOT_AGENT_TOKEN": "tok", "MODE": "workspace"}}
+	got := WorkspaceEnv(base, ws, map[string]string{"MODE": "harness", "HARNESS_ONLY": "1"})
+	assert.Equal(t, []string{"PATH=/bin", "HARNESS_ONLY=1", "MODE=workspace", "SLOP_BOT_AGENT_TOKEN=tok"}, got)
+
+	ws.APIKeyOptIn = true
+	assert.Contains(t, WorkspaceEnv(base, ws, nil), "OPENAI_API_KEY=placeholder")
+	assert.NotEmpty(t, WorkspaceEnv(nil, &harness.Workspace{}, nil), "nil base is the process's own environment")
+}

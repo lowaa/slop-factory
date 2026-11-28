@@ -6,7 +6,6 @@ package claudecode
 import (
 	"context"
 	"log/slog"
-	"os"
 	"os/exec"
 
 	"github.com/google/uuid"
@@ -95,19 +94,11 @@ func common(ws *harness.Workspace) []string {
 }
 
 func (h *Harness) env(ws *harness.Workspace) []string {
-	base := os.Environ
-	if h.Environ != nil {
-		base = h.Environ
-	}
-	set := map[string]string{
+	return agentproc.WorkspaceEnv(h.Environ, ws, map[string]string{
 		// Without it a long command becomes a background task mid-turn, and
 		// turn boundaries stop meaning "the agent is done for now".
 		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
-	}
-	for k, v := range ws.Env {
-		set[k] = v
-	}
-	return agentproc.AgentEnv(&agentproc.EnvOptions{Base: base(), APIKeyOptIn: ws.APIKeyOptIn, Set: set})
+	})
 }
 
 func (h *Harness) binary() (string, error) {
