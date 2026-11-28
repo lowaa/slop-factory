@@ -290,6 +290,9 @@ func (m *Manager) recover(ctx context.Context, wt *Worktree, reg *registration) 
 	if err := m.writeResume(wt.Ticket, wt.Repo, res); err != nil {
 		return nil, false, err
 	}
+	if err := m.saveAutostashes(ctx, wt.RepoPath, wt.Path); err != nil {
+		return nil, false, err
+	}
 	if err := m.unregister(ctx, wt.RepoPath, wt.Path); err != nil {
 		return nil, false, err
 	}

@@ -33,6 +33,9 @@ const (
 	// ignored path (an agent's own worktrees): git would delete it, files
 	// and all, with this one, and `git status` doesn't show it.
 	Nested ReasonKind = "nested"
+	// InProgress is a rebase, merge, cherry-pick or revert stopped part
+	// way; an autostash of uncommitted edits may be held with it.
+	InProgress ReasonKind = "in_progress"
 )
 
 // Reason is one thing that would be lost if the worktree were removed.
@@ -151,6 +154,22 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 	var reasons []Reason
 	if st.reg != nil && st.reg.locked {
 		reasons = append(reasons, Reason{Kind: Locked, Detail: "locked: " + orNone(st.reg.lockReason)})
+	}
+	if st.reg != nil {
+		dir, err := m.adminDir(ctx, repoPath, st.path)
+		if err != nil {
+			return nil, err
+		}
+		if dir != "" {
+			ops, err := inProgress(dir)
+			if err != nil {
+				return nil, err
+			}
+			if len(ops) > 0 {
+				reasons = append(reasons, Reason{Kind: InProgress,
+					Detail: "an operation is in progress (" + strings.Join(ops, ", ") + "); finish or abort it"})
+			}
+		}
 	}
 	nested, err := m.nested(ctx, repoPath, st.path)
 	if err != nil {
