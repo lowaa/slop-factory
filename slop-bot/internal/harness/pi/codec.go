@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,22 +32,27 @@ type codec struct {
 	log     *slog.Logger
 	request atomic.Int64
 
-	// prompts are the ids of prompt commands awaiting their response, so a
-	// rejected or handled one can be told apart from other commands'.
+	// prompts are the texts of prompt commands awaiting their response, by
+	// request id, so a rejected or handled one can be told apart from other
+	// commands' and a rejected one can be sent again.
 	mu      sync.Mutex
-	prompts map[string]bool
+	prompts map[string]string
 
 	// The rest is touched only by Decode, which rpcdriver calls from a single
 	// goroutine.
 	inTurn bool
-	usage  *harness.Usage
+	// held are messages pi rejected mid-run (it refuses even a steer while
+	// compacting), sent again when compaction ends or the run settles, so
+	// a message Send accepted is never silently dropped.
+	held  []string
+	usage *harness.Usage
 	// failure is the run's last model error, cleared when a later request
 	// succeeds (a retry), and reported if the run ends on it.
 	failure string
 }
 
 func newCodec(id string, resumed bool, log *slog.Logger) *codec {
-	return &codec{id: id, resumed: resumed, log: log, prompts: map[string]bool{}}
+	return &codec{id: id, resumed: resumed, log: log, prompts: map[string]string{}}
 }
 
 func (c *codec) nextID() string { return "slop-bot-" + strconv.FormatInt(c.request.Add(1), 10) }
@@ -81,31 +87,51 @@ func (c *codec) Open(ctx context.Context, w *rpcdriver.Wire, next func(context.C
 			return "", err
 		}
 		var r record
-		if err := json.Unmarshal(line, &r); err != nil || r.Type != "response" || r.ID != handshakeID {
-			continue // nothing else is expected before the answer; nothing is lost by skipping it
+		if err := json.Unmarshal(line, &r); err != nil {
+			continue
 		}
-		if !r.Success {
-			return "", fmt.Errorf("get_state failed: %s", r.Error)
+		if r.Type == "extension_ui_request" {
+			// One of the user's extensions may open a dialog at session start,
+			// before pi answers; unanswered, it would block.
+			if err := c.cancelDialog(&r, w); err != nil {
+				return "", err
+			}
+			continue
 		}
-		var st stateData
-		if err := json.Unmarshal(r.Data, &st); err != nil {
-			return "", fmt.Errorf("decoding get_state: %w", err)
+		if r.Type != "response" || r.ID != handshakeID {
+			continue // no run has started, so no other record matters yet
 		}
-		if st.SessionID != c.id {
-			return "", fmt.Errorf("pi opened session %q, not %q", st.SessionID, c.id)
+		if err := c.checkState(&r); err != nil {
+			return "", err
 		}
-		if st.Model == nil {
-			return "", errors.New("pi has no model selected")
-		}
-		if c.resumed && st.MessageCount == 0 {
-			// --session-id creates a missing session rather than failing, so a
-			// resume that lost its session file starts afresh without context.
-			c.log.Warn("pi: resumed session is empty", "session", c.id)
-		}
-		c.log.Info("pi: session open", "session", c.id, "model", st.Model.Provider+"/"+st.Model.ID,
-			"thinking", st.ThinkingLevel, "messages", st.MessageCount)
 		return c.id, nil
 	}
+}
+
+// checkState checks get_state's answer: the session slop-bot chose, with a
+// model selected.
+func (c *codec) checkState(r *record) error {
+	if !r.Success {
+		return fmt.Errorf("get_state failed: %s", r.Error)
+	}
+	var st stateData
+	if err := json.Unmarshal(r.Data, &st); err != nil {
+		return fmt.Errorf("decoding get_state: %w", err)
+	}
+	if st.SessionID != c.id {
+		return fmt.Errorf("pi opened session %q, not %q", st.SessionID, c.id)
+	}
+	if st.Model == nil {
+		return errors.New("pi has no model selected")
+	}
+	if c.resumed && st.MessageCount == 0 {
+		// --session-id creates a missing session rather than failing, so a
+		// resume that lost its session file starts afresh without context.
+		c.log.Warn("pi: resumed session is empty", "session", c.id)
+	}
+	c.log.Info("pi: session open", "session", c.id, "model", st.Model.Provider+"/"+st.Model.ID,
+		"thinking", st.ThinkingLevel, "messages", st.MessageCount)
+	return nil
 }
 
 // Send always uses `prompt` with streamingBehavior "steer". pi decides
@@ -118,11 +144,28 @@ func (c *codec) Open(ctx context.Context, w *rpcdriver.Wire, next func(context.C
 // whole run to finish, and a message should reach the agent at the next
 // model call.
 func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, _ bool) error {
+	return c.prompt(w, msg.Text)
+}
+
+func (c *codec) prompt(w *rpcdriver.Wire, text string) error {
 	id := c.nextID()
 	c.mu.Lock()
-	c.prompts[id] = true
+	c.prompts[id] = text
 	c.mu.Unlock()
-	return write(w, command{ID: id, Type: "prompt", Message: msg.Text, StreamingBehavior: "steer"})
+	return write(w, command{ID: id, Type: "prompt", Message: text, StreamingBehavior: "steer"})
+}
+
+// resendHeld sends the held messages again; one pi rejects again is held
+// again, or, if pi is idle by then, ends a failed turn that reports why.
+func (c *codec) resendHeld(w *rpcdriver.Wire) error {
+	held := c.held
+	c.held = nil
+	for _, text := range held {
+		if err := c.prompt(w, text); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Interrupt sends abort: pi kills the running tool, ends the run with
@@ -205,7 +248,8 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 		c.usage, c.failure = &harness.Usage{CostEstimated: true}, ""
 		return []harness.Event{{Kind: harness.TurnStarted}}, nil
 	case "agent_settled":
-		return c.settle(&r), nil
+		evs := c.settle(&r)
+		return evs, c.resendHeld(w)
 	case "tool_execution_start":
 		return []harness.Event{{Kind: harness.ToolStarted, Tool: r.ToolName}}, nil
 	case "tool_execution_end":
@@ -221,17 +265,9 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 			c.failure = r.FinalError
 		}
 	case "compaction_end":
-		if r.Result != nil {
-			c.addUsage(r.Result.Usage)
-		}
+		return c.compacted(&r), c.resendHeld(w)
 	case "extension_ui_request":
-		// Nobody is at a terminal to answer a dialog; unanswered, it would
-		// hold the run for ever. The rest (notify, status) need no answer.
-		if slices.Contains(dialogs, r.Method) {
-			if err := write(w, map[string]any{"type": "extension_ui_response", "id": r.ID, "cancelled": true}); err != nil {
-				return nil, err
-			}
-		}
+		return nil, c.cancelDialog(&r, w)
 	case "extension_error":
 		c.log.Warn("pi: extension error", "event", r.Event, "err", r.Error)
 	}
@@ -243,7 +279,7 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 // the message was meant to start.
 func (c *codec) response(r *record) []harness.Event {
 	c.mu.Lock()
-	isPrompt := c.prompts[r.ID]
+	text, isPrompt := c.prompts[r.ID]
 	delete(c.prompts, r.ID)
 	c.mu.Unlock()
 	if !isPrompt {
@@ -258,7 +294,8 @@ func (c *codec) response(r *record) []harness.Event {
 	case !r.Success && !c.inTurn:
 		return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: r.Error}}
 	case !r.Success:
-		c.log.Warn("pi: a mid-turn message was rejected", "err", r.Error)
+		c.log.Warn("pi: a mid-turn message was rejected; holding it to send again", "err", r.Error)
+		c.held = append(c.held, text)
 	case d.Disposition == "handled" && !c.inTurn:
 		// An extension command or input handler consumed it.
 		return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: harness.TurnCompleted}}
@@ -273,7 +310,7 @@ func (c *codec) messageEnd(m *message) []harness.Event {
 	c.addUsage(m.Usage)
 	switch m.StopReason {
 	case "error":
-		c.failure = m.ErrorMessage
+		c.failure = cmp.Or(m.ErrorMessage, "the model request failed")
 	case "aborted":
 	default:
 		c.failure = ""
@@ -289,6 +326,33 @@ func (c *codec) messageEnd(m *message) []harness.Event {
 		}
 	}
 	return evs
+}
+
+// compacted counts a compaction's model usage: into the run's, or, for a
+// compaction outside a run, as a report of its own.
+func (c *codec) compacted(r *record) []harness.Event {
+	if r.Result == nil || r.Result.Usage == nil {
+		return nil
+	}
+	if c.inTurn {
+		c.addUsage(r.Result.Usage)
+		return nil
+	}
+	c.usage = &harness.Usage{CostEstimated: true}
+	c.addUsage(r.Result.Usage)
+	u := c.usage
+	c.usage = nil
+	return []harness.Event{{Kind: harness.UsageReport, Usage: u}}
+}
+
+// cancelDialog answers an extension's dialog as dismissed: nobody is at a
+// terminal to answer it, and unanswered it would block for ever. The other
+// methods (notify, status) need no answer.
+func (c *codec) cancelDialog(r *record, w *rpcdriver.Wire) error {
+	if !slices.Contains(dialogs, r.Method) {
+		return nil
+	}
+	return write(w, map[string]any{"type": "extension_ui_response", "id": r.ID, "cancelled": true})
 }
 
 func (c *codec) addUsage(u *usage) {

@@ -80,7 +80,9 @@ type Workspace struct {
 	// system-prompt channel; BriefingFile holds the same text on disk.
 	Briefing     string
 	BriefingFile string
-	// Model and Effort are blank for the harness's own default.
+	// Model and Effort are blank for the implementation's default, which may
+	// be one slop-bot chooses rather than the harness's own (pi always
+	// passes a model).
 	Model  string
 	Effort string
 	// Permissive runs without permission prompts.

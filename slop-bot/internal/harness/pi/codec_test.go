@@ -131,6 +131,10 @@ func TestTurnOutcomes(t *testing.T) {
 			[]string{agentStart, okEnd, `{"type":"auto_retry_end","success":false,"attempt":3,"finalError":"overloaded"}`, settled},
 			harness.TurnFailed, "overloaded",
 		},
+		"an error without a message still fails the turn": {
+			[]string{agentStart, `{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error"}}`, settled},
+			harness.TurnFailed, "the model request failed",
+		},
 		"aborted": {
 			[]string{agentStart, errorEnd, `{"type":"agent_settled","aborted":true}`},
 			harness.TurnInterrupted, "",
@@ -175,6 +179,26 @@ func TestTurnsDontShareUsage(t *testing.T) {
 	assert.InDelta(t, 0.5, usages[1].CostUSD, 1e-9)
 }
 
+func TestCompactionUsageIsCounted(t *testing.T) {
+	t.Parallel()
+	compaction := `{"type":"compaction_end","reason":"threshold","result":{"summary":"s","usage":{"input":100,"output":20,"cost":{"total":0.25}}},"aborted":false,"willRetry":false}`
+	end := `{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"stop","usage":{"input":10,"output":2,"cost":{"total":0.5}}}}`
+	t.Run("into the run's usage", func(t *testing.T) {
+		t.Parallel()
+		evs := decodeAll(t, testCodec(), nil, agentStart, end, compaction, settled)
+		require.Equal(t, []harness.EventKind{harness.TurnStarted, harness.UsageReport, harness.TurnEnded}, kinds(evs))
+		assert.Equal(t, int64(110), evs[1].Usage.InputTokens)
+		assert.InDelta(t, 0.75, evs[1].Usage.CostUSD, 1e-9)
+	})
+	t.Run("on its own outside a run", func(t *testing.T) {
+		t.Parallel()
+		evs := decodeAll(t, testCodec(), nil, compaction)
+		require.Equal(t, []harness.EventKind{harness.UsageReport}, kinds(evs))
+		assert.Equal(t, int64(20), evs[0].Usage.OutputTokens)
+		assert.True(t, evs[0].Usage.CostEstimated)
+	})
+}
+
 // sent sends a message through c, returning the prompt's request id.
 func sent(t *testing.T, c *codec) string {
 	t.Helper()
@@ -206,11 +230,38 @@ func TestAPromptThatStartsNoRunStillEndsATurn(t *testing.T) {
 		require.Equal(t, []harness.EventKind{harness.TurnStarted, harness.TurnEnded}, kinds(evs))
 		assert.Equal(t, harness.TurnCompleted, evs[1].Outcome)
 	})
-	t.Run("rejected mid-turn leaves the running turn alone", func(t *testing.T) {
+	t.Run("rejected mid-turn is sent again when compaction ends", func(t *testing.T) {
 		t.Parallel()
 		c := testCodec()
-		evs := decodeAll(t, c, nil, agentStart, response(sent(t, c), `"success":false,"error":"Cannot submit a prompt while compaction is in progress"`))
-		assert.Equal(t, []harness.EventKind{harness.TurnStarted}, kinds(evs))
+		var buf bytes.Buffer
+		w := rpcdriver.NewWire(&buf)
+		evs := decodeAll(t, c, w, agentStart, response(sent(t, c), `"success":false,"error":"Cannot submit a prompt while compaction is in progress"`))
+		assert.Equal(t, []harness.EventKind{harness.TurnStarted}, kinds(evs), "the running turn is left alone")
+		assert.Empty(t, buf.String(), "nothing is sent until compaction ends")
+
+		decodeAll(t, c, w, `{"type":"compaction_end","reason":"threshold","aborted":false,"willRetry":false}`)
+		var again command
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &again))
+		assert.Equal(t, "hi", again.Message)
+		assert.Equal(t, "steer", again.StreamingBehavior)
+
+		buf.Reset()
+		decodeAll(t, c, w, settled)
+		assert.Empty(t, buf.String(), "sent once, not again at settle")
+	})
+	t.Run("rejected mid-turn with no compaction is sent at settle", func(t *testing.T) {
+		t.Parallel()
+		c := testCodec()
+		var buf bytes.Buffer
+		w := rpcdriver.NewWire(&buf)
+		decodeAll(t, c, w, agentStart, response(sent(t, c), `"success":false,"error":"busy"`), settled)
+		var again command
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &again))
+		assert.Equal(t, "hi", again.Message)
+		// Rejected again while idle, it ends a failed turn: reported, not held.
+		evs := decodeAll(t, c, w, response(again.ID, `"success":false,"error":"busy"`))
+		require.Equal(t, []harness.EventKind{harness.TurnStarted, harness.TurnEnded}, kinds(evs))
+		assert.Equal(t, harness.TurnFailed, evs[1].Outcome)
 	})
 	t.Run("started and queued are left to the run's own events", func(t *testing.T) {
 		t.Parallel()
@@ -294,6 +345,18 @@ func TestOpen(t *testing.T) {
 		var cmd command
 		require.NoError(t, json.Unmarshal(buf.Bytes(), &cmd))
 		assert.Equal(t, command{ID: handshakeID, Type: "get_state"}, cmd)
+	})
+	t.Run("a dialog before the answer is cancelled", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		_, err := testCodec().Open(context.Background(), rpcdriver.NewWire(&buf),
+			lines([]byte(`{"type":"extension_ui_request","id":"ui-1","method":"select","title":"Pick"}`), handshakeReply(t)))
+		require.NoError(t, err)
+		dec := json.NewDecoder(&buf)
+		var hs, reply map[string]any
+		require.NoError(t, dec.Decode(&hs))
+		require.NoError(t, dec.Decode(&reply))
+		assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "ui-1", "cancelled": true}, reply)
 	})
 	t.Run("a different session is an error", func(t *testing.T) {
 		t.Parallel()
