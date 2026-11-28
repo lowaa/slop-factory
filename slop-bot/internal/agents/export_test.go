@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
@@ -19,7 +20,12 @@ const HeldRetry = heldRetry
 func Render(msgs []state.Message) string { return render(msgs) }
 
 // RemovalAdvice is how the user is told to remove a kept worktree.
-func RemovalAdvice(res *worktree.CleanupResult) string { return removalAdvice(res) }
+func RemovalAdvice(ticket ident.TicketID, res *worktree.CleanupResult) string {
+	return removalAdvice(ticket, res)
+}
+
+// EventPayload is what the event log records of a harness event.
+func EventPayload(ev *harness.Event) map[string]any { return eventPayload(ev) }
 
 // OnStartBusy makes f run whenever a start on the caller's goroutine (a
 // hand-back's resume) finds its ticket's start place taken. Set it before

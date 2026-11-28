@@ -52,6 +52,9 @@ func newInstallHarness(t *testing.T) *installHarness {
 	h.deps.Env.Lookup = func(k string) (string, bool) { v, ok := ih.vars[k]; return v, ok }
 	ih.stdin = strings.NewReader("")
 	h.deps.Stdin = ih.stdin
+	// /run/user/1000 is a real runtime dir: a slop-bot installed on the
+	// machine running the tests answers there. withDaemon stands one in.
+	h.deps.daemonAnswers = func(context.Context, string) bool { return false }
 	runner.Answer(lingerQuery, &service.Result{Stdout: "Linger=no\n"})
 	return ih
 }
@@ -106,7 +109,8 @@ func TestInstallSummaryGolden(t *testing.T) {
 	h := newInstallHarness(t)
 	repo := filepath.Join(h.home, "src", "app")
 	require.NoError(t, os.MkdirAll(repo, 0o700))
-	h.cmds.Answer("git -C "+repo+" rev-parse --git-dir", &service.Result{Stdout: ".git\n"})
+	h.cmds.Answer("git -C "+repo+" rev-parse --is-bare-repository", &service.Result{Stdout: "false\n"})
+	h.cmds.Answer("git -C "+repo+" rev-parse --show-toplevel", &service.Result{Stdout: repo + "\n"})
 
 	require.Equal(t, 0, h.run(t, "install", "--repo", "app=~/src/app"), h.err.String()+h.out.String())
 	golden(t, "install", h.stable(h.out.String()))
@@ -256,6 +260,7 @@ func TestPurgeRefusesWhileADaemonListens(t *testing.T) {
 	t.Parallel()
 	h := newInstallHarness(t)
 	h.vars["XDG_RUNTIME_DIR"] = h.runtime
+	h.deps.daemonAnswers = nil // dial the socket for real: it is the test's own
 	sock := filepath.Join(h.runtime, "slop-bot", "slop-bot.sock")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sock), 0o700))
 	l, err := net.Listen("unix", sock)

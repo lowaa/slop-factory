@@ -119,16 +119,16 @@ func (ar *attachRoutes) session(id ident.AgentID, holder string) *attachSession 
 	return s
 }
 
-func requireUser(w http.ResponseWriter, r *http.Request) bool {
+func requireUser(w http.ResponseWriter, r *http.Request, what string) bool {
 	if !control.PrincipalFrom(r.Context()).IsUser() {
-		attachFail(w, fmt.Errorf("%w: attach is the user's", agents.ErrUserOnly))
+		attachFail(w, fmt.Errorf("%w: %s is the user's", agents.ErrUserOnly, what))
 		return false
 	}
 	return true
 }
 
 func (ar *attachRoutes) attach(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	if !requireUser(w, r, "attach") {
 		return
 	}
 	var in api.AttachRequest
@@ -283,7 +283,7 @@ func (ar *attachRoutes) endTUI(pid int) {
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
 func (ar *attachRoutes) launched(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	if !requireUser(w, r, "attach") {
 		return
 	}
 	var in api.Launched
@@ -304,7 +304,7 @@ func (ar *attachRoutes) launched(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ar *attachRoutes) handBack(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	if !requireUser(w, r, "attach") {
 		return
 	}
 	var in api.HandBack
@@ -338,7 +338,7 @@ func (ar *attachRoutes) writeOutcome(w http.ResponseWriter, out agents.HandBackO
 // to end its TUI, and this waits for its hand-back. With no CLI connected
 // (after a daemon restart, before it reconnects) it hands back directly.
 func (ar *attachRoutes) detach(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	if !requireUser(w, r, "attach") {
 		return
 	}
 	a, err := ar.d.agents.LiveAgent(r.Context(), r.PathValue("agent"))

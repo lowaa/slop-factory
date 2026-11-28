@@ -42,15 +42,21 @@ type codec struct {
 	// commands' and a rejected one can be sent again.
 	prompts map[string]*pending
 	// held are messages pi rejected while busy (it refuses even a steer
-	// while compacting), so a message Send accepted is never silently
-	// dropped. They go again when the compaction ends, when the run settles
-	// (keeping the turn open), or after an interrupt, ahead of the next Send.
+	// while compacting), so a message Send accepted isn't silently dropped
+	// while pi runs. They go again when the compaction ends, when the run
+	// settles (keeping the turn open), or after an interrupt, ahead of the
+	// next Send. They live only here: state.db has marked them delivered, so
+	// a pi that exits first loses them.
 	held []string
 
 	// The rest is touched only by Decode, which rpcdriver calls from a single
 	// goroutine.
 	inTurn     bool
 	compacting bool
+	// heldTurn is a turn rpcdriver opened for an idle Send whose message pi
+	// rejected while compacting outside a run: no run's settle will close
+	// it, so the held messages' run, or the codec, has to.
+	heldTurn bool
 	// deferred is a settled run's turn end, held back while held messages
 	// are resent at the settle: they start the next run within the same
 	// turn, so Stop keeps waiting for it. It is emitted if none was taken.
@@ -70,6 +76,9 @@ type pending struct {
 	text string
 	// bridging marks a held message resent at a settle.
 	bridging bool
+	// opened marks a message sent while rpcdriver had no turn open, so its
+	// Send opened one.
+	opened bool
 }
 
 // bridge is a deferred turn end and the resent prompts it waits on.
@@ -168,22 +177,22 @@ func (c *codec) checkState(r *record) error {
 // until something else starts a run. follow_up isn't used: it waits for the
 // whole run to finish, and a message should reach the agent at the next
 // model call.
-func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, _ bool) error {
+func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, mid bool) error {
 	// Messages held over an interrupt go first, in the order they were sent.
 	for _, text := range c.takeHeld() {
-		if err := c.prompt(w, text, false); err != nil {
+		if err := c.prompt(w, &pending{text: text, opened: !mid}); err != nil {
 			return err
 		}
 	}
-	return c.prompt(w, msg.Text, false)
+	return c.prompt(w, &pending{text: msg.Text, opened: !mid})
 }
 
-func (c *codec) prompt(w *rpcdriver.Wire, text string, bridging bool) error {
+func (c *codec) prompt(w *rpcdriver.Wire, p *pending) error {
 	id := c.nextID()
 	c.mu.Lock()
-	c.prompts[id] = &pending{text: text, bridging: bridging}
+	c.prompts[id] = p
 	c.mu.Unlock()
-	return write(w, command{ID: id, Type: "prompt", Message: text, StreamingBehavior: "steer"})
+	return write(w, command{ID: id, Type: "prompt", Message: p.text, StreamingBehavior: "steer"})
 }
 
 func (c *codec) hold(text string) {
@@ -206,7 +215,7 @@ func (c *codec) takeHeld() []string {
 func (c *codec) resendHeld(w *rpcdriver.Wire, bridging bool) int {
 	held := c.takeHeld()
 	for i, text := range held {
-		if err := c.prompt(w, text, bridging); err != nil {
+		if err := c.prompt(w, &pending{text: text, bridging: bridging}); err != nil {
 			c.log.Warn("pi: resending a held message", "err", err, "lost", len(held)-i)
 			return i
 		}
@@ -316,9 +325,16 @@ func (c *codec) agentStart() []harness.Event {
 	if c.inTurn {
 		return nil // a retry or a queued message within the same run
 	}
-	c.inTurn = true
+	c.inTurn, c.heldTurn = true, false
 	c.usage, c.failure = &harness.Usage{CostEstimated: true}, ""
 	return []harness.Event{{Kind: harness.TurnStarted}}
+}
+
+// noRun is a turn that starts and ends with no run: a prompt pi rejected or
+// handled, or one held open by a rejected message that an interrupt ends.
+func (c *codec) noRun(outcome harness.TurnOutcome, text string) []harness.Event {
+	c.heldTurn = false
+	return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: outcome, Text: text}}
 }
 
 func (c *codec) decodeMessageEnd(r *record) ([]harness.Event, error) {
@@ -332,10 +348,14 @@ func (c *codec) decodeMessageEnd(r *record) ([]harness.Event, error) {
 func (c *codec) compactionEnd(r *record, w *rpcdriver.Wire) []harness.Event {
 	c.compacting = false
 	evs := c.compacted(r)
-	if !r.Aborted {
-		// An aborted one is part of an interrupt: the held messages wait
-		// for the next Send rather than restart the agent.
+	switch {
+	case !r.Aborted:
 		c.resendHeld(w, false)
+	case c.heldTurn && !c.inTurn:
+		// An aborted one is part of an interrupt: the held messages wait
+		// for the next Send rather than restart the agent, so nothing else
+		// will end the turn their Send opened.
+		evs = append(evs, c.noRun(harness.TurnInterrupted, "")...)
 	}
 	return evs
 }
@@ -363,11 +383,14 @@ func (c *codec) response(r *record) []harness.Event {
 	case !r.Success && (c.inTurn || c.compacting):
 		c.log.Warn("pi: a message was rejected while pi was busy; holding it to send again", "err", r.Error)
 		c.hold(p.text)
+		if p.opened && !c.inTurn {
+			c.heldTurn = true
+		}
 	case !r.Success:
-		return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: r.Error}}
+		return c.noRun(harness.TurnFailed, r.Error)
 	case d.Disposition == "handled" && !c.inTurn:
 		// An extension command or input handler consumed it.
-		return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: harness.TurnCompleted}}
+		return c.noRun(harness.TurnCompleted, "")
 	}
 	return nil
 }

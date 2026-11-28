@@ -21,10 +21,21 @@ const remote = "origin"
 // `worktree add` never finished.
 const lockInitializing = "initializing"
 
-// checkRepo checks p is a git repo's own top level (or, bare, its git dir).
-// A plain directory inside some other repo would otherwise have git discover
-// and act on that enclosing repo.
-func (m *Manager) checkRepo(ctx context.Context, p string) error {
+// ErrNotTopLevel is a repo path inside a repo rather than its top level.
+var ErrNotTopLevel = errors.New("not a repo of its own")
+
+// Runner runs git in a directory and returns what it printed: *gitx.Git, or
+// doctor's probes.
+type Runner interface {
+	Run(ctx context.Context, dir string, args ...string) (string, error)
+}
+
+func (m *Manager) checkRepo(ctx context.Context, p string) error { return CheckRepo(ctx, m.git, p) }
+
+// CheckRepo checks p is a git repo's own top level (or, bare, its git dir),
+// as a repo in the lookup must be. A plain directory inside some other repo
+// would otherwise have git discover and act on that enclosing repo.
+func CheckRepo(ctx context.Context, git Runner, p string) error {
 	info, err := os.Stat(p)
 	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("%w: %s", ErrRepoMissing, p)
@@ -35,7 +46,7 @@ func (m *Manager) checkRepo(ctx context.Context, p string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("%w: %s isn't a directory", ErrRepoMissing, p)
 	}
-	bare, err := m.git.Run(ctx, p, "rev-parse", "--is-bare-repository")
+	bare, err := git.Run(ctx, p, "rev-parse", "--is-bare-repository")
 	if err != nil {
 		return err
 	}
@@ -43,7 +54,7 @@ func (m *Manager) checkRepo(ctx context.Context, p string) error {
 	if strings.TrimSpace(bare) == "true" {
 		query = "--absolute-git-dir"
 	}
-	top, err := m.git.Run(ctx, p, "rev-parse", query)
+	top, err := git.Run(ctx, p, "rev-parse", query)
 	if err != nil {
 		return err
 	}
@@ -55,7 +66,7 @@ func (m *Manager) checkRepo(ctx context.Context, p string) error {
 		return err
 	}
 	if got := filepath.Clean(strings.TrimSpace(top)); got != want {
-		return fmt.Errorf("%w: %s is inside the repo at %s, not a repo of its own", gitx.ErrNotARepo, p, got)
+		return fmt.Errorf("%w: %w: %s is inside the repo at %s", gitx.ErrNotARepo, ErrNotTopLevel, p, got)
 	}
 	return nil
 }

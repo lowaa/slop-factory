@@ -125,6 +125,7 @@ func (a *app) root() *cobra.Command {
 		a.installCmd(),
 		a.uninstallCmd(),
 		a.ticketCmd(),
+		a.worktreesCmd(),
 		a.tuiCmd(),
 		a.hookCmd(),
 	)
