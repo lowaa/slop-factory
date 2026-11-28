@@ -35,6 +35,56 @@ func TestPeriodicRunsAtStartThenEveryPeriodUntilStopped(t *testing.T) {
 	assert.Empty(t, runs, "stopped")
 }
 
+// Stop cancels a run in progress, and returns once it has ended: a sweep
+// mustn't carry on into the stores the daemon closes next.
+func TestPeriodicStopCancelsARunInProgress(t *testing.T) {
+	t.Parallel()
+	entered := make(chan struct{})
+	p := &Periodic{N: "sweep", Every: time.Hour, Clock: clock.NewFake(time.Now()), Logger: slog.New(slog.DiscardHandler),
+		Run: func(ctx context.Context) error {
+			close(entered)
+			<-ctx.Done()
+			return ctx.Err()
+		}}
+	require.NoError(t, p.Start(context.Background()))
+	<-entered
+	// A safety net, not a synchronisation: a Stop that doesn't cancel the
+	// run gives up here instead of hanging the test.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, p.Stop(ctx))
+	select {
+	case <-p.Exited():
+	default:
+		assert.Fail(t, "Stop returned before the run ended")
+	}
+}
+
+// A run that ignores its context outlives a Stop that gives up at its
+// deadline; Exited says when it has really gone.
+func TestPeriodicExitedOutlivesAStopThatGaveUp(t *testing.T) {
+	t.Parallel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	p := &Periodic{N: "sweep", Every: time.Hour, Clock: clock.NewFake(time.Now()), Logger: slog.New(slog.DiscardHandler),
+		Run: func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		}}
+	require.NoError(t, p.Start(context.Background()))
+	<-entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, p.Stop(ctx), context.Canceled)
+	select {
+	case <-p.Exited():
+		assert.Fail(t, "the run is still going")
+	default:
+	}
+	close(release)
+	<-p.Exited()
+}
+
 func TestPeriodicNeedsItsFields(t *testing.T) {
 	t.Parallel()
 	assert.Error(t, (&Periodic{N: "x"}).Start(context.Background()))

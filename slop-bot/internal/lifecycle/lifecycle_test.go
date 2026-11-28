@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,6 +66,67 @@ func TestStopTwiceStopsOnce(t *testing.T) {
 	require.NoError(t, g.Stop(context.Background()))
 	require.NoError(t, g.Stop(context.Background()))
 	assert.Equal(t, []string{"start a", "stop a"}, r.calls)
+}
+
+// exiter is a component whose Stop gives up at once, while it runs on
+// until release closes.
+type exiter struct {
+	release, exited chan struct{}
+}
+
+func (e *exiter) Name() string                { return "sweep" }
+func (e *exiter) Start(context.Context) error { return nil }
+func (e *exiter) Exited() <-chan struct{}     { return e.exited }
+func (e *exiter) Stop(context.Context) error  { return errors.New("gave up at its deadline") }
+
+// warned closes logged at the first warning logged.
+type warned struct {
+	slog.Handler
+	once   sync.Once
+	logged chan struct{}
+}
+
+func (h *warned) Enabled(_ context.Context, l slog.Level) bool { return l >= slog.LevelWarn }
+
+func (h *warned) Handle(context.Context, slog.Record) error {
+	h.once.Do(func() { close(h.logged) })
+	return nil
+}
+
+// A component still running after its Stop gave up holds back stopping
+// what it depends on until it has exited: a sweep still in a database
+// mustn't see it closed.
+func TestStopWaitsForAComponentThatOutlivedItsStop(t *testing.T) {
+	t.Parallel()
+	sweep := &exiter{release: make(chan struct{}), exited: make(chan struct{})}
+	go func() {
+		<-sweep.release
+		close(sweep.exited)
+	}()
+	storeStopped := make(chan bool, 1)
+	store := &Func{N: "store", StopFunc: func(context.Context) error {
+		select {
+		case <-sweep.exited:
+			storeStopped <- true
+		default:
+			storeStopped <- false
+		}
+		return nil
+	}}
+	h := &warned{Handler: slog.DiscardHandler, logged: make(chan struct{})}
+	g := NewGroup(slog.New(h), store, sweep)
+	require.NoError(t, g.Start(context.Background()))
+	stopped := make(chan error, 1)
+	go func() { stopped <- g.Stop(context.Background()) }()
+	// The group warns that it is waiting; stopping the store instead fails.
+	select {
+	case <-h.logged:
+	case exited := <-storeStopped:
+		require.Fail(t, "the store was stopped without waiting for the sweep", "sweep exited: %v", exited)
+	}
+	close(sweep.release)
+	assert.True(t, <-storeStopped, "the store stopped after the sweep exited")
+	assert.ErrorContains(t, <-stopped, "gave up at its deadline")
 }
 
 func TestFuncWithoutHooks(t *testing.T) {

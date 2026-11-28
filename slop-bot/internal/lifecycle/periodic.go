@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/lowaa/slop-factory/go-clock"
@@ -18,11 +17,11 @@ type Periodic struct {
 	Every  time.Duration
 	Clock  clock.Clock
 	Logger *slog.Logger
-	Run    func(context.Context) error
+	// Run is given a context Stop cancels.
+	Run func(context.Context) error
 
-	stopOnce sync.Once
-	stop     chan struct{}
-	done     chan struct{}
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // Name implements Component.
@@ -33,32 +32,36 @@ func (p *Periodic) Start(context.Context) error {
 	if p.Every <= 0 || p.Clock == nil || p.Logger == nil || p.Run == nil {
 		return errors.New("lifecycle: a Periodic needs Every, Clock, Logger and Run")
 	}
-	p.stop, p.done = make(chan struct{}), make(chan struct{})
-	go p.loop() // #nosec G118 -- the loop outlives Start's ctx; Stop ends it
+	// Not Start's ctx, which ends with starting; Stop ends this one.
+	ctx, cancel := context.WithCancel(context.Background())
+	p.cancel, p.done = cancel, make(chan struct{})
+	go p.loop(ctx)
 	return nil
 }
 
-func (p *Periodic) loop() {
+func (p *Periodic) loop(ctx context.Context) {
 	defer close(p.done)
-	ctx := context.Background()
 	for {
-		if err := p.Run(ctx); err != nil {
+		if err := p.Run(ctx); err != nil && ctx.Err() == nil {
 			p.Logger.Warn("lifecycle: a periodic run failed", "component", p.N, "err", err)
 		}
 		select {
 		case <-p.Clock.After(p.Every):
-		case <-p.stop:
+		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// Stop implements Component: it waits for a run in progress to finish.
+// Stop implements Component: it cancels a run in progress and waits, until
+// ctx ends, for it to return. A run that outlasts ctx is still going when
+// Stop returns; Exited says when it has gone, and the group waits for that
+// before stopping what the run uses.
 func (p *Periodic) Stop(ctx context.Context) error {
 	if p.done == nil {
 		return nil
 	}
-	p.stopOnce.Do(func() { close(p.stop) })
+	p.cancel()
 	select {
 	case <-p.done:
 		return nil
@@ -66,3 +69,19 @@ func (p *Periodic) Stop(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
+// Exited implements Exiter.
+func (p *Periodic) Exited() <-chan struct{} {
+	if p.done == nil {
+		return closed
+	}
+	return p.done
+}
+
+// closed is a channel that is already closed: what never started has
+// exited.
+var closed = func() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}()

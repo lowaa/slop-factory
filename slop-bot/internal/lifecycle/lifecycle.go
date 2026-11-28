@@ -17,6 +17,13 @@ type Component interface {
 	Stop(ctx context.Context) error
 }
 
+// Exiter is a component whose Stop can give up at its deadline while it is
+// still running (a periodic job in a database call): Exited closes once it
+// has really stopped.
+type Exiter interface {
+	Exited() <-chan struct{}
+}
+
 // Group runs components as one.
 type Group struct {
 	components []Component
@@ -45,7 +52,9 @@ func (g *Group) Start(ctx context.Context) error {
 
 // Stop stops every started component in reverse order. It carries on past a
 // failure, so one stuck component doesn't leak the rest, and reports every
-// error.
+// error. An Exiter whose Stop failed is waited for, past ctx, before
+// anything started before it is stopped: those are what it uses, and
+// closing them under it is worse than a slow shutdown.
 func (g *Group) Stop(ctx context.Context) error {
 	var errs []error
 	for i := len(g.started) - 1; i >= 0; i-- {
@@ -53,10 +62,23 @@ func (g *Group) Stop(ctx context.Context) error {
 		g.logger.Debug("stopping", "component", c.Name())
 		if err := c.Stop(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("stopping %s: %w", c.Name(), err))
+			if e, ok := c.(Exiter); ok {
+				g.awaitExit(c.Name(), e)
+			}
 		}
 	}
 	g.started = nil
 	return errors.Join(errs...)
+}
+
+func (g *Group) awaitExit(name string, e Exiter) {
+	select {
+	case <-e.Exited():
+		return
+	default:
+	}
+	g.logger.Warn("lifecycle: waiting for a component that outlived its stop, before stopping what it uses", "component", name)
+	<-e.Exited()
 }
 
 // Func adapts a pair of functions into a Component.
