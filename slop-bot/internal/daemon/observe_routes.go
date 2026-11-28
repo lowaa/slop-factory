@@ -284,7 +284,7 @@ func (f *follower) reread(ctx context.Context) error {
 // (harness.*): what the agent's states and messages do to it.
 var watchable = map[string]bool{
 	agents.EventState: true, agents.EventFinished: true, agents.EventDelivered: true,
-	agents.EventNudged: true, agents.EventResumed: true, "agent.asked": true,
+	agents.EventNudged: true, agents.EventResumed: true, "agent.asked": true, agents.EventReleased: true,
 }
 
 // watch streams an agent's conversation events, live, from now, until it
@@ -332,7 +332,10 @@ func watched(e *state.Event) bool {
 	return strings.HasPrefix(string(e.Type), agents.EventHarness) || watchable[string(e.Type)]
 }
 
-// endsAgent reports whether e is its agent ending.
+// endsAgent reports whether e is its agent ending. A release slop-bot
+// makes from the record (endRecord) logs agent.released, with no
+// agent.state.
 func endsAgent(e *state.Event) bool {
-	return string(e.Type) == agents.EventFinished || (string(e.Type) == agents.EventState && endsIn(e.Payload))
+	return string(e.Type) == agents.EventFinished || string(e.Type) == agents.EventReleased ||
+		(string(e.Type) == agents.EventState && endsIn(e.Payload))
 }
