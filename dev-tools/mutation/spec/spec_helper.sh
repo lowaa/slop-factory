@@ -6,6 +6,7 @@
 # arguments, one call a line, to $STUB_LOG, and does what the STUB_*
 # variables say:
 #   STUB_GO_DIRS         what `go list -f {{.Dir}} PATTERN` prints (default: two packages)
+#   STUB_GO_NAME         the package name `go list` gives every dir (default: its base name)
 #   STUB_GO_LIST_EXIT    what `go list` exits with (default 0)
 #   STUB_GO_BUILD_EXIT   what `go build` exits with (default 0)
 #   STUB_GREMLINS_EXIT   what gremlins exits with (default 0)
@@ -18,7 +19,7 @@ stub_setup() {
   STUB_LOG="${SCRATCH}/log"
   : > "${STUB_LOG}"
   export STUB_LOG STUB_GO_LIST_EXIT=0 STUB_GO_BUILD_EXIT=0 STUB_GREMLINS_EXIT=0 \
-    STUB_GREMLINS_WRITE=1 STUB_MUTATION_EXIT=0 STUB_PROJECT="${SCRATCH}/repo/proj"
+    STUB_GREMLINS_WRITE=1 STUB_GREMLINS_SAY='' STUB_GO_NAME='' STUB_MUTATION_EXIT=0 STUB_PROJECT="${SCRATCH}/repo/proj"
   STUB_GO_DIRS="${STUB_PROJECT}/internal/x
 ${STUB_PROJECT}/internal/y"
   export STUB_GO_DIRS
@@ -30,7 +31,9 @@ case "$1" in
   env) echo "${STUB_PROJECT}/go.mod" ;;
   list)
     ((STUB_GO_LIST_EXIT == 0)) || exit "${STUB_GO_LIST_EXIT}"
-    printf '%s\n' "${STUB_GO_DIRS}"
+    while IFS= read -r d; do
+      echo "${STUB_GO_NAME:-$(basename "${d}")} ${d}"
+    done <<< "${STUB_GO_DIRS}"
     ;;
   build)
     echo "GOWORK=${GOWORK-unset}" >> "${STUB_LOG}"
@@ -50,7 +53,8 @@ EOF
   cat > "${SCRATCH}/bin/gremlins_stub" << 'EOF'
 #!/usr/bin/env bash
 echo "gremlins $*" >> "${STUB_LOG}"
-echo "gremlins output for the log"
+echo "gremlins-env GOWORK=${GOWORK-unset} GOFLAGS=${GOFLAGS-unset}" >> "${STUB_LOG}"
+echo "gremlins output for the log ${STUB_GREMLINS_SAY:-}"
 while (($#)); do
   [[ "$1" != -o ]] || { [[ "${STUB_GREMLINS_WRITE}" == 0 ]] || echo '{"files":[]}' > "$2"; }
   shift

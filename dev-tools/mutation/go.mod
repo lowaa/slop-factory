@@ -4,6 +4,8 @@ go 1.27.4
 
 tool github.com/go-gremlins/gremlins/cmd/gremlins
 
+require github.com/stretchr/testify v1.12.1
+
 require (
 	github.com/MakeNowJust/heredoc v1.0.0 // indirect
 	github.com/bluekeyes/go-gitdiff v0.8.1 // indirect
@@ -23,7 +25,6 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
-	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sys v0.38.0 // indirect

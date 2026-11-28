@@ -37,6 +37,17 @@ func Scores(rows []*Row) Snapshot {
 	return s
 }
 
+// Undecided names the rows that decided no mutant.
+func Undecided(rows []*Row) []string {
+	var out []string
+	for _, r := range rows {
+		if _, ok := r.Counts.Score(); !ok {
+			out = append(out, r.Package)
+		}
+	}
+	return out
+}
+
 func scoreCell(c *gremlins.Counts) string {
 	v, ok := c.Score()
 	if !ok {

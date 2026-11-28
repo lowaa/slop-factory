@@ -25,13 +25,15 @@ deployment examples) or publishes its images on each push to main. Their
 | slop-review | `slop-review/test.sh`, `slop-review/report/test.sh` |
 | slop-bot | `slop-bot/test.sh` |
 | Coverage, complexity and test time against the baselines | each project's `quality.sh`, e.g. `slop-bot/quality.sh`; see `dev-tools/quality/README.md` |
-| Test tooling | `bats/run.sh --recursive dev-tools`, and `dev-tools/quality/test.sh` (needs shellspec) |
+| Test tooling | `bats/run.sh --recursive dev-tools`, and `dev-tools/quality/test.sh` and `dev-tools/mutation/test.sh` (need shellspec) |
 | End to end | `SHARDS=2 slop-haus/e2e_playwright_ts/test.sh` |
 | Harnesses against a scripted model | `slop-haus/harness_e2e/test.sh` |
 | Deployment examples (compose, Helm, Argo CD), static checks | `deployment_example/test.sh` |
 
 The soak test, the lists-at-scale e2e run and the harnesses at their latest
 releases run nightly (`.github/workflows/nightly.yml`), not on pull requests.
+Mutation testing (`dev-tools/mutation/README.md`) runs weekly and on demand
+(`.github/workflows/mutation.yml`), likewise.
 
 A fresh checkout needs the root `npm ci` first: bats and the frontend's
 stylelint ratchet come from it. The shell tests written since bats use

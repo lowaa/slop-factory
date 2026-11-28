@@ -22,6 +22,9 @@ const (
 	// Floor is what a package new to the baseline must reach to land, as
 	// quality.sh's 80% for coverage.
 	Floor = 80.0
+	// eps absorbs float rounding at the tolerance's edge: 65.4 - 63.4 is
+	// not exactly 2.0.
+	eps = 1e-9
 )
 
 // Snapshot is the score of each package, named relative to the project
@@ -69,7 +72,7 @@ func judge(pkg string, base Snapshot, now float64) (msg string, regressed bool) 
 		return fmt.Sprintf("%s: %.1f%% is a new package under the %.0f%% floor", pkg, now, Floor), true
 	case !known:
 		return fmt.Sprintf("%s: new at %.1f%%", pkg, now), false
-	case now < was-Tolerance:
+	case now+Tolerance+eps < was:
 		return fmt.Sprintf("%s: %.1f%% is more than %.1f points below the baseline %.1f%%", pkg, now, Tolerance, was), true
 	case now > was:
 		return fmt.Sprintf("%s: %.1f%% -> %.1f%%", pkg, was, now), false
@@ -107,9 +110,14 @@ func Prune(base, cur Snapshot, gone func(pkg string) bool) Snapshot {
 }
 
 // Rebaseline replaces the entries of the packages cur ran with its values,
-// whatever they are, and keeps the rest of base (less stale entries).
-func Rebaseline(base, cur Snapshot, gone func(pkg string) bool) Snapshot {
+// whatever they are, and keeps the rest of base (less stale entries). A
+// package that ran but decided no mutants (undecided) has no score to
+// record, so its entry goes.
+func Rebaseline(base, cur Snapshot, undecided []string, gone func(pkg string) bool) Snapshot {
 	out := Prune(base, nil, gone)
+	for _, pkg := range undecided {
+		delete(out, pkg)
+	}
 	for pkg, c := range cur {
 		out[pkg] = c
 	}

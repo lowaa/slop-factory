@@ -100,18 +100,32 @@ mutation_patterns() {
 # ./<dir relative to the module> lines, sorted and unique. Run in the
 # project. A pattern that matches nothing is an error: a typo would
 # otherwise quietly measure less.
+#
+# Gremlins 0.6.0 finds the package to test by walking up the directory path
+# until it ends with the package's name; where none does (a `package main`
+# in cmd/x, a directory foo-bar holding package foobar) every mutant "fails"
+# to build and is reported KILLED. Such a package is refused when named, and
+# skipped with a warning when a ... pattern finds it.
 mutation_expand() {
-  local root dir p dirs all=""
+  local root name dir p listed all=""
   root="$(dirname "$(go env GOMOD)")" || return 2
   for p in "$@"; do
-    dirs="$(go list -f '{{.Dir}}' "${p}" 2> /dev/null)" || dirs=""
-    [[ -n "${dirs}" ]] || {
+    listed="$(go list -f '{{.Name}} {{.Dir}}' "${p}" 2> /dev/null)" || listed=""
+    [[ -n "${listed}" ]] || {
       echo "mutation.sh: '${p}' matches no package" >&2
       return 2
     }
-    while IFS= read -r dir; do
+    while read -r name dir; do
+      if [[ "$(basename "${dir}")" != "${name}" ]]; then
+        if [[ "${p}" == *... ]]; then
+          echo "mutation.sh: skipping ${dir#"${root}"}: its directory is not named for package ${name}, which gremlins would score wrongly" >&2
+          continue
+        fi
+        echo "mutation.sh: ${p}: the directory is not named for package ${name}, which gremlins would score wrongly" >&2
+        return 2
+      fi
       all+=".${dir#"${root}"}"$'\n'
-    done <<< "${dirs}"
+    done <<< "${listed}"
   done
   printf '%s' "${all}" | sort -u
 }
@@ -159,9 +173,16 @@ mutation_build() {
 # mutation_run_package GREMLINS PKG OUT: one gremlins run, on PKG alone: its
 # tests are the ones that must catch its mutants, and --coverpkg keeps the
 # coverage run to it. Run in the project.
+#
+# GOWORK=off: gremlins runs the mutants in a copy of the module that has no
+# go.work, so a coverage run that used one would pass where every mutant
+# then fails to build, and a failed build counts as KILLED. Off, such a
+# project fails loudly at once. -count=1: gremlins sets each mutant's timeout
+# from its coverage run's time, and a cached run replays in milliseconds,
+# which times out the mutants that survive and so counts them caught.
 mutation_run_package() {
   local gremlins="$1" pkg="$2" out="$3"
-  mutation_capped "${MUTATION_PACKAGE_TIMEOUT:-1500}" "${gremlins}" unleash \
+  GOWORK=off GOFLAGS="${GOFLAGS:+${GOFLAGS} }-count=1" mutation_capped "${MUTATION_PACKAGE_TIMEOUT:-1500}" "${gremlins}" unleash \
     --workers "$(mutation_workers)" \
     --timeout-coefficient "${MUTATION_TIMEOUT_COEFFICIENT:-10}" \
     --coverpkg "${pkg}" -o "${out}" "${pkg}" > "${out%.json}.log" 2>&1
@@ -195,18 +216,24 @@ mutation_go() (
   [[ -n "${bin}" ]] || bin="$(mutation_build mutation "${tmp}" ./cmd/mutation)" || exit 2
 
   results=()
+  n=0
   for pkg in "${pkgs[@]}"; do
-    out="${tmp}/$(echo "${pkg}" | tr '/.' '--').json"
+    n=$((n + 1))
+    out="${tmp}/pkg${n}.json"
     echo "== gremlins ${pkg}" >&2
     mutation_run_package "${gremlins}" "${pkg}" "${out}" || {
       echo "mutation.sh: gremlins failed on ${pkg}; its output:" >&2
       tail -n 20 "${out%.json}.log" >&2 || true
       exit 2
     }
-    [[ -s "${out}" ]] || {
-      echo "mutation.sh: gremlins wrote no report for ${pkg}" >&2
-      exit 2
-    }
+    if [[ ! -s "${out}" ]]; then
+      # With nothing to mutate gremlins exits 0 and writes no file.
+      grep -q "No results to report" "${out%.json}.log" || {
+        echo "mutation.sh: gremlins wrote no report for ${pkg}" >&2
+        exit 2
+      }
+      echo '{"files":[]}' > "${out}"
+    fi
     results+=(--result "${pkg}=${out}")
   done
 

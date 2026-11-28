@@ -112,6 +112,21 @@ ${STUB_PROJECT}/internal/y"
 ./internal/y'
     End
 
+    It 'skips, with a warning, a package a ... pattern finds that gremlins would mis-score'
+      STUB_GO_NAME=main
+      When call mutation_expand './cmd/...'
+      The status should be success
+      The output should eq ''
+      The stderr should include 'skipping /internal/x: its directory is not named for package main'
+    End
+
+    It 'refuses a package named outright that gremlins would mis-score'
+      STUB_GO_NAME=main
+      When call mutation_expand ./cmd/tool
+      The status should eq 2
+      The stderr should include 'not named for package main'
+    End
+
     It 'refuses a pattern that matches nothing, rather than measuring less'
       STUB_GO_LIST_EXIT=1
       When call mutation_expand ./typo
@@ -173,6 +188,7 @@ ${STUB_PROJECT}/internal/y"
     gremlins_calls() { calls 'gremlins '; }
     go_build_calls() { calls 'go build'; }
     mutation_calls() { calls 'mutation '; }
+    env_calls() { calls 'gremlins-env '; }
     all_calls() { cat "${STUB_LOG}"; }
     build_gowork() { calls 'GOWORK='; }
 
@@ -255,6 +271,23 @@ ${STUB_PROJECT}/internal/y"
       The stderr should include 'gremlins failed on ./internal/x'
       The stderr should include 'gremlins output for the log'
       The result of function mutation_calls should eq ''
+    End
+
+    It 'treats gremlins finding no mutants as an empty report'
+      STUB_GREMLINS_WRITE=0
+      STUB_GREMLINS_SAY='No results to report'
+      When call mutation_go "$(project)" --packages=./internal/x
+      The status should be success
+      The stderr should include 'gremlins'
+      The result of function mutation_calls should include '--result ./internal/x='
+    End
+
+    It 'runs gremlins without go.work and without the test cache'
+      GOFLAGS=-v
+      When call mutation_go "$(project)" --packages=./internal/x
+      The status should be success
+      The stderr should include 'gremlins'
+      The result of function env_calls should include 'GOWORK=off GOFLAGS=-v -count=1'
     End
 
     It 'stops when gremlins writes no report'

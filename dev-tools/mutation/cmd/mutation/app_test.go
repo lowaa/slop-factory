@@ -179,6 +179,21 @@ func TestAnyModeWritesTheReportWhenGivenADirectory(t *testing.T) {
 	assert.FileExists(t, filepath.Join(dir, "summary.txt"))
 }
 
+func TestASubdirectorysMutantsAreNotThePackages(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.pkg("./a", 9, 1)
+	data, err := os.ReadFile(strings.TrimPrefix(f.results[1], "./a="))
+	require.NoError(t, err)
+	file := filepath.Join(t.TempDir(), "r.json")
+	nested := strings.Replace(string(data), `"files":[`, `"files":[{"file_name":"sub/y.go","mutations":[{"type":"X","status":"LIVED","line":1,"column":1}]},`, 1)
+	require.NoError(t, os.WriteFile(file, []byte(nested), 0o600))
+	f.results = []string{"--result", "./a=" + file}
+	f.baseline("./a 90.0\n")
+	assert.Equal(t, exitOK, f.run("check"))
+	assert.Regexp(t, `\./a\s+9\s+1\s+0\s+0\s+90\.0%`, f.out.String())
+}
+
 func TestUsageErrors(t *testing.T) {
 	t.Parallel()
 	for name, args := range map[string][]string{
@@ -193,4 +208,21 @@ func TestUsageErrors(t *testing.T) {
 		var out, errb bytes.Buffer
 		assert.Equal(t, exitError, (&App{Out: &out, Err: &errb}).Run(args), name)
 	}
+}
+
+func TestReportNamesDifferForPackagesThatOnlyDifferInSeparators(t *testing.T) {
+	t.Parallel()
+	assert.NotEqual(t, reportName("./a/b"), reportName("./a-b"))
+	assert.Equal(t, "root.json", reportName("."))
+}
+
+func TestAPackageThatLostAllItsCoverageRegresses(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.pkg("./a", 0, 0)
+	f.baseline("./a 98.4\n")
+	assert.Equal(t, exitRegression, f.run("check"))
+	assert.Contains(t, f.out.String(), "no mutant is covered")
+	assert.Equal(t, exitOK, f.run("rebaseline"))
+	assert.NotContains(t, f.readBaseline(), "./a 98.4")
 }

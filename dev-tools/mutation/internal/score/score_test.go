@@ -67,7 +67,7 @@ func TestPruneTightensAddsAndDropsButNeverLoosens(t *testing.T) {
 func TestRebaselineTakesCurrentValuesEvenWhenLower(t *testing.T) {
 	t.Parallel()
 	base := Snapshot{"./a": 90, "./kept": 70, "./stale": 85}
-	got := Rebaseline(base, Snapshot{"./a": 60, "./b": 10}, func(p string) bool { return p == "./stale" })
+	got := Rebaseline(base, Snapshot{"./a": 60, "./b": 10}, nil, func(p string) bool { return p == "./stale" })
 	assert.Equal(t, Snapshot{"./a": 60, "./b": 10, "./kept": 70}, got)
 }
 
@@ -118,4 +118,24 @@ func TestWriteSurvivorsOpensInAnEditor(t *testing.T) {
 	var b bytes.Buffer
 	WriteSurvivors(&b, rows)
 	assert.Equal(t, "./internal/x/x.go:4:9 CONDITIONALS_NEGATION\n", b.String())
+}
+
+func TestCompareAFallOfExactlyTheToleranceIsWithinIt(t *testing.T) {
+	t.Parallel()
+	for _, c := range [][2]float64{{65.4, 63.4}, {65.9, 63.9}, {64.4, 62.4}} {
+		res := Compare(Snapshot{"./a": c[0]}, Snapshot{"./a": c[1]}, neverGone)
+		assert.Empty(t, res.Regressions, "%v", c)
+	}
+}
+
+func TestRebaselineDropsAPackageThatDecidedNothing(t *testing.T) {
+	t.Parallel()
+	got := Rebaseline(Snapshot{"./a": 98.4, "./b": 70}, Snapshot{}, []string{"./a"}, neverGone)
+	assert.Equal(t, Snapshot{"./b": 70}, got)
+}
+
+func TestUndecidedNamesRowsWithNoScore(t *testing.T) {
+	t.Parallel()
+	rows := []*Row{{Package: "./a", Counts: gremlins.Counts{Killed: 1}}, {Package: "./b", Counts: gremlins.Counts{NotCovered: 2}}}
+	assert.Equal(t, []string{"./b"}, Undecided(rows))
 }

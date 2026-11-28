@@ -106,10 +106,11 @@ func readRows(results []string) ([]*score.Row, error) {
 		if !ok || pkg == "" || file == "" {
 			return nil, fmt.Errorf("--result %q: want PKG=FILE", r)
 		}
-		rep, err := gremlins.ReadFile(file)
+		whole, err := gremlins.ReadFile(file)
 		if err != nil {
 			return nil, err
 		}
+		rep := whole.Direct()
 		rows = append(rows, &score.Row{Package: pkg, Counts: rep.Counts(), Survivors: rep.Survivors()})
 	}
 	return rows, nil
@@ -145,7 +146,7 @@ func (a *App) summarize(m *summarizeArgs) (failed bool, err error) {
 		if err != nil {
 			return false, err
 		}
-		return false, a.writeBaseline(path, score.Rebaseline(base, cur, gone))
+		return false, a.writeBaseline(path, score.Rebaseline(base, cur, score.Undecided(rows), gone))
 	}
 	base, found, err := a.readBaseline(path)
 	if err != nil {
@@ -159,6 +160,13 @@ func (a *App) summarize(m *summarizeArgs) (failed bool, err error) {
 		return false, fmt.Errorf("no baseline at %s: create it with --rebaseline", path)
 	}
 	res := score.Compare(base, cur, gone)
+	// A package that had a score and now has no covered mutants lost its
+	// tests' reach: that is a drop, not an absence.
+	for _, pkg := range score.Undecided(rows) {
+		if _, had := base[pkg]; had {
+			res.Regressions = append(res.Regressions, pkg+": no mutant is covered by its tests any more, but the baseline has a score")
+		}
+	}
 	failed = a.printResult(m, res)
 	if m.mode == "prune" {
 		return failed, a.writeBaseline(path, score.Prune(base, cur, gone))
@@ -239,10 +247,20 @@ func writeReport(m *summarizeArgs, rows []*score.Row) error {
 		if err != nil {
 			return err
 		}
-		name := strings.Trim(strings.ReplaceAll(pkg, "/", "-"), ".-") + ".json"
+		name := reportName(pkg)
 		if err := os.WriteFile(filepath.Join(m.reportDir, "gremlins", name), data, 0o600); err != nil { // #nosec G703 -- a path from the command line, the operator's own
 			return err
 		}
 	}
 	return nil
+}
+
+// reportName is the raw report's file name for a package: not hidden (the
+// root package is "."), and one name per package (a/b and a-b differ).
+func reportName(pkg string) string {
+	pkg = strings.TrimPrefix(pkg, "./")
+	if pkg == "" || pkg == "." {
+		pkg = "root"
+	}
+	return strings.ReplaceAll(pkg, "/", "__") + ".json"
 }

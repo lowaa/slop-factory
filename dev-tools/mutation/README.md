@@ -35,9 +35,11 @@ failing test suite, gremlins failing or timing out).
 For each package: mutants killed, survived, timed out, not covered, and the
 **score**: `(killed + timed out) / (killed + survived + timed out)`. A mutant
 that makes the tests hang counts as caught, as in PIT and Stryker. Mutants
-in code no test covers ("not covered") and mutants that don't compile ("not
-viable") are left out of the score: they say nothing about the tests'
-strength, and the first is what `quality.sh`'s coverage already gates. The
+in code no test covers ("not covered") are left out of the score: they say
+nothing about the tests' strength, and `quality.sh`'s coverage already gates
+them. A mutant that doesn't compile (a `+` turned into a `-` on strings)
+counts as killed, not as "not viable": gremlins 0.6.0 maps a failed build to
+KILLED, so a package with such mutants scores a little high. The
 total is reported but not ratcheted.
 
 `--report` (or setting `MUTATION_REPORT_DIR`, as CI does) also writes, per
@@ -89,9 +91,19 @@ mutant reruns them.
 - `MUTATION_WORKERS` mutants are tested at once (default `min(4, cores)`):
   each worker copies the module and runs its tests, and contention
   turns into spurious timeouts.
-- Each package is its own gremlins run, with `--coverpkg` limited to it: its
-  own tests are the ones that must catch its mutants, and its coverage run
-  doesn't run the rest of the module's tests.
+- Each package is its own gremlins run, with `--coverpkg` limited to it.
+  Gremlins runs the tests of the package and of its subdirectories for the
+  coverage, and then each mutant against the package's own tests only.
+- It runs with `GOWORK=off` and `GOFLAGS=-count=1`. Gremlins tests its
+  mutants in a copy of the module that has no `go.work`, and counts a failed
+  build as killed, so a project that needs the workspace to build would
+  score 100% for nothing; without it the run fails at once instead. And a
+  cached coverage run replays in milliseconds, which sets every mutant's
+  timeout so short that the survivors time out and count as caught.
+- A package whose directory is not named for it (`package main` in `cmd/x`)
+  can't be scored: gremlins looks the package up by its directory name and
+  reports every mutant killed. `mutation.sh` refuses such a package when it
+  is named, and skips it, with a warning, when a `...` pattern finds it.
 
 ## Choice of tool
 
@@ -111,16 +123,22 @@ ratchet, and the repo wraps it so far as `mutation.sh` and
 `internal/gremlins` (which reads its JSON, the one interface used) that a
 swap would touch those and nothing else.
 
-Limits to know: it mutates source in place and copies the module to run
-workers, so a project must build from its own directory (a workspace-only
-dependency resolved by the root `go.work` is the case to check before
-adding one); and it names a file by its base name within the package, which
-`mutation.sh` expands to a path using the package it ran on.
+Limits to know: it tests each mutant in a copy of the module, so a project
+must build from its own directory with `GOWORK=off` (a dependency resolved
+only by the root `go.work` fails the run); and it walks the directory it is given, subdirectories too, so
+`mutation.sh` keeps only the files directly in each package, which each
+subdirectory's own run covers. Tests that live in another package (a shared
+conformance suite, as `slop-bot`'s `internal/tickets/conformance`) don't
+kill the mutants of the package they exercise: the coverage run sees those
+lines as covered, then each mutant is tested against the package's own
+tests, and survives. Such a package scores low (`internal/tickets`, 5.5%
+on its first run), and its survivors say what its own tests don't check.
 
 ## Tests
 
-`dev-tools/mutation/test.sh`: lint, `gofmt`, `go vet`, `go test -race`, then
+Install shellspec as `dev-tools/quality/README.md` says. `dev-tools/mutation/test.sh`: lint, `gofmt`, `go vet`, `go test -race`, then
 `shellspec`. The Go tests cover the report parsing, the score rules and the
 CLI's modes end to end on scratch projects. The specs cover `mutation.sh`'s
 arguments, package expansion, and its runs with `go`, gremlins and the CLI
-stubbed. CI runs it as the `dev-tools-mutation` job.
+stubbed. CI runs it, and the project's own `quality.sh`, as the
+`dev-tools-mutation` job.

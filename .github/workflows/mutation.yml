@@ -25,7 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      MUTATION_REPORT_DIR: ${{ runner.temp }}/mutation-reports
       # Passed through the environment, not interpolated into the script.
       PROJECT: ${{ inputs.project || 'slop-bot' }}
       PACKAGES: ${{ inputs.packages }}
@@ -39,6 +38,9 @@ jobs:
       # A check, so a score that fell past the tolerance fails the run; the
       # report is written either way, since MUTATION_REPORT_DIR is set.
       - run: dev-tools/mutation/mutation.sh "${PROJECT}" ${PACKAGES:+--packages="${PACKAGES}"}
+        env:
+          # The runner context isn't available in a job-level env.
+          MUTATION_REPORT_DIR: ${{ runner.temp }}/mutation-reports
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -73,3 +73,14 @@ func TestAddSumsEveryOutcome(t *testing.T) {
 	c.Add(Counts{Killed: 10, Lived: 20, TimedOut: 30, NotCovered: 40, NotViable: 50})
 	assert.Equal(t, Counts{Killed: 11, Lived: 22, TimedOut: 33, NotCovered: 44, NotViable: 55}, c)
 }
+
+func TestDirectLeavesOutSubdirectoriesWhichArePackagesOfTheirOwn(t *testing.T) {
+	t.Parallel()
+	rep := &Report{Files: []File{
+		{Name: "rules.go", Mutations: []Mutation{{Status: Killed}}},
+		{Name: "local/store.go", Mutations: []Mutation{{Status: Lived}}},
+	}}
+	direct := rep.Direct()
+	require.Len(t, direct.Files, 1)
+	assert.Equal(t, Counts{Killed: 1}, direct.Counts())
+}

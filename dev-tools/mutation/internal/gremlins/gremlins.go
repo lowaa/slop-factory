@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 )
 
 // The statuses gremlins writes (internal/mutator in the pinned release).
@@ -100,6 +101,20 @@ func ReadFile(path string) (*Report, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return rep, nil
+}
+
+// Direct is the report of the files in the directory itself. Gremlins walks
+// the directory it is given, subdirectories too, but those are other
+// packages with runs of their own: counting them here would score a package
+// by tests that don't cover it and count their mutants twice.
+func (r *Report) Direct() *Report {
+	out := &Report{}
+	for _, f := range r.Files {
+		if !strings.Contains(f.Name, "/") {
+			out.Files = append(out.Files, f)
+		}
+	}
+	return out
 }
 
 // Counts tallies every mutant in the report.
