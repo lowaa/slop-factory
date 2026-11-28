@@ -254,26 +254,29 @@ func (s *scan) call(call *syntax.CallExpr, depth int) {
 	case "gh":
 		s.gh(args)
 	case "glab":
-		if len(args) >= 2 && args[0].val == "mr" && args[1].val == "merge" {
-			s.find(KindPRMerge, "glab mr merge")
-		}
+		s.glab(args)
 	case "curl", "wget", "http", "https", "xh":
 		s.httpClient(name, args)
 	case "eval":
-		var parts []string
-		for _, a := range args {
-			if !a.ok {
-				s.opaque(printed(call), "eval runs a computed command")
-				return
-			}
-			parts = append(parts, a.val)
-		}
-		s.script(strings.Join(parts, " "), depth+1)
+		s.eval(call, args, depth)
 	default:
 		if isShell(name) {
 			s.shell(args, depth)
 		}
 	}
+}
+
+// eval follows `eval <words>` into the command line they make.
+func (s *scan) eval(call *syntax.CallExpr, args []word, depth int) {
+	parts := make([]string, 0, len(args))
+	for _, a := range args {
+		if !a.ok {
+			s.opaque(printed(call), "eval runs a computed command")
+			return
+		}
+		parts = append(parts, a.val)
+	}
+	s.script(strings.Join(parts, " "), depth+1)
 }
 
 func (s *scan) cd(args []word) {

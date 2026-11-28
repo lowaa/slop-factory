@@ -62,7 +62,8 @@ func (ar *agentRoutes) preTool(w http.ResponseWriter, r *http.Request) {
 
 // authoriseMerge is tell's --merge: the user's go-ahead, recorded before
 // the message is delivered, so the agent that reads it can merge at once.
-// It returns the text to deliver.
+// It returns the text to deliver: the go-ahead, then the user's own words,
+// so the agent can't miss that it is authorised.
 func (ar *agentRoutes) authoriseMerge(r *http.Request, in *api.Tell) (string, error) {
 	if in.All {
 		return "", fmt.Errorf("%w: a merge is authorised for one agent's ticket, not --all", errBadRequest)
@@ -73,5 +74,5 @@ func (ar *agentRoutes) authoriseMerge(r *http.Request, in *api.Tell) (string, er
 	if in.Text == "" || agents.SaysMerge(in.Text) {
 		return agents.MergeGoAhead, nil
 	}
-	return in.Text, nil
+	return agents.MergeGoAhead + "\n\n" + in.Text, nil
 }

@@ -67,6 +67,12 @@ func TestTheMergeGuardRefusesUntilTheUserAuthorises(t *testing.T) {
 	assert.Contains(t, told.Text, "authorised to merge")
 	assert.Empty(t, e.preTool(s, "gh pr merge 12 --squash"), "authorised, the merge runs")
 	assert.Empty(t, e.preTool(s, "git push origin HEAD:main"))
+
+	e.h.ok(t, "tell", agent, "--merge", "CI is green")
+	told, err = s.Expect(e.ctx(), fake.RepUser)
+	require.NoError(t, err)
+	assert.Contains(t, told.Text, "authorised to merge", "the user's own words don't hide the go-ahead")
+	assert.Contains(t, told.Text, "CI is green")
 }
 
 func TestABareMergeTellAuthorises(t *testing.T) {

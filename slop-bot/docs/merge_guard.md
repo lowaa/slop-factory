@@ -29,6 +29,11 @@ until the user says go.
 An allow writes nothing, so the harness's own permission rules still apply.
 The hook never approves anything those rules would have asked about.
 
+`attach` hands the session over with the same flags, so a person attached
+to an agent is held to the guard too, because the session still carries the
+agent's token. To merge from there, run `slop-bot tell <agent> --merge`
+first.
+
 ## What counts as a merge
 
 The classifier parses the command as bash (`mvdan.cc/sh`). It looks at every
@@ -93,6 +98,9 @@ a shell can always reach a merge that the classifier can't see:
 - Stripping the token (`env -u SLOP_BOT_AGENT_TOKEN ...`) only affects the
   agent's own slop-bot calls. The hook runs from the harness, outside the
   agent's command, with the harness's own environment.
+- Claude Code settings that turn hooks off, `disableAllHooks` or a managed
+  `allowManagedHooksOnly`, turn the guard off too. The user's own settings
+  still apply under `--settings`.
 - The agent can edit or delete the hook's inputs where it can write to them:
   pi's extension file sits beside the briefing, in slop-bot's state directory.
   This is the same trust boundary as the briefing.

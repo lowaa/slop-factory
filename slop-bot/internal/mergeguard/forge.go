@@ -54,6 +54,12 @@ func (s *scan) gh(args []word) {
 	}
 }
 
+func (s *scan) glab(args []word) {
+	if len(args) >= 2 && args[0].val == "mr" && args[1].val == "merge" {
+		s.find(KindPRMerge, "glab mr merge")
+	}
+}
+
 // firstPositional is the index of the first argument that isn't an option
 // (or an option's value), -1 when there is none.
 func firstPositional(args []word, values []string) int {
