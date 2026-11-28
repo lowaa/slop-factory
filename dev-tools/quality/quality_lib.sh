@@ -28,7 +28,7 @@ measures: coverage complexity testtime
   --report            write the full reports to $QUALITY_REPORT_DIR; never fails
   --coverprofile=FILE reuse a cover profile rather than running the tests; repeatable
   --coverdir=DIR      merge a GOCOVERDIR (an e2e run's) into the coverage; repeatable
-  --mutation          mutation testing: not implemented yet
+  --mutation          mutation testing lives in dev-tools/mutation/mutation.sh; exits 2
 EOF
 }
 
@@ -161,7 +161,7 @@ quality_go() (
   shift
   quality_parse_args "$@" || exit
   if [[ -n "${QUALITY_MUTATION}" ]]; then
-    echo "quality.sh: --mutation=${QUALITY_MUTATION}: not implemented yet (plan task 10.1)" >&2
+    echo "quality.sh: --mutation=${QUALITY_MUTATION}: mutation testing is dev-tools/mutation/mutation.sh <project-dir> (dev-tools/mutation/README.md)" >&2
     exit 2
   fi
   cd "${project}" || exit 2

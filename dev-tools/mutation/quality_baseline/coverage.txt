@@ -1,0 +1,6 @@
+# Statement coverage: <package> <percent>, then the total. Written by
+# quality.sh; see dev-tools/quality/README.md.
+./cmd/mutation 89.0
+./internal/gremlins 95.6
+./internal/score 100.0
+total 93.6

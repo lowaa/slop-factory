@@ -1,0 +1,89 @@
+{
+  "functions": 32,
+  "cyclomatic": {
+    "threshold": 15,
+    "mean": 4.13,
+    "p90": 8,
+    "max": 12,
+    "over_threshold": 0
+  },
+  "cognitive": {
+    "threshold": 20,
+    "mean": 3.41,
+    "p90": 7,
+    "max": 15,
+    "over_threshold": 0
+  },
+  "longest": [
+    {
+      "file": "cmd/mutation/app.go",
+      "function": "(*App).summarize",
+      "lines": 49,
+      "cyclomatic": 12,
+      "cognitive": 15
+    },
+    {
+      "file": "cmd/mutation/app.go",
+      "function": "(*App).parse",
+      "lines": 30,
+      "cyclomatic": 8,
+      "cognitive": 7
+    },
+    {
+      "file": "cmd/mutation/app.go",
+      "function": "writeReport",
+      "lines": 26,
+      "cyclomatic": 7,
+      "cognitive": 9
+    },
+    {
+      "file": "cmd/mutation/app.go",
+      "function": "(*App).printResult",
+      "lines": 22,
+      "cyclomatic": 9,
+      "cognitive": 6
+    },
+    {
+      "file": "internal/gremlins/gremlins.go",
+      "function": "(*Report).Survivors",
+      "lines": 21,
+      "cyclomatic": 6,
+      "cognitive": 10
+    },
+    {
+      "file": "cmd/mutation/app.go",
+      "function": "(*App).Run",
+      "lines": 20,
+      "cyclomatic": 6,
+      "cognitive": 4
+    },
+    {
+      "file": "internal/gremlins/gremlins.go",
+      "function": "(*Report).Counts",
+      "lines": 20,
+      "cyclomatic": 8,
+      "cognitive": 6
+    },
+    {
+      "file": "internal/score/score.go",
+      "function": "Compare",
+      "lines": 16,
+      "cyclomatic": 5,
+      "cognitive": 4
+    },
+    {
+      "file": "cmd/mutation/app.go",
+      "function": "readRows",
+      "lines": 15,
+      "cyclomatic": 6,
+      "cognitive": 6
+    },
+    {
+      "file": "cmd/mutation/app.go",
+      "function": "(*App).readBaseline",
+      "lines": 14,
+      "cyclomatic": 4,
+      "cognitive": 3
+    }
+  ]
+}

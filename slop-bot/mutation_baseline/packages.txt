@@ -1,0 +1,9 @@
+# Packages mutation.sh tests by default: a core subset, so a run takes about 15 minutes.
+# See dev-tools/mutation/README.md.
+./internal/agents/...
+./internal/state
+# internal/tickets scores low on its own: its rules are exercised by the
+# conformance suite through tickets/local, which --coverpkg per package does
+# not credit to it. Its survivors in rules.go are the finding.
+./internal/tickets
+./internal/tickets/local

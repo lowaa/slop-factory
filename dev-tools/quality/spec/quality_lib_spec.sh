@@ -235,7 +235,7 @@ Describe 'quality_lib.sh'
     It 'stubs mutation testing, running nothing'
       When call quality_go "$(project)" --mutation=all
       The status should eq 2
-      The stderr should eq 'quality.sh: --mutation=all: not implemented yet (plan task 10.1)'
+      The stderr should eq 'quality.sh: --mutation=all: mutation testing is dev-tools/mutation/mutation.sh <project-dir> (dev-tools/mutation/README.md)'
       The result of function all_calls should eq ''
     End
 
