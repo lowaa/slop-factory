@@ -7,6 +7,8 @@ internal/control/auth.go NewToken #36
 internal/control/client.go Client.Stream #36
 internal/control/server.go Server.Handle #36
 internal/daemon/daemon.go Daemon.Ready #36
+internal/gitx/ package #36
+internal/gitx/gitxtest/ package #36
 internal/harness/agentproc/env.go AgentEnv #36
 internal/harness/agentproc/env.go WorkspaceEnv #36
 internal/harness/agentproc/process.go Process.Done #36
@@ -51,7 +53,6 @@ internal/paths/paths.go Paths.DefaultBriefing #36
 internal/paths/paths.go Paths.TranscriptsDir #36
 internal/service/servicetest/ package #36
 internal/sqlitex/sqlitextest/ package #36
-internal/tickets/conformance/ package #36
 internal/state/events.go Events.Append #36
 internal/state/events.go Events.Follow #36
 internal/state/events.go Events.ReadAfter #36
@@ -82,4 +83,6 @@ internal/state/transcripts.go Transcripts.Add #36
 internal/state/transcripts.go Transcripts.Expired #36
 internal/state/transcripts.go Transcripts.ForAgent #36
 internal/state/transcripts.go Transcripts.Remove #36
+internal/tickets/conformance/ package #36
 internal/tickets/status.go Statuses #36
+internal/worktree/ package #36
