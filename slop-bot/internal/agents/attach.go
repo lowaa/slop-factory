@@ -392,29 +392,42 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 	if r.joined() {
 		return m.rejoin(ctx, r, decl, summary, why), nil
 	}
+	return m.resumeHandedBack(ctx, r, why, decl, summary)
+}
+
+// resumeHandedBack resumes a handed-back agent's conversation in place of
+// its attached runner r, carrying what it declared from the TUI.
+func (m *Manager) resumeHandedBack(ctx context.Context, r *runner, why string, decl declared, summary string) (HandBackOutcome, error) {
+	id := r.id
 	a, err := m.opts.State.Agents.Get(ctx, id)
 	if err != nil {
 		return "", err
 	}
-	conv, caps, err := m.startConversation(ctx, a)
+	// The resume is a start like any other: it holds the ticket's start
+	// place, so Stop waits for it and a sync leaves the ticket to it, and it
+	// is bounded and cancelled as goStart's are, so a hung handshake can't
+	// hold up the caller (the lease sweeper, which Stop waits on) for ever.
+	startCtx, done, err := m.claimStart(a.Ticket, a.Pool)
 	if err != nil {
-		r.setState(ctx, state.StateCrashed, "couldn't resume after an attach: "+err.Error())
-		m.tellUser(ctx, id, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after its attach: %v; slop-bot is retrying", id, a.Ticket, err))
-		m.forget(id)
-		// Like a harness that died: retried, then given up on, never left
-		// live with nothing running it.
-		m.goRecover(r)
 		return "", err
+	}
+	defer done()
+	s, err := m.startConversation(startCtx, a)
+	if err != nil {
+		return "", m.handBackFailed(ctx, r, err)
 	}
 	payload := map[string]string{"why": why, "outcome": string(Resumed)}
 	// A harness whose protocol reports the id (Codex, pi) could hand back a
 	// different one; the next restart must resume the one now running.
-	if got := conv.Ref().ID; got != a.ConversationID {
+	if got := s.conv.Ref().ID; got != a.ConversationID {
 		m.opts.Logger.Warn("agents: the conversation id changed across an attach", "agent", id, "was", a.ConversationID, "now", got)
 		payload["conversation_was"] = a.ConversationID
 	}
-	nr := m.adopt(ctx, &adoption{id: id, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps,
+	nr, ok := m.adoptHandBack(ctx, r, &adoption{id: id, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s,
 		st: state.StateAttached, decl: decl, summary: summary, holdsSlot: true})
+	if !ok {
+		return Ended, nil
+	}
 	m.event(ctx, EventHandedBack, id, a.Ticket, payload)
 	if _, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{
 		From: state.UserParty, To: state.AgentParty(id), Kind: state.KindSystem, Body: handBackNote,
@@ -424,6 +437,61 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 	nr.setState(ctx, state.StateStarting, "handed back: "+why)
 	m.deliverPending(ctx, nr)
 	return Resumed, nil
+}
+
+// handBackFailed handles a hand-back whose resume failed: like a harness
+// that died, it is retried, then given up on, never left live with nothing
+// running it. A daemon stopping leaves it for the next start (see resume).
+func (m *Manager) handBackFailed(ctx context.Context, r *runner, err error) error {
+	if m.base.Err() != nil {
+		return fmt.Errorf("agents: handing back %s: %w", r.id, err)
+	}
+	r.setState(ctx, state.StateCrashed, "couldn't resume after an attach: "+err.Error())
+	m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after its attach: %v; slop-bot is retrying", r.id, r.ticket, err))
+	m.forget(r.id)
+	m.goRecover(r)
+	return err
+}
+
+// claimStart holds ticket's start place for a start run on the caller's
+// goroutine, as goStart does for its own: Stop waits for it, and its context
+// is bounded by startTimeout and cancelled by Stop. done gives the place
+// back.
+func (m *Manager) claimStart(ticket ident.TicketID, pool state.Pool) (ctx context.Context, done func(), err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopping {
+		return nil, nil, fmt.Errorf("%w: slop-bot is stopping; the agent resumes when it starts again", ErrNoLiveAgent)
+	}
+	if _, busy := m.starting[ticket]; busy {
+		return nil, nil, fmt.Errorf("agents: ticket %s's agent is already being started", ticket)
+	}
+	m.starting[ticket] = pool
+	m.starts.Add(1)
+	ctx, cancel := context.WithTimeout(m.base, m.startTimeout())
+	return ctx, func() {
+		cancel()
+		m.settled(ticket)
+		m.starts.Done()
+	}, nil
+}
+
+// adoptHandBack adopts a hand-back's resumed conversation in place of the
+// attached runner it replaces, unless that runner ended while the
+// conversation started (its ticket was cancelled or finished): then the
+// conversation is stopped, and nothing runs for the ended agent. It holds
+// syncMu, so a sync that would end the agent comes before the check, and
+// finds the new runner after it.
+func (m *Manager) adoptHandBack(ctx context.Context, old *runner, a *adoption) (*runner, bool) {
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
+	cur, ok := m.runner(a.id)
+	if ok && cur == old && !old.isEnding() {
+		return m.adopt(ctx, a), true
+	}
+	_ = a.conv.Stop(context.WithoutCancel(ctx), true)
+	m.opts.Logger.Info("agents: the agent ended while it was handed back", "agent", a.id)
+	return nil, false
 }
 
 // sweepLeases hands back every attach whose lease has expired: its CLI

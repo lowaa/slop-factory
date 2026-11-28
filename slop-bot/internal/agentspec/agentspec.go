@@ -18,8 +18,8 @@ import (
 var ErrInvalid = errors.New("agent spec")
 
 // efforts are the effort or thinking levels each harness's CLI accepts.
-// Codex is missing on purpose: its levels are per model, advertised by the
-// model list, so they are checked where that list is (at spawn).
+// Codex is missing on purpose: its levels are per model, and slop-bot
+// doesn't check them; a bad one surfaces as codex's own error.
 var efforts = map[string][]string{
 	config.ClaudeCode: {"low", "medium", "high", "xhigh", "max"},
 	config.Pi:         {"off", "minimal", "low", "medium", "high", "xhigh", "max"},

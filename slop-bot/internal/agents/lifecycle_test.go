@@ -133,6 +133,31 @@ func TestAnAgentThatKeepsCrashingIsReleased(t *testing.T) {
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
 }
 
+// A resume that fails reports a failed turn before its harness exits:
+// Claude Code does for a session it can't find. A failed turn shows nothing
+// works again, so it mustn't end the run of crashes, or such an agent is
+// resumed for ever.
+func TestAFailedTurnDoesNotEndTheRunOfCrashes(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	tk := f.file("t", nil)
+	s := f.session()
+	f.user(s)
+	for range 3 {
+		f.do(s, fake.Command{Cmd: fake.CmdExit, Code: 1})
+		s = f.session()
+		require.True(t, s.Resumed)
+		f.user(s)
+		f.do(s, fake.Command{Cmd: fake.CmdTurnEnd, Outcome: string(harness.TurnFailed)})
+		// Settled after the turn's end, so its effect on the count is in.
+		f.await(agents.EventState, toState(state.StateStalled))
+	}
+	f.do(s, fake.Command{Cmd: fake.CmdExit, Code: 1})
+	released := f.await(agents.EventReleased, nil)
+	assert.Contains(t, reason(released), "died 4 times")
+	f.noLiveAgent(tk.ID)
+}
+
 func TestMarkingTheTicketDoneEndsItsAgent(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "")
@@ -170,6 +195,25 @@ func TestATicketCancelledWhileTheDaemonWasDownEndsItsAgent(t *testing.T) {
 	assert.Zero(t, resumes.Load(), "ended from its record, never resumed into the cancelled work")
 	f.noLiveAgent(tk.ID)
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
+}
+
+// A daemon stopping while a new agent's worktrees are made is no fault of
+// the ticket's: it is left to start again, not parked as misconfigured.
+func TestStoppingMidWorktreeCreationDoesntParkTheTicket(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	entered := make(chan struct{})
+	f.wts.mu.Lock()
+	f.wts.beforeCreate = func(ctx context.Context) error {
+		close(entered)
+		<-ctx.Done() // a git call that hangs until the stop
+		return ctx.Err()
+	}
+	f.wts.mu.Unlock()
+	tk := f.file("t", nil)
+	<-entered
+	require.NoError(t, f.mgr.Stop(f.ctx()))
+	assert.Equal(t, tickets.StatusPreparing, f.ticket(tk.ID).Status)
 }
 
 func TestAHungStartHoldsUpNeitherOtherTicketsNorStop(t *testing.T) {

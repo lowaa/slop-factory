@@ -140,6 +140,14 @@ func TestCleanupSafeguards(t *testing.T) {
 			},
 		},
 		{
+			// git worktree list reports an all-zero HEAD: there is no tip
+			// to lose, and none to hand rev-list.
+			name: "a switch to an unborn branch is removed",
+			arrange: func(f *fixture, wt *Worktree) {
+				f.run(wt.Path, "switch", "-q", "--orphan", "fresh")
+			},
+		},
+		{
 			name: "dirty and unpushed reports both",
 			arrange: func(f *fixture, wt *Worktree) {
 				f.commit(wt.Path, "work", "unpushed")

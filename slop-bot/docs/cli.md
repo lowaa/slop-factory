@@ -33,7 +33,7 @@ Agents are refused, even on an agent command, from:
 - setting `AutoMerge` (`--auto-merge`)
 - `tell --interrupt`, `tell --merge` and `inbox --log`
 - changing a ticket that isn't theirs, or moving one out of `discussion`
-- cancelling a ticket they didn't file
+- cancelling a ticket that is neither their own nor one they filed
 
 ## User commands
 
@@ -62,7 +62,7 @@ Agents are refused, even on an agent command, from:
 
 | Flag | Meaning |
 | --- | --- |
-| `--purge` | also delete config, briefing, tickets, state and cache. It lists what it will delete and asks first. `workspace_dir` is never deleted: it may hold work in progress. |
+| `--purge` | also delete config, briefing, tickets, state and cache. It lists what it will delete and asks first. `workspace_dir` is never deleted: it may hold work in progress. The installed service is stopped and removed first; purge refuses only if a daemon started by hand still answers. |
 | `--yes` | with `--purge`, delete without asking. |
 
 ### Service
@@ -93,7 +93,7 @@ Ticket ids are as `ticket list` prints them.
 | `ticket comment <id> <text>` | agent | Comment: for product decisions, blockers and scope changes. |
 | `ticket block <id> --on <blocker>` | agent | Make a ticket wait on another. |
 | `ticket unblock <id> --on <blocker>` | agent | Lift a blocker. An agent may lift only blockers it added. |
-| `ticket cancel <id>` | agent | Cancel a ticket (agents: your own, unless it is in discussion, or one you filed). |
+| `ticket cancel <id>` | agent | Cancel a ticket (agents: their own, unless it is in discussion, or one they filed). |
 | `ticket assign <id> [<user>\|me]` | user | Assign a ticket, by default to slop-bot's user, so an agent picks it up; with an empty user, unassign it. |
 
 `ticket create` flags:
@@ -118,7 +118,8 @@ Ticket ids are as `ticket list` prints them.
 `--effort`, `--urgent` (`--urgent=false` clears it), `--reason`,
 `--auto-merge` and `--json`, plus `--title <text>`, `--status <s>`, and
 `--repo <name>` (repeat; it replaces the list, primary first). A ticket's
-agent spec is locked once an agent exists for it.
+agent spec can't be changed while its agent is live: a live agent resumes
+from the spec it started with. Once the agent has ended, it can.
 
 `ticket list` flags: `--status <s>` (repeat), `--assignee <user>` (`""` for
 unassigned), `--mine` (assigned to slop-bot's user), `--json`.
@@ -126,7 +127,8 @@ unassigned), `--mine` (assigned to slop-bot's user), `--json`.
 
 Effort levels per harness: `claude-code` and `agy`: `low`, `medium`,
 `high`, `xhigh`, `max`; `pi`: `off`, `minimal`, `low`, `medium`, `high`,
-`xhigh`, `max`; `codex`: per model, checked when the agent starts.
+`xhigh`, `max`; `codex`: per model, so slop-bot doesn't check them: the
+value is passed to codex as given.
 
 Ticket statuses: `preparing`, `discussion`, `open`, `in_progress`,
 `misconfigured`, `done`, `cancelled`. A ticket with open blockers is
@@ -138,6 +140,8 @@ Ticket statuses: `preparing`, `discussion`, `open`, `in_progress`,
 | --- | --- |
 | `status` | Every agent: its ticket, state, and progress note, plus autonomy and its budget, and each harness's plan allowance. `--json` prints JSON. (Agent, see below.) |
 | `watch <agent\|ticket>` | Follow an agent live: its turns, tool calls, text and state changes. |
+| `attach <agent\|ticket>` | Take an agent over in its harness's TUI, in this terminal. Quitting the TUI hands the agent back. See below. |
+| `detach <agent\|ticket>` | Hand an attached agent back from another terminal, which ends its TUI. |
 | `transcript <agent\|ticket>` | Show an agent's conversation from its harness's own transcript, or slop-bot's retained copy once the harness has pruned it. A ticket id means the ticket's latest agent. |
 | `tui` | A live, read-only table of every agent: ticket, title, ticket status, agent state and time in it, harness, model and effort, pool, open blockers and note. The header shows pool use, autonomy and its budget, and each harness's plan limits. It updates on daemon events, so the time in a state can read stale between them. `←`/`→` or PgUp/PgDn change page, `q` or ctrl+c quits. |
 | `events` | Print the daemon's event log as JSON lines. |
@@ -155,6 +159,13 @@ Ticket statuses: `preparing`, `discussion`, `open`, `in_progress`,
 | `--follow` | keep printing until the agent ends |
 | `--full` | don't cut long tool input and output |
 | `--format text\|jsonl` | default `text` |
+
+`attach` flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--now` | interrupt the agent's turn instead of waiting for it to end |
+| `--no-resume` | release the agent to you: slop-bot stops running it, and the ticket stays assigned but no new agent is started for it |
 
 `events` flags: `--after <n>` (start after this event id), `--follow`.
 

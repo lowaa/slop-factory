@@ -38,17 +38,18 @@ Durations are Go duration strings: `15m`, `24h`, `720h`.
 | `repos[].path` | path | none | The repo's checkout on this machine. Required. |
 | `repos[].git_remote` | string | none | Accepted and kept, but nothing reads it yet (reserved for multi-machine use). |
 | `concurrency.max_active` | int | `4` | Agents in a turn at once, in the normal pool. At least 1. |
-| `concurrency.max_live` | int | `3 * max_active` | Cap on live harness processes, working or waiting. Must be at least `max_active + urgent.max_active`. |
+| `concurrency.max_live` | int | the larger of `3 * max_active` and `max_active + urgent.max_active` | Cap on live harness processes, working or waiting. Must be at least `max_active + urgent.max_active`. |
 | `concurrency.urgent.max_active` | int | `1` | Agents in a turn at once, in the urgent pool. At least 1. |
 | `autonomy.enabled` | bool | `false` | Whether tickets that agents file are worked without a person. `slop-bot autonomy on\|off` overrides it at runtime and persists. |
 | `autonomy.tickets_per_agent` | int | `10` | Budget of outstanding agent-filed tickets, per agent slot (`max_active + urgent.max_active`). At least 1. |
 | `harnesses.<name>.driver` | string | the harness's only driver | One of the drivers below. |
 | `harnesses.<name>.api_key_opt_in` | bool | `false` | Let the harness's API key variables through from the environment. Off, they are stripped: Claude Code in `-p` mode would otherwise bill an `ANTHROPIC_API_KEY` at API rates instead of using your subscription login. |
-| `harnesses.<name>.permissive` | bool | `true` | Run the harness without permission prompts. Nobody watches a headless agent's dialogs. |
+| `harnesses.<name>.permissive` | bool | `true` | Run the harness without permission prompts. Nobody watches a headless agent's dialogs. pi has no permission prompts, so `false` is refused for it. |
 | `harnesses.<name>.model` | string | blank | The model for agents whose ticket names none. Blank leaves it to the harness; pi's adapter then picks a known-good one and `doctor` warns. |
 | `harnesses.<name>.limit_threshold` | number | `95` | Percent of the plan's allowance at which no new agent starts on this harness until the window resets. Above 0, up to 100. See [plan-limit holds](concepts.md#plan-limit-holds). |
 | `agents.nudges` | int | `3` | How many times an agent that stops without a reason is nudged before it is stalled. At least 1. |
 | `agents.stall_after` | duration | `15m` | How long a working agent may go without an event before it is stalled. |
+| `agents.attach_lease` | duration | `30s` | How long an attach outlives its CLI's last heartbeat. Past it, the agent is handed back. Across a daemon restart, the attached CLI has this long to reconnect. At least 1s. See [attach](concepts.md#attach-and-hand-back). |
 | `agents.ask_reminder_after` | duration | `24h` | Parsed and validated, but no code acts on it in this build: there is no ask reminder yet. |
 | `retention.transcripts` | duration | `720h` (30 days) | How long a retained transcript is kept after its agent ends. |
 | `retention.events` | duration | `720h` (30 days) | How long the event log keeps events. |
@@ -127,7 +128,7 @@ honoured when set to an absolute path; otherwise the default applies.
 | --- | --- | --- |
 | Config: `slop-bot-config.yaml`, `briefing.md` | `~/.config/slop-bot/` | `XDG_CONFIG_HOME` |
 | Data: `tickets.db` (the local tickets) | `~/.local/share/slop-bot/` | `XDG_DATA_HOME` |
-| State: `state.db`, `agents/<id>/` (rendered briefings), `transcripts/`, `logs/` | `~/.local/state/slop-bot/` | `XDG_STATE_HOME` |
+| State: `state.db`, `agents/<id>/` (rendered briefings), `transcripts/`, `logs/` (macOS; under systemd the logs go to the journal, `journalctl --user -u slop-bot.service`) | `~/.local/state/slop-bot/` | `XDG_STATE_HOME` |
 | Cache | `~/.cache/slop-bot/` | `XDG_CACHE_HOME` |
 | Runtime: `slop-bot.sock`, `daemon.lock` | `$XDG_RUNTIME_DIR/slop-bot/` | `XDG_RUNTIME_DIR` |
 

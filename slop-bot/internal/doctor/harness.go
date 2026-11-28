@@ -24,6 +24,8 @@ type harnessCheck struct {
 	// models is the list the sign-in check fetched, where fetching it is
 	// the sign-in check (agy), so it isn't fetched twice.
 	models []string
+	// onlyWarn caps the checks at Warn, for a harness this build can't run.
+	onlyWarn bool
 }
 
 // env is the environment the harness's agents get: the API keys only with
@@ -37,6 +39,9 @@ func (h *harnessCheck) run(ctx context.Context, args ...string) (*service.Result
 }
 
 func (h *harnessCheck) add(name string, level Level, detail, fix string) {
+	if h.onlyWarn && level == Fail {
+		level = Warn
+	}
 	h.d.add(h.group, name, level, detail, fix)
 }
 
@@ -96,6 +101,9 @@ func (d *Doctor) checkHarness(ctx context.Context, name string, cfg *config.Harn
 			level, fix = Fail, "set default_harness to a harness this build runs (claude-code, codex, pi)"
 		}
 		h.add("implemented", level, fmt.Sprintf("this build of slop-bot can't run %s under the %s driver yet", name, cfg.Driver), fix)
+		// Its probes still say what a build that has it would need, but
+		// nothing runs it here: they mustn't fail doctor, and so install.
+		h.onlyWarn = true
 	}
 	bin, err := d.opts.Commands.LookPath(p.binary)
 	if err != nil {

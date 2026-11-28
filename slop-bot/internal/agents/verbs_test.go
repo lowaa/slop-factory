@@ -77,6 +77,25 @@ func TestDiscussParksTheTicketAndResolveWakesTheAgent(t *testing.T) {
 	assert.ErrorIs(t, err, agents.ErrNotInDiscusson, "it is open now")
 }
 
+// Resolving the discussion answers the discussion, not some other question
+// the agent asked meanwhile.
+func TestResolvingADiscussionLeavesAnUnrelatedAskOpen(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	s, tk, agent := f.startedAgent("t", nil)
+	f.turn(s, func() {
+		_, err := f.mgr.Ask(f.ctx(), agent, "CSV or XLSX?", nil, "")
+		require.NoError(t, err)
+		require.NoError(t, f.mgr.Discuss(f.ctx(), agent, "Drop the column?", nil, ""))
+	})
+	f.await(agents.EventState, toState(state.StateWaitingUser))
+	require.NoError(t, f.mgr.ResolveDiscussion(f.ctx(), ident.UserPrincipal(), tk.ID, "keep it"))
+	assert.Contains(t, f.user(s).Text, "Your discussion is resolved: keep it")
+	asks, err := f.state.Messages.OpenAsksFrom(context.Background(), agent.Agent)
+	require.NoError(t, err)
+	assert.Len(t, asks, 1, "the question is still the user's to answer")
+}
+
 func TestResolveDiscussionOfAnUnknownTicketFails(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "")

@@ -19,6 +19,10 @@ import (
 // handshakeID is the get_state request Open waits on.
 const handshakeID = "slop-bot-handshake"
 
+// ErrEmptySession is a resume that found no conversation: pi made a new,
+// empty session in its place.
+var ErrEmptySession = errors.New("pi: the resumed session is empty")
+
 // dialogs are the extension UI methods that block until answered.
 var dialogs = []string{"select", "confirm", "input", "editor"}
 
@@ -146,8 +150,9 @@ func (c *codec) checkState(r *record) error {
 	}
 	if c.resumed && st.MessageCount == 0 {
 		// --session-id creates a missing session rather than failing, so a
-		// resume that lost its session file starts afresh without context.
-		c.log.Warn("pi: resumed session is empty", "session", c.id)
+		// resume that can't find its session (lost, or looked for in another
+		// cwd's project) would carry on with neither history nor kick-off.
+		return fmt.Errorf("%w: %s", ErrEmptySession, c.id)
 	}
 	c.log.Info("pi: session open", "session", c.id, "model", st.Model.Provider+"/"+st.Model.ID,
 		"thinking", st.ThinkingLevel, "messages", st.MessageCount)

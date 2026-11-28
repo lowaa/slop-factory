@@ -6,6 +6,7 @@ import (
 	"embed"
 	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -206,6 +207,25 @@ func mustRead(t *testing.T, name string) []byte {
 	b, err := migrationFiles.ReadFile(name)
 	require.NoError(t, err)
 	return b
+}
+
+// The path goes into a file: URI, where ?, # and %XX mean something: a
+// home directory holding them must still open the file named, with the
+// pragmas applied.
+func TestAPathWithURICharactersOpensThatFile(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "a#b?c%20d e")
+	path := filepath.Join(dir, "x.db")
+	db, err := open(t, path, migrations(t))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	var fk int
+	require.NoError(t, db.NewRaw("PRAGMA foreign_keys").Scan(context.Background(), &fk))
+	assert.Equal(t, 1, fk, "the pragmas weren't lost to the path")
+	assert.FileExists(t, path)
+	entries, err := os.ReadDir(filepath.Dir(dir))
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "nothing opened beside it, at a truncated path")
 }
 
 func TestDurableSetsSynchronousFull(t *testing.T) {

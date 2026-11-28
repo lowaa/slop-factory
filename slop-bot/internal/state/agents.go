@@ -79,7 +79,10 @@ type Agent struct {
 	Model          string
 	Effort         string
 	ConversationID string
-	Mode           Mode
+	// ConversationDir is the cwd the conversation started in, where it is
+	// resumed; "" for a record from before it was kept.
+	ConversationDir string
+	Mode            Mode
 	// Lease is set exactly when Mode is ModeAttached.
 	Lease *Lease
 	// TUISession is the tmux session name, for TUI drivers.
@@ -169,29 +172,30 @@ func (e *LeaseHeldError) Is(target error) bool { return target == ErrConflict }
 type agentRow struct {
 	bun.BaseModel `bun:"table:agents"`
 
-	ID             string `bun:"id,pk"`
-	TicketID       string `bun:"ticket_id"`
-	Harness        string `bun:"harness"`
-	Driver         string `bun:"driver"`
-	Model          string `bun:"model"`
-	Effort         string `bun:"effort"`
-	ConversationID string `bun:"conversation_id"`
-	Mode           string `bun:"mode"`
-	LeaseHolder    string `bun:"lease_holder"`
-	LeaseExpiresAt *int64 `bun:"lease_expires_at"`
-	TUISession     string `bun:"tui_session"`
-	Pool           string `bun:"pool"`
-	State          string `bun:"state"`
-	StateSince     int64  `bun:"state_since"`
-	ProgressNote   string `bun:"progress_note"`
-	NudgeCount     int    `bun:"nudge_count"`
-	Declared       string `bun:"declared"`
-	DeclaredSum    string `bun:"declared_summary"`
-	BlockedTold    bool   `bun:"blocked_told"`
-	Recoveries     int    `bun:"recoveries"`
-	TokenHash      string `bun:"token_hash"`
-	CreatedAt      int64  `bun:"created_at"`
-	EndedAt        *int64 `bun:"ended_at"`
+	ID              string `bun:"id,pk"`
+	TicketID        string `bun:"ticket_id"`
+	Harness         string `bun:"harness"`
+	Driver          string `bun:"driver"`
+	Model           string `bun:"model"`
+	Effort          string `bun:"effort"`
+	ConversationID  string `bun:"conversation_id"`
+	ConversationDir string `bun:"conversation_dir"`
+	Mode            string `bun:"mode"`
+	LeaseHolder     string `bun:"lease_holder"`
+	LeaseExpiresAt  *int64 `bun:"lease_expires_at"`
+	TUISession      string `bun:"tui_session"`
+	Pool            string `bun:"pool"`
+	State           string `bun:"state"`
+	StateSince      int64  `bun:"state_since"`
+	ProgressNote    string `bun:"progress_note"`
+	NudgeCount      int    `bun:"nudge_count"`
+	Declared        string `bun:"declared"`
+	DeclaredSum     string `bun:"declared_summary"`
+	BlockedTold     bool   `bun:"blocked_told"`
+	Recoveries      int    `bun:"recoveries"`
+	TokenHash       string `bun:"token_hash"`
+	CreatedAt       int64  `bun:"created_at"`
+	EndedAt         *int64 `bun:"ended_at"`
 }
 
 func (r *agentRow) agent() *Agent {
@@ -203,6 +207,7 @@ func (r *agentRow) agent() *Agent {
 		Model:           r.Model,
 		Effort:          r.Effort,
 		ConversationID:  r.ConversationID,
+		ConversationDir: r.ConversationDir,
 		Mode:            Mode(r.Mode),
 		TUISession:      r.TUISession,
 		Pool:            Pool(r.Pool),
@@ -429,11 +434,11 @@ func (a *Agents) History(ctx context.Context, id ident.AgentID) ([]StateChange, 
 	return out, nil
 }
 
-// SetConversationID records the harness's conversation id, which resumes
-// the agent after a restart or an attach.
-func (a *Agents) SetConversationID(ctx context.Context, id ident.AgentID, conversation string) error {
+// SetConversation records the harness's conversation id and the cwd it
+// runs in, which resume the agent after a restart or an attach.
+func (a *Agents) SetConversation(ctx context.Context, id ident.AgentID, conversation, dir string) error {
 	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
-		return q.Set("conversation_id = ?", conversation)
+		return q.Set("conversation_id = ?", conversation).Set("conversation_dir = ?", dir)
 	})
 }
 

@@ -33,6 +33,26 @@ func TestANestedWorktreeIsKeptAndNeverForceRemoved(t *testing.T) {
 	assert.FileExists(t, filepath.Join(sub, "precious"))
 }
 
+// A nested worktree deleted by hand leaves its registration behind: the
+// parent is still kept, but the detail says the directory is gone and how
+// to clear the registration.
+func TestAStaleNestedRegistrationSaysHowToClearIt(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "a")
+	wt := f.create("62", []string{"a"}, "a")[0]
+	f.commit(wt.Path, ".gitignore", ".claude/worktrees/")
+	f.run(wt.Path, "push", "-q", "origin", "HEAD")
+	sub := filepath.Join(wt.Path, ".claude", "worktrees", "sub")
+	f.run(wt.RepoPath, "worktree", "add", "-q", "--detach", sub)
+	require.NoError(t, os.RemoveAll(sub))
+
+	r := f.m.Cleanup(context.Background(), "62", []*Worktree{wt})[0]
+	require.NoError(t, r.Err)
+	require.Equal(t, []ReasonKind{Nested}, kinds(r.Reasons))
+	assert.Contains(t, r.Reasons[0].Detail, "is gone")
+	assert.Contains(t, r.Reasons[0].Detail, "git -C "+wt.RepoPath+" worktree prune")
+}
+
 // A symref under the ticket's prefix isn't one of its branches; deleting
 // through it would delete its target.
 func TestASymrefAmongTheTicketsBranchesIsLeftAlone(t *testing.T) {

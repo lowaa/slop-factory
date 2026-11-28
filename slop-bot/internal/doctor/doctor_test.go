@@ -332,6 +332,9 @@ func agyFixture(t *testing.T, harness string) *fixture {
 	t.Helper()
 	f := newFixture(t, "linux")
 	f.config("default_harness: agy\nharnesses: {agy: " + harness + "}\n")
+	// As a build that runs agy sees it: one that doesn't caps its checks
+	// at Warn (TestUnimplementedHarness).
+	f.opts.Implemented = func(string, string) bool { return true }
 	return f
 }
 
@@ -587,6 +590,9 @@ func TestUnimplementedHarness(t *testing.T) {
 	res := f.result(f.run(), "harness agy", "implemented")
 	assert.Equal(t, doctor.Warn, res.Level, "only agy's tickets are parked")
 	assert.Contains(t, res.Detail, "can't run agy under the tui driver")
+	f.cmds.Remove("agy")
+	missing := f.result(f.run(), "harness agy", "binary")
+	assert.Equal(t, doctor.Warn, missing.Level, "nothing runs agy here, so a missing one fails nothing")
 
 	f.config("default_harness: agy\nharnesses: {agy: {}}\n")
 	assert.Equal(t, doctor.Fail, f.result(f.run(), "harness agy", "implemented").Level,

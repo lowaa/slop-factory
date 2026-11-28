@@ -14,6 +14,11 @@ on:
       - slop-bot/internal/scriptedmodel/**
       - slop-bot/internal/ident/**
       - slop-bot/internal/version/**
+      # The transcript.Reader contract the adapters implement, and what it
+      # is built on.
+      - slop-bot/internal/transcript/**
+      - slop-bot/internal/state/**
+      - slop-bot/internal/sqlitex/**
       # The merge guard's tests run the real hook, through the CLI; these
       # are the parts of it the guard is made of (the CLI's other
       # dependencies are covered by the unit and e2e suites).

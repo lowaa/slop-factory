@@ -215,6 +215,12 @@ func (ar *attachRoutes) heartbeat(ctx context.Context, sess *attachSession, id i
 		return true
 	case ctx.Err() != nil:
 		return true // the stream's end handles it
+	case !attachOver(err):
+		// A busy database, say: the next tick retries, and the lease
+		// outlasts a few missed renewals. Ending here would kill the
+		// person's TUI and leave the agent attached until the lease ran out.
+		ar.d.opts.Logger.Warn("daemon: renewing an attach lease", "agent", id, "err", err)
+		return true
 	case !sess.claim():
 		// A hand-back released the lease and is resuming the agent: its
 		// outcome is the session's, not this.
@@ -224,6 +230,12 @@ func (ar *attachRoutes) heartbeat(ctx context.Context, sess *attachSession, id i
 	send(&api.AttachFrame{Type: api.FrameEnded, Reason: err.Error()})
 	sess.finish(agents.Ended, nil)
 	return false
+}
+
+// attachOver reports whether a failed renewal means the attach is over:
+// it was handed back, or the agent has ended. Anything else is retried.
+func attachOver(err error) bool {
+	return errors.Is(err, agents.ErrNotAttached) || errors.Is(err, state.ErrEnded) || errors.Is(err, state.ErrNotFound)
 }
 
 // hungUp hands back an attach whose CLI went away without a word.

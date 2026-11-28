@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/agents"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 )
@@ -22,4 +23,14 @@ func TestAnAgentSeesOnlyItsOwnConversationEvents(t *testing.T) {
 	assert.True(t, visibleTo(me, mine))
 	assert.True(t, visibleTo(me, queued))
 	assert.True(t, visibleTo(ident.UserPrincipal(), other), "the user sees everything")
+}
+
+// slop-bot releasing an agent it gave up on (a failed start, a crash loop)
+// writes no agent.state, only agent.released: a follower must end on it,
+// in exactly the failure a user is likely to be watching.
+func TestAReleaseEndsAWatch(t *testing.T) {
+	t.Parallel()
+	released := &state.Event{Type: agents.EventReleased, Agent: "t1-aaaaaa", Payload: []byte(`{"reason":"its harness died 4 times in a row"}`)}
+	assert.True(t, endsAgent(released))
+	assert.True(t, watched(released), "watch shows why it ended")
 }

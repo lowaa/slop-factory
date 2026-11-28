@@ -19,20 +19,21 @@ const adoptedNote = "slop-bot restarted while you worked. Any slop-bot command t
 // daemon and a's did: the conversation runs on as it was, and keeps its
 // token (the session's environment has it), where a resume starts the
 // conversation again. ok is false when there is nothing to adopt.
-func (m *Manager) adoptSession(ctx context.Context, a *state.Agent) (harness.Conversation, harness.Capabilities, bool) {
+func (m *Manager) adoptSession(ctx context.Context, a *state.Agent) (*started, bool) {
 	h, found := m.opts.Harnesses.Harness(a.Harness)
 	ad, isAdopter := h.(harness.Adopter)
 	if !found || !isAdopter {
-		return nil, harness.Capabilities{}, false
+		return nil, false
 	}
 	conv, err := ad.AdoptAgent(ctx, a.ID)
 	if err != nil {
 		if !errors.Is(err, harness.ErrNoSession) {
 			m.opts.Logger.Warn("agents: adopting a session; resuming instead", "agent", a.ID, "err", err)
 		}
-		return nil, harness.Capabilities{}, false
+		return nil, false
 	}
-	return conv, h.Capabilities(), true
+	// Still running where it started.
+	return &started{conv: conv, caps: h.Capabilities(), dir: a.ConversationDir}, true
 }
 
 // joinForAttach is stopForAttach for a conversation a person joins (a TUI

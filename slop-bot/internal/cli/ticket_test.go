@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,9 +26,27 @@ func (h *harness) ticket(t *testing.T, args ...string) api.Ticket {
 	return tk
 }
 
+func TestARepoNotInTheConfigIsRefused(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	require.NoError(t, os.WriteFile(h.config, []byte("user: ada\nharnesses: {claude-code: {}}\n"+
+		"repos: [{name: app, path: "+filepath.Join(h.home, "app")+"}]\n"), 0o600))
+	startDaemon(t, h)
+
+	assert.Equal(t, 1, h.run(t, "ticket", "create", "--title", "t", "--repo", "app", "--repo", "typo"))
+	assert.Contains(t, h.err.String(), `repo "typo" isn't in this machine's config (repos: app)`)
+	tk := h.ticket(t, "ticket", "create", "--title", "t", "--repo", "app")
+	assert.Equal(t, 1, h.run(t, "ticket", "set", tk.ID, "--repo", "app", "--repo", "app"))
+	assert.Contains(t, h.err.String(), `repo "app" is named twice`)
+	assert.Equal(t, 1, h.run(t, "ticket", "set", tk.ID, "--repo", "typo"))
+	assert.Contains(t, h.ok(t, "ticket", "show", tk.ID), "app")
+}
+
 func TestTicketLifecycleThroughTheCLI(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	require.NoError(t, os.WriteFile(h.config, []byte("user: ada\nharnesses: {claude-code: {}, pi: {}}\n"+
+		"repos: [{name: app, path: "+filepath.Join(h.home, "app")+"}]\n"), 0o600))
 	startDaemon(t, h)
 
 	first := h.ticket(t, "ticket", "create", "--title", "Add export", "--body", "CSV, please", "--harness", "pi", "--effort", "low", "--repo", "app", "--assign")

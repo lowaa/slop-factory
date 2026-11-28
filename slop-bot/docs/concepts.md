@@ -18,7 +18,7 @@ Ticket statuses:
 | `discussion` | waiting on a person to resolve a risky decision. Only the user may move a ticket out of it. |
 | `open` | refined, ready to be worked once nothing blocks it |
 | `in_progress` | being worked |
-| `misconfigured` | its agent spec failed validation (an unconfigured harness, a bad effort), so it isn't scheduled until fixed |
+| `misconfigured` | parked until you fix it: its agent spec failed validation (an unconfigured harness, a bad effort), or its agent failed to start or was given up on (see below) |
 | `done` | finished, only from `in_progress` |
 | `cancelled` | dropped |
 
@@ -49,8 +49,8 @@ Agent states:
 | `discussion` | raised a `discuss` |
 | `waiting_merge` | said `ready-to-merge` |
 | `stalled` | needs a person: too many nudges, a failed turn, or silence mid-turn |
-| `attached` | a person has taken over (designed; see [attach](#attach-and-hand-back)) |
-| `released` | handed to a person for good, or given up on (designed) |
+| `attached` | a person has taken over in the harness's TUI (see [attach](#attach-and-hand-back)) |
+| `released` | handed to a person with `attach --no-resume`, or given up on (see below) |
 | `done` | the ticket's goal is met |
 | `exited` / `crashed` | the harness process ended, with status 0 / non-zero |
 
@@ -59,8 +59,15 @@ from this turn's declaration: open asks mean `waiting_user`, a ticket in
 `discussion` means `discussion`.
 
 If the harness process dies, the agent becomes `exited` or `crashed` and
-the user is told. On a daemon restart, live agents are resumed by their
-conversation id.
+the user is told. slop-bot then resumes it by its conversation id, up to 3
+times in a row. The count resets only when a turn completes: a failed turn
+doesn't reset it. Past 3, or when a resume fails, the agent is `released`
+and its worktrees are cleaned up (any holding work are kept, and the user
+is told). A `preparing` or `open` ticket is then parked as `misconfigured`,
+so a new agent isn't started into the same failure. A harness that fails to
+start is treated the same way. `slop-bot ticket set <id> --status preparing`
+puts a parked ticket back in line. On a daemon restart, live agents are
+resumed by their conversation id.
 
 ## Declarations, nudges and stalls
 
@@ -81,7 +88,10 @@ A turn that ends with none of these is **nudged**:
 a message from slop-bot asks it to say why it stopped. After
 `agents.nudges` nudges (default 3), the next such stop makes it `stalled`
 and tells the user. A turn that ended because a person interrupted it is
-`idle`, not nudged, and a turn that failed is `stalled` at once.
+`idle`, not nudged, and a turn that failed is `stalled` at once. A turn
+that ends with none of the declarations on a ticket with open blockers
+leaves the agent `idle`, not nudged: it was told to wait, and slop-bot wakes
+it when they are done.
 
 Separately, an agent that is in a turn but emits no event for
 `agents.stall_after` (default 15 minutes) is `stalled`, and the user is told
@@ -95,10 +105,11 @@ events resume.
 - mid-turn, steered into the running turn where the driver can do it
 - otherwise at the next turn boundary, which needs a slot; an agent being
   woken for a message goes ahead of new tickets in its pool's queue
-- held while a person is attached
+- held while a person is attached, and delivered at the hand-back
 
-Each message says who sent it. A message from **user** carries the user's
-authority; one from another agent is information to weigh, not an
+Each message says who sent it: the text is quoted with `> ` under a
+`[slop-bot] Message from ...` header line, so only slop-bot writes a header.
+A message from **user** carries the user's authority; one from another agent is information to weigh, not an
 instruction. A loop guard stops ping-pong and flooding: at most 30
 messages a minute from one sender, and 20 between one pair in ten minutes,
 after which the user is told.
@@ -111,7 +122,8 @@ Two limits bound how many agents run. Both are counted per daemon.
   agent waiting on an answer, a discussion or a merge holds no slot.
 - `concurrency.urgent.max_active` (default 1) is a second, separate pool for
   urgent tickets, so a red main branch never queues behind normal work.
-- `concurrency.max_live` (default 3 times `max_active`) caps live harness
+- `concurrency.max_live` (default the larger of 3 times `max_active` and
+  `max_active` plus `urgent.max_active`) caps live harness
   processes, working or waiting. At the cap, no new agent starts.
 
 An agent that has an answer or message to act on is served before new
@@ -119,8 +131,8 @@ tickets. New work never jumps an agent already queued for a slot.
 
 An urgent ticket is one the user marked `--urgent`, or an agent did, when
 `agents_may_set_urgent` is true, with a required `--reason` that goes on the
-ticket and tells the user. The briefing tells agents to use it only for
-something breaking the pipeline.
+ticket as a comment; the user isn't told separately. The briefing tells
+agents to use it only for something breaking the pipeline.
 
 The design also stops the longest-waiting agent to free a live place when
 `max_live` is reached, resuming it later by id. This build only refuses new
@@ -146,23 +158,32 @@ pick them up: `preparing`, then the work.
 
 ## Attach and hand-back
 
-The design lets a person take over an agent's session. This build has the
-seams but no `attach` command:
+`slop-bot attach <agent|ticket>` lets a person take over an agent's session.
+It stops the programmatic session at the end of the agent's turn (with
+`--now`, it interrupts the turn instead of waiting), then runs the harness's
+own TUI, resuming the same conversation, in your terminal. The TUI gets a
+fresh agent token, so `ask` and `done` work from inside it.
 
-- each conversation can describe an attach plan: **hand-over** (stop the
-  programmatic session at a safe point and run the harness's own TUI,
-  resuming the same conversation, in your terminal) or **join** (attach to
-  the existing tmux session of a TUI-driven agent)
-- while attached, messages are held, not typed into the session
-  (`ErrAttached`), and delivered on hand-back with a note that a person
-  worked with the agent
-- hanging up hands the agent back to programmatic control; one attach per
-  agent
+- one attach per agent. A second is told who holds it.
+- the attach holds a **lease**, renewed by the CLI's heartbeat. If the
+  heartbeat stops for `agents.attach_lease` (default 30s), the agent is
+  handed back without the CLI. After a daemon restart the CLI has that long
+  to reconnect.
+- while attached, messages are held, not typed into the session, and are
+  delivered at the hand-back with a note that a person worked with the agent
+- the agent is handed back, and resumed by its conversation id, when you
+  quit the TUI, when the terminal hangs up, when the lease expires, or when
+  `slop-bot detach <agent|ticket>` is run from another terminal (which ends
+  the TUI)
+- if the agent ran `done` from inside the TUI, the hand-back finishes the
+  ticket instead of resuming the agent. If the ticket was cancelled during
+  the attach, the agent just ends.
+- `--no-resume` releases the agent to you: it is `released`, nothing
+  resumes it, and the ticket stays assigned, but no new agent is
+  started for it. The merge guard still applies in the TUI
+  ([merge_guard.md](merge_guard.md)).
 
-Nothing sets the `attached` or `released` state yet, so `slop-bot` can't be
-used to attach to an agent from this build. The harness CLIs can: the
-conversation id is recorded, and every worktree is an ordinary git
-worktree.
+Only harnesses with a TUI to hand over to can be attached.
 
 ## Transcripts and retention
 

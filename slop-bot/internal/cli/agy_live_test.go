@@ -80,7 +80,7 @@ func TestLiveAgyWorksATicketThroughTheDaemon(t *testing.T) {
 	_, err = rand.Read(b)
 	require.NoError(t, err)
 	h.deps.tmuxSocket = "sbt-agy-" + hex.EncodeToString(b)
-	tmuxtest.Host(t, &sessionhost.TmuxOptions{Socket: h.deps.tmuxSocket})
+	host := tmuxtest.Host(t, &sessionhost.TmuxOptions{Socket: h.deps.tmuxSocket})
 	live := &liveAgy{h: h}
 	h.deps.tuiHarnesses = func(kit *tuidriver.Sessions) daemon.Harnesses {
 		s := *kit
@@ -106,6 +106,20 @@ func TestLiveAgyWorksATicketThroughTheDaemon(t *testing.T) {
 	self, err := os.Executable()
 	require.NoError(t, err)
 	e := &e2e{t: t, h: h, self: self, stop: startDaemon(t, h), timeout: 4 * time.Minute}
+	// Before the daemon stops: what a failure needs to be understood.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		if h.run(t, "events") == 0 {
+			t.Logf("events:\n%s", h.out.String())
+		}
+		names, _ := host.List(context.Background())
+		for _, n := range names {
+			screen, _ := host.Capture(context.Background(), n)
+			t.Logf("session %s:\n%s", n, screen)
+		}
+	})
 
 	e.h.ticket(t, "ticket", "create", "--assign", "--effort", "low", "--title", "Live smoke test",
 		"--body", "This is an automated test of slop-bot. Do exactly this, and nothing else: run the shell command `"+

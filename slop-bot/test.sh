@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs slop-bot's lint and Go tests: what CI runs. Extra arguments go to
-# `go test`, e.g. `./test.sh -run TestScheduler ./internal/scheduler`.
+# `go test`, e.g. `./test.sh -run TestScheduler ./internal/agents`.
 # It builds in the repo's go.work, as the repo's other apps do: sibling
 # modules resolve there, not through tagged releases.
 set -euo pipefail

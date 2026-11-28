@@ -140,7 +140,10 @@ func dsn(path string, durable bool) string {
 	}
 	q.Add("_pragma", "synchronous("+sync+")")
 	q.Set("_txlock", "immediate")
-	return "file:" + path + "?" + q.Encode()
+	// Escaped as a URI: the driver opens with SQLITE_OPEN_URI, where an
+	// unescaped ?, # or %XX in the path would cut it short or change it.
+	u := url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}
+	return u.String()
 }
 
 func migrate(ctx context.Context, sqldb *sql.DB, opts *Options) error {

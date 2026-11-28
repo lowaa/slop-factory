@@ -332,12 +332,19 @@ func (at *attachRun) reconnect(ctx context.Context) (*scannedBody, error) {
 		case <-time.After(wait):
 		}
 		body, _, err := at.open(ctx, at.agent, &api.AttachRequest{Holder: at.holder, Reattach: true})
-		var refused *control.APIError
-		if err == nil || errors.As(err, &refused) {
+		if err == nil || refusal(err) {
 			return body, err
 		}
 		wait = min(2*wait, retryMax)
 	}
+}
+
+// refusal reports whether err is the daemon refusing a request, as against
+// failing it: a 5xx (a busy database, say) is worth retrying, and taking it
+// for a refusal would end the person's TUI.
+func refusal(err error) bool {
+	var apiErr *control.APIError
+	return errors.As(err, &apiErr) && apiErr.Status < http.StatusInternalServerError
 }
 
 // handBack tells the daemon the TUI has exited, retrying through a daemon
@@ -352,8 +359,7 @@ func (at *attachRun) handBack(ctx context.Context) {
 			at.say("Handed agent %s back to slop-bot: %s.", at.agent, out.Outcome)
 			return
 		}
-		var refused *control.APIError
-		if errors.As(err, &refused) || time.Now().After(deadline) {
+		if refusal(err) || time.Now().After(deadline) {
 			at.say("slop-bot: handing agent %s back: %v. Its lease expiring will hand it back.", at.agent, err)
 			return
 		}

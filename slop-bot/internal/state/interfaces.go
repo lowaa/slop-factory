@@ -33,7 +33,7 @@ type TokenLookup interface {
 type AgentWriter interface {
 	Create(ctx context.Context, n *NewAgent) (*Agent, error)
 	SetState(ctx context.Context, t *Transition) (bool, error)
-	SetConversationID(ctx context.Context, id ident.AgentID, conversation string) error
+	SetConversation(ctx context.Context, id ident.AgentID, conversation, dir string) error
 	SetProgressNote(ctx context.Context, id ident.AgentID, note string) error
 	SetDeclared(ctx context.Context, id ident.AgentID, declared, summary string) error
 	AddNudge(ctx context.Context, id ident.AgentID) (int, error)

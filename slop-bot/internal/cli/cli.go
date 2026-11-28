@@ -59,6 +59,9 @@ type Deps struct {
 	clock clock.Clock
 	// tuiGrace shortens the daemon's wait for a hung-up TUI in tests.
 	tuiGrace time.Duration
+	// daemonAnswers lets in-package tests stand a daemon in for the one at
+	// a socket they can't listen on; nil dials it.
+	daemonAnswers func(ctx context.Context, socket string) bool
 }
 
 // FromOS is the real outside world.
