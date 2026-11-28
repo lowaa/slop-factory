@@ -29,8 +29,10 @@ type peer struct {
 	sent []message
 	// ids are the id of the last request of each method.
 	ids map[string]json.RawMessage
-	// broken fails every write, as a pipe to an exited process does.
+	// broken fails every write, as a pipe to an exited process does;
+	// refuse fails only the writes of that method.
 	broken bool
+	refuse string
 }
 
 func (p *peer) Write(b []byte) (int, error) {
@@ -40,6 +42,9 @@ func (p *peer) Write(b []byte) (int, error) {
 	for _, line := range bytes.Split(bytes.TrimRight(b, "\n"), []byte("\n")) {
 		var m message
 		require.NoError(p.t, json.Unmarshal(line, &m))
+		if p.refuse != "" && m.Method == p.refuse {
+			return 0, errors.New("broken pipe")
+		}
 		p.sent = append(p.sent, m)
 		if m.Method != "" && m.ID != nil {
 			p.ids[m.Method] = m.ID

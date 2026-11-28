@@ -388,7 +388,18 @@ func (c *codec) steerRefused(w *rpcdriver.Wire, r *request, e *rpcError) error {
 		c.queued = append(c.queued, r.msg)
 		return nil
 	}
-	return c.deliver(w, r.msg)
+	return c.sendOn(w, r.msg, c.deliver)
+}
+
+// sendOn sends msg on with send, a message a Send already took (the
+// caller has it marked delivered): if the write fails, it goes back to the
+// head of the queue, Undelivered, rather than being lost. mu is held.
+func (c *codec) sendOn(w *rpcdriver.Wire, msg *harness.Message, send func(*rpcdriver.Wire, *harness.Message) error) error {
+	err := send(w, msg)
+	if err != nil {
+		c.queued = append([]*harness.Message{msg}, c.queued...)
+	}
+	return err
 }
 
 // turnStarted handles turn/start's response: the turn's id, which the
@@ -425,7 +436,9 @@ func (c *codec) flush(w *rpcdriver.Wire) error {
 	queued := c.queued
 	c.queued = nil
 	for i, msg := range queued {
-		if err := c.deliver(w, msg); err != nil {
+		if err := c.sendOn(w, msg, c.deliver); err != nil {
+			// The rest are still waiting, behind the one that failed.
+			c.queued = append(c.queued, queued[i+1:]...)
 			return err
 		}
 		if c.starting {
@@ -518,7 +531,7 @@ func (c *codec) turnCompleted(w *rpcdriver.Wire, params json.RawMessage) ([]harn
 	if next {
 		msg := c.queued[0]
 		c.queued = c.queued[1:]
-		return evs, c.startTurn(w, msg)
+		return evs, c.sendOn(w, msg, c.startTurn)
 	}
 	return evs, nil
 }
