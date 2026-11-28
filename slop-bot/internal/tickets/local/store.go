@@ -23,7 +23,15 @@ func (s *System) Get(ctx context.Context, id ident.TicketID) (*tickets.Ticket, e
 	if err != nil {
 		return nil, err
 	}
-	return loadTicket(ctx, s.db, n, true)
+	var t *tickets.Ticket
+	err = s.read(ctx, func(ctx context.Context, tx bun.Tx) error {
+		t, err = loadTicket(ctx, tx, n, true)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 // loadTicket reads one ticket with its open blockers, and its comments if
@@ -85,8 +93,21 @@ func comments(ctx context.Context, db bun.IDB, ticket int64) ([]tickets.Comment,
 
 // List implements tickets.TicketingSystem.
 func (s *System) List(ctx context.Context, q *tickets.Query) ([]*tickets.Ticket, error) {
+	var out []*tickets.Ticket
+	err := s.read(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		out, err = list(ctx, tx, q)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func list(ctx context.Context, db bun.IDB, q *tickets.Query) ([]*tickets.Ticket, error) {
 	var rows []ticketRow
-	sel := s.db.NewSelect().Model(&rows).Order("id")
+	sel := db.NewSelect().Model(&rows).Order("id")
 	if q != nil {
 		applyQuery(sel, q)
 	}
@@ -100,7 +121,7 @@ func (s *System) List(ctx context.Context, q *tickets.Query) ([]*tickets.Ticket,
 	for i := range rows {
 		ids[i] = rows[i].ID
 	}
-	open, err := openBlockers(ctx, s.db, ids)
+	open, err := openBlockers(ctx, db, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +174,7 @@ func (s *System) Blockers(ctx context.Context, id ident.TicketID) (*tickets.Bloc
 	}
 	var set *tickets.BlockerSet
 	// One read transaction, so both directions are of the same graph.
-	err = s.db.RunInTx(ctx, &sql.TxOptions{ReadOnly: true}, func(ctx context.Context, tx bun.Tx) error {
+	err = s.read(ctx, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := loadTicket(ctx, tx, n, false); err != nil {
 			return err
 		}

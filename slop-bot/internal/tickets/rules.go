@@ -55,6 +55,10 @@ var (
 	// own nor one it filed that hasn't started.
 	ErrNotEditable = fmt.Errorf("%w: an agent may edit only its own ticket, "+
 		"or one it filed that is still preparing or open. To ask for a change, comment on it", ErrNotPermitted)
+	// ErrStatusNotPermitted refuses an agent moving the status of a ticket
+	// other than its own.
+	ErrStatusNotPermitted = fmt.Errorf("%w: an agent moves only its own ticket's status, "+
+		"and may only cancel a ticket it filed", ErrNotPermitted)
 	// ErrBlockersNotEditable is ErrNotEditable for blockers. Gating another
 	// agent's work, or a person's, is a person's call.
 	ErrBlockersNotEditable = fmt.Errorf("%w: an agent may edit the blockers only of its own ticket, "+
@@ -122,6 +126,13 @@ func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketCha
 	if err := CheckPrincipal(by); err != nil {
 		return err
 	}
+	// Before editability, so an agent reopening its finished ticket hears
+	// that reopening is the user's, not that the ticket isn't its to edit.
+	if change.Status != nil {
+		if err := checkStatusAuthority(by, cur, *change.Status); err != nil {
+			return err
+		}
+	}
 	if !by.IsUser() && !AgentMayEdit(by, cur) {
 		return fmt.Errorf("%w (%s is %s)", ErrNotEditable, cur.ID, cur.Status)
 	}
@@ -142,26 +153,40 @@ func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketCha
 		}
 	}
 	if change.Status != nil {
-		return checkTransition(by, cur, *change.Status)
+		return checkTransition(cur, *change.Status)
 	}
 	return nil
 }
 
-func checkTransition(by ident.Principal, cur *Ticket, to Status) error {
+// checkStatusAuthority is who may move a ticket's status. The user may make
+// any move. An agent moves its own ticket's, and may only cancel one it
+// filed: moving a filing on to open or in_progress itself would skip the
+// refinement another agent is meant to give it.
+func checkStatusAuthority(by ident.Principal, cur *Ticket, to Status) error {
+	if by.IsUser() || to == cur.Status {
+		return nil
+	}
+	if cur.Status.Terminal() {
+		return fmt.Errorf("%w: reopening %s", ErrUserOnly, cur.ID)
+	}
+	if by.Ticket != cur.ID && to != StatusCancelled {
+		return fmt.Errorf("%w (%s to %s)", ErrStatusNotPermitted, cur.ID, to)
+	}
+	return nil
+}
+
+func checkTransition(cur *Ticket, to Status) error {
 	if !to.Valid() {
 		return fmt.Errorf("%w: unknown status %q", ErrInvalid, to)
 	}
 	if !CanTransition(cur.Status, to) {
 		return fmt.Errorf("%w: %s to %s", ErrInvalidTransition, cur.Status, to)
 	}
-	if cur.Status.Terminal() && cur.Status != to && !by.IsUser() {
-		return fmt.Errorf("%w: reopening %s", ErrUserOnly, cur.ID)
-	}
-	// Only from open: blockers gate starting the work, not work already
-	// under way. An agent that adds a blocker to its own ticket mid-work
-	// keeps it, and resumes after a discussion even if it is still waiting.
-	if cur.Status == StatusOpen && to == StatusInProgress && len(cur.BlockedBy) > 0 {
-		return fmt.Errorf("%w: %s waits on %d", ErrBlocked, cur.ID, len(cur.BlockedBy))
+	// Into in_progress from any status: there is no telling here whether the
+	// work started before, so a ticket that waits on something waits, even
+	// one blocked mid-work and coming back from a discussion.
+	if to == StatusInProgress && cur.Status != StatusInProgress && len(cur.BlockedBy) > 0 {
+		return fmt.Errorf("%w: %s waits on %d open blocker(s)", ErrBlocked, cur.ID, len(cur.BlockedBy))
 	}
 	return nil
 }

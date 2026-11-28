@@ -35,7 +35,8 @@ const (
 //   - done is reached only from in_progress: only work finishes a ticket. A
 //     person closing one by hand cancels it.
 //   - into in_progress: from open, the work starting, and from discussion,
-//     the work resuming once a mid-work decision is resolved.
+//     the work resuming once a mid-work decision is resolved. Either way
+//     not while the ticket has open blockers (see CheckChange).
 //   - back to preparing: when the work needs refining again (from open or
 //     discussion), or on reopening a finished ticket.
 //   - out of done and cancelled is a reopen, which only the user may do

@@ -19,6 +19,7 @@ var feedTests = []test{
 	{"Feed/ASlowConsumerMissesNothing", testFeedSlowConsumer},
 	{"Feed/ConcurrentWritersMissNothing", testFeedConcurrentWriters},
 	{"Feed/UnblockedWhenTheLastBlockerIsDone", testFeedUnblocked},
+	{"Feed/AFinishedTicketIsNeverUnblocked", testFeedNoUnblockForFinished},
 	{"Feed/NoOpsAndRefusalsRecordNothing", testFeedNoOps},
 	{"Feed/Lifecycle", testFeedLifecycle},
 	{"Feed/StopWhileTheConsumerIsAway", testFeedStopWhileBlocked},
@@ -267,11 +268,39 @@ func testFeedUnblocked(t *testing.T, nb NewBackend) {
 		{tickets.EventUnblocked, held.ID, user},
 	}, seenOf(m.upTo(ch)), "a person lifting the last one unblocks it")
 
+	_, err = f.sys.RemoveBlocker(f.ctx, user, work.ID, b2.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []seen{{tickets.EventBlockersChanged, work.ID, user}}, seenOf(m.upTo(ch)),
+		"lifting a done blocker unblocks nothing: it held nothing up")
+
 	f.reach(b1.ID, tickets.StatusOpen)
 	assert.Equal(t, []seen{
 		{tickets.EventUpdated, b1.ID, user},
 		{tickets.EventBlockersChanged, work.ID, user},
 	}, seenOf(m.upTo(ch)), "a reopened blocker blocks again")
+}
+
+// A finished ticket is never unblocked: there is nothing left to schedule.
+func testFeedNoUnblockForFinished(t *testing.T, nb NewBackend) {
+	f := newFixture(t, nb)
+	done, cancelled, blocker := f.ticket("done"), f.ticket("cancelled"), f.ticket("blocker")
+	f.reach(done.ID, tickets.StatusInProgress)
+	f.blockedBy(done.ID, blocker.ID) // mid-work, so it can still finish
+	_, err := f.setStatus(user, done.ID, tickets.StatusDone)
+	require.NoError(t, err)
+	f.blockedBy(cancelled.ID, blocker.ID)
+	f.reach(cancelled.ID, tickets.StatusCancelled)
+	m := newMarker(f)
+	ch := start(t, f.sys, "")
+	m.upTo(ch)
+
+	f.reach(blocker.ID, tickets.StatusDone)
+	assert.Equal(t, []seen{
+		{tickets.EventUpdated, blocker.ID, user},
+		{tickets.EventUpdated, blocker.ID, user},
+		{tickets.EventBlockersChanged, done.ID, user},
+		{tickets.EventBlockersChanged, cancelled.ID, user},
+	}, seenOf(m.upTo(ch)))
 }
 
 func testFeedNoOps(t *testing.T, nb NewBackend) {

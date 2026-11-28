@@ -36,16 +36,14 @@ func testEveryTransition(t *testing.T, nb NewBackend) {
 	}
 }
 
-// Reopening a finished ticket is a person's call. An agent's own ticket
-// stops being its to edit once it is finished, so the refusal comes either
-// way.
+// Reopening a finished ticket is a person's call, even the agent's own.
 func testOnlyTheUserReopens(t *testing.T, nb NewBackend) {
 	f := newFixture(t, nb)
 	for _, end := range []tickets.Status{tickets.StatusDone, tickets.StatusCancelled} {
 		a := f.agent("builder-" + string(end))
 		f.reach(a.Ticket, end)
 		_, err := f.setStatus(a, a.Ticket, tickets.StatusOpen)
-		require.ErrorIs(t, err, tickets.ErrNotPermitted)
+		require.ErrorIs(t, err, tickets.ErrUserOnly)
 		assert.Equal(t, end, f.get(a.Ticket).Status)
 
 		reopened, err := f.setStatus(user, a.Ticket, tickets.StatusOpen)
@@ -54,8 +52,8 @@ func testOnlyTheUserReopens(t *testing.T, nb NewBackend) {
 	}
 }
 
-// Blockers gate starting the work, not the refinement, and not work under
-// way.
+// Blockers gate the work, not the refinement: no way into in_progress is
+// open while one is.
 func testStartingWaitsOnBlockers(t *testing.T, nb NewBackend) {
 	f := newFixture(t, nb)
 	work, blocker := f.ticket("Work"), f.ticket("Blocker")
@@ -64,6 +62,9 @@ func testStartingWaitsOnBlockers(t *testing.T, nb NewBackend) {
 	_, err := f.setStatus(user, work.ID, tickets.StatusInProgress)
 	require.ErrorIs(t, err, tickets.ErrBlocked)
 	assert.Equal(t, tickets.StatusOpen, f.get(work.ID).Status)
+	f.reach(work.ID, tickets.StatusDiscussion)
+	_, err = f.setStatus(user, work.ID, tickets.StatusInProgress)
+	require.ErrorIs(t, err, tickets.ErrBlocked, "nor by way of a discussion")
 	_, err = f.setStatus(user, work.ID, tickets.StatusPreparing)
 	require.NoError(t, err, "refining a blocked ticket is fine")
 	f.reach(work.ID, tickets.StatusOpen)
@@ -73,14 +74,20 @@ func testStartingWaitsOnBlockers(t *testing.T, nb NewBackend) {
 	require.NoError(t, err, "a done blocker holds nothing up")
 	assert.Equal(t, tickets.StatusInProgress, started.Status)
 
-	// Blocked mid-work, it keeps going, and resumes after a discussion.
+	// Blocked mid-work, it stays in progress; once it leaves, it comes
+	// back only when the blocker is done.
 	later := f.ticket("Later")
-	f.blockedBy(work.ID, later.ID)
+	change, err := f.sys.AddBlocker(f.ctx, user, work.ID, later.ID)
+	require.NoError(t, err)
+	assert.Equal(t, tickets.StatusInProgress, change.Ticket.Status)
+	assert.Equal(t, []string{"Later"}, titles(change.Ticket.BlockedBy))
 	_, err = f.setStatus(user, work.ID, tickets.StatusDiscussion)
 	require.NoError(t, err)
-	resumed, err := f.setStatus(user, work.ID, tickets.StatusInProgress)
+	_, err = f.setStatus(user, work.ID, tickets.StatusInProgress)
+	require.ErrorIs(t, err, tickets.ErrBlocked)
+	f.reach(later.ID, tickets.StatusDone)
+	_, err = f.setStatus(user, work.ID, tickets.StatusInProgress)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Later"}, titles(resumed.BlockedBy))
 }
 
 func titles(refs []tickets.TicketRef) []string {

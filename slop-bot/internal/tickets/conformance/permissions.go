@@ -17,6 +17,32 @@ var permissionTests = []test{
 	{"Permissions/AgentsEditOnlyTheirOwnWork", testAgentEditScope},
 	{"Permissions/AgentsStartTheirTicketsPreparing", testAgentStartsPreparing},
 	{"Permissions/AgentOfAMissingTicket", testAgentOfAMissingTicket},
+	{"Permissions/AgentsMoveOnlyTheirOwnTicketsStatus", testAgentStatusAuthority},
+}
+
+// A filing is refined by the agent working it, not pushed on by its filer.
+func testAgentStatusAuthority(t *testing.T, nb NewBackend) {
+	f := newFixture(t, nb)
+	a := f.agent("builder-1")
+	filed := f.filedBy(a, "follow-up")
+	for _, to := range []tickets.Status{tickets.StatusOpen, tickets.StatusDiscussion, tickets.StatusMisconfigured} {
+		_, err := f.setStatus(a, filed.ID, to)
+		require.ErrorIs(t, err, tickets.ErrStatusNotPermitted, "the filer moving it to %s", to)
+	}
+	f.reach(filed.ID, tickets.StatusOpen)
+	_, err := f.setStatus(a, filed.ID, tickets.StatusInProgress)
+	require.ErrorIs(t, err, tickets.ErrStatusNotPermitted, "nor starting it")
+	assert.Equal(t, tickets.StatusOpen, f.get(filed.ID).Status)
+
+	second := f.filedBy(a, "second")
+	refiner := ident.AgentPrincipal("builder-2", second.ID)
+	moved, err := f.setStatus(refiner, second.ID, tickets.StatusOpen)
+	require.NoError(t, err, "the agent working it moves it on")
+	assert.Equal(t, tickets.StatusOpen, moved.Status)
+
+	cancelled, err := f.setStatus(a, filed.ID, tickets.StatusCancelled)
+	require.NoError(t, err, "a filer may drop its own filing")
+	assert.Equal(t, tickets.StatusCancelled, cancelled.Status)
 }
 
 func testAutoMergeIsTheUsers(t *testing.T, nb NewBackend) {

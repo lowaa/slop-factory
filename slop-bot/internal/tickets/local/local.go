@@ -10,6 +10,7 @@ package local
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -86,6 +87,13 @@ func (s *System) write(ctx context.Context, fn func(ctx context.Context, tx bun.
 	}
 	s.wake.signal()
 	return nil
+}
+
+// read runs fn in one read transaction, so a ticket, its blockers and its
+// comments come from one state of the database, not from either side of a
+// write that landed between two queries.
+func (s *System) read(ctx context.Context, fn func(ctx context.Context, tx bun.Tx) error) error {
+	return s.db.RunInTx(ctx, &sql.TxOptions{ReadOnly: true}, fn)
 }
 
 func (s *System) now() int64 { return nanos(s.clock.Now()) }
