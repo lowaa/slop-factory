@@ -23,6 +23,8 @@ func (m *Manager) schedule() {
 		case <-m.stop:
 			return
 		case <-m.kick:
+		case <-m.wake:
+			m.wake = nil
 		case ev, ok := <-feed:
 			if !ok {
 				feed = nil
@@ -91,7 +93,14 @@ func (m *Manager) evaluate(ctx context.Context) {
 		if m.queued(pool) || !m.slotFree(pool, "") || m.liveCount() >= m.opts.Config.Concurrency.MaxLive {
 			continue
 		}
-		if err := m.spawn(ctx, t, pool); err != nil && !errors.Is(err, errMisconfigured) {
+		spec, err := m.specFor(ctx, t)
+		var hold *errHeld
+		if errors.As(err, &hold) {
+			m.wakeAt(hold.resets)
+			m.noteHeld(ctx, t, hold)
+			continue
+		}
+		if err := m.spawn(ctx, t, pool, spec); err != nil && !errors.Is(err, errMisconfigured) {
 			m.opts.Logger.Warn("agents: spawning", "ticket", t.ID, "err", err)
 		}
 	}

@@ -20,7 +20,7 @@ import (
 func (a *app) agentCmds() []*cobra.Command {
 	return []*cobra.Command{
 		a.tellCmd(), a.inboxCmd(), a.askCmd(), a.asksCmd(), a.discussCmd(), a.discussionsCmd(),
-		a.readyToMergeCmd(), a.doneCmd(), a.statusCmd(), a.eventsCmd(), a.autonomyCmd(),
+		a.readyToMergeCmd(), a.doneCmd(), a.statusCmd(), a.eventsCmd(), a.autonomyCmd(), a.transcriptCmd(), a.watchCmd(),
 	}
 }
 
@@ -311,6 +311,11 @@ func (a *app) statusCmd() *cobra.Command {
 			on := map[bool]string{true: "on", false: "off"}[st.Autonomy]
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "autonomy %s, agent-filed tickets %d of %d\n", on, st.Outstanding, st.Budget); err != nil {
 				return err
+			}
+			for _, l := range st.Limits {
+				if _, err := io.WriteString(cmd.OutOrStdout(), describeLimit(&l)); err != nil {
+					return err
+				}
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			_, _ = fmt.Fprintln(tw, "AGENT\tTICKET\tSTATE\tFOR\tHARNESS\tNOTE")

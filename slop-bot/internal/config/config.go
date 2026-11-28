@@ -100,7 +100,14 @@ type HarnessConfig struct {
 	// Permissive runs the harness without permission prompts. Default true:
 	// nobody is watching a headless agent's dialogs.
 	Permissive *bool `yaml:"permissive"`
+	// LimitThreshold is the percentage of the plan's allowance at which no
+	// new agent is started on this harness until the window resets.
+	LimitThreshold float64 `yaml:"limit_threshold"`
 }
+
+// DefaultLimitThreshold leaves a little of the allowance for the agents
+// already running, and for the user's own interactive use.
+const DefaultLimitThreshold = 95
 
 // Agents holds the lifecycle timings.
 type Agents struct {
@@ -203,6 +210,9 @@ func (c *Config) applyDefaults(home string) {
 		if h.Permissive == nil {
 			h.Permissive = ptr(true)
 		}
+		if h.LimitThreshold == 0 {
+			h.LimitThreshold = DefaultLimitThreshold
+		}
 	}
 	c.defaultDurations()
 }
@@ -268,6 +278,9 @@ func (c *Config) validate() error {
 			add("harnesses.%s: unknown harness (known: claude-code, codex, pi, agy)", name)
 		case !slices.Contains(known, h.Driver):
 			add("harnesses.%s.driver: %q isn't a driver for %s (have: %s)", name, h.Driver, name, strings.Join(known, ", "))
+		}
+		if h.LimitThreshold <= 0 || h.LimitThreshold > 100 {
+			add("harnesses.%s.limit_threshold: %v isn't a percentage above 0, up to 100", name, h.LimitThreshold)
 		}
 	}
 	if _, ok := c.Harnesses[c.DefaultHarness]; !ok {

@@ -20,9 +20,9 @@ import (
 // errMisconfigured is a ticket whose agent spec can't run here.
 var errMisconfigured = errors.New("agents: misconfigured")
 
-// spawn starts an agent for t, which the scheduler found eligible.
-func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool) error {
-	spec := agentspec.Resolve(t.Agent, m.opts.Config)
+// spawn starts an agent for t, which the scheduler found eligible, with
+// spec: t's own, resolved, or the fallback specFor chose.
+func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool, spec tickets.AgentSpec) error {
 	h, ok := m.opts.Harnesses.Harness(spec.Harness)
 	if err := agentspec.Validate(spec, m.opts.Config); err != nil || !ok {
 		if err == nil {
@@ -63,7 +63,7 @@ func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool)
 		m.abandon(ctx, id, err)
 		return fmt.Errorf("agents: starting %s for ticket %s: %w", h.Name(), t.ID, err)
 	}
-	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
+	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
 	return r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: kickoff(t)})
 }
@@ -94,16 +94,18 @@ func (m *Manager) abandon(ctx context.Context, id ident.AgentID, cause error) {
 type adoption struct {
 	id     ident.AgentID
 	ticket ident.TicketID
-	pool   state.Pool
-	conv   harness.Conversation
-	caps   harness.Capabilities
-	st     state.AgentState
+	// harness is the configured name, whose plan limits the agent reports.
+	harness string
+	pool    state.Pool
+	conv    harness.Conversation
+	caps    harness.Capabilities
+	st      state.AgentState
 }
 
 func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 	id := a.id
 	conv := a.conv
-	r := &runner{m: m, id: id, ticket: a.ticket, pool: a.pool, conv: conv, caps: a.caps, st: a.st, exited: make(chan struct{})}
+	r := &runner{m: m, id: id, ticket: a.ticket, harness: a.harness, pool: a.pool, conv: conv, caps: a.caps, st: a.st, exited: make(chan struct{})}
 	m.mu.Lock()
 	m.runners[id] = r
 	m.mu.Unlock()
@@ -239,7 +241,7 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent) error {
 	if err != nil {
 		return err
 	}
-	m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, pool: a.Pool, conv: conv, caps: h.Capabilities(), st: a.State})
+	m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: h.Capabilities(), st: a.State})
 	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
 	// A waiting agent stays waiting; one that was mid-work is told why its
 	// last turn may have been cut short.

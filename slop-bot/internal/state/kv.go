@@ -3,9 +3,12 @@ package state
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/uptrace/bun"
 
@@ -90,6 +93,47 @@ func (s *Settings) Autonomy(ctx context.Context) (enabled, ok bool, err error) {
 // SetAutonomy persists the autonomy toggle.
 func (s *Settings) SetAutonomy(ctx context.Context, enabled bool) error {
 	return s.set(ctx, keyAutonomy, strconv.FormatBool(enabled))
+}
+
+// HarnessLimit is the last plan allowance a harness reported. It is kept so
+// a restarted daemon still holds spawns for a harness at its limit.
+type HarnessLimit struct {
+	Harness     string    `json:"-"`
+	UsedPercent float64   `json:"used_percent"`
+	ResetsAt    time.Time `json:"resets_at,omitzero"`
+	ReportedAt  time.Time `json:"reported_at"`
+}
+
+const keyLimitPrefix = "limit."
+
+// SetHarnessLimit records l as its harness's latest.
+func (s *Settings) SetHarnessLimit(ctx context.Context, l *HarnessLimit) error {
+	if l.Harness == "" {
+		return errors.New("state: a harness limit needs its harness")
+	}
+	b, err := json.Marshal(l)
+	if err != nil {
+		return err
+	}
+	return s.set(ctx, keyLimitPrefix+l.Harness, string(b))
+}
+
+// HarnessLimits is every harness's latest recorded limit, by name.
+func (s *Settings) HarnessLimits(ctx context.Context) ([]HarnessLimit, error) {
+	var rows []settingRow
+	if err := s.db.NewSelect().Model(&rows).Where("key LIKE ?", keyLimitPrefix+"%").Order("key").Scan(ctx); err != nil {
+		return nil, fmt.Errorf("state: reading harness limits: %w", err)
+	}
+	out := make([]HarnessLimit, 0, len(rows))
+	for _, r := range rows {
+		var l HarnessLimit
+		if err := json.Unmarshal([]byte(r.Value), &l); err != nil {
+			return nil, fmt.Errorf("state: setting %s is %q: %w", r.Key, r.Value, err)
+		}
+		l.Harness = strings.TrimPrefix(r.Key, keyLimitPrefix)
+		out = append(out, l)
+	}
+	return out, nil
 }
 
 func (s *Settings) get(ctx context.Context, key string) (string, bool, error) {

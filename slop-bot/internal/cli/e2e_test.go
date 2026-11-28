@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,8 @@ type e2e struct {
 	ctl  *fake.Controller
 	self string
 	seq  int64
+	// transcripts is where the fakes keep theirs.
+	transcripts string
 }
 
 func newE2E(t *testing.T) *e2e {
@@ -84,15 +87,17 @@ func newE2EWithConfig(t *testing.T, cfg string) *e2e {
 	require.NoError(t, err)
 	self, err := os.Executable()
 	require.NoError(t, err)
+	transcripts := filepath.Join(h.home, "fake-transcripts")
+	require.NoError(t, os.MkdirAll(transcripts, 0o700))
 	h.deps.harnesses = daemon.Harnesses{"claude-code": &e2eHarness{
-		Harness: &fake.Harness{Binary: self, Control: ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}},
+		Harness: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}},
 		h:       h,
 	}}
 	startDaemon(t, h)
 	// Closing the controller first makes the fakes exit, so the daemon's
 	// drain doesn't wait on turns the test left open.
 	t.Cleanup(func() { _ = ctl.Close() })
-	return &e2e{t: t, h: h, ctl: ctl, self: self}
+	return &e2e{t: t, h: h, ctl: ctl, self: self, transcripts: transcripts}
 }
 
 func (e *e2e) ctx() context.Context {

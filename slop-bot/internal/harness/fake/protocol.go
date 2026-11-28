@@ -16,13 +16,16 @@ type inMsg struct {
 
 // Wire messages from the fake to slop-bot, on its stdout.
 type outMsg struct {
-	Ev      string `json:"ev"` // hello | turn_start | turn_end | tool_start | tool_end | text | usage
+	Ev      string `json:"ev"` // hello | turn_start | turn_end | tool_start | tool_end | text | usage | limit
 	ID      string `json:"id,omitempty"`
 	Outcome string `json:"outcome,omitempty"`
 	Tool    string `json:"tool,omitempty"`
 	Text    string `json:"text,omitempty"`
 	Input   int64  `json:"input,omitempty"`
 	Output  int64  `json:"output,omitempty"`
+	// Used and ResetsAt (unix seconds) of a limit.
+	Used     float64 `json:"used,omitempty"`
+	ResetsAt int64   `json:"resets_at,omitempty"`
 }
 
 // Command is what a test tells the fake to do.
@@ -32,7 +35,13 @@ type Command struct {
 	Outcome string `json:"outcome,omitempty"`
 	// Tool for tool_start and tool_end.
 	Tool string `json:"tool,omitempty"`
+	// Text of text; and for tool_start and tool_end, the input and output
+	// the transcript records.
 	Text string `json:"text,omitempty"`
+	// Used is the percentage of the plan used, and ResetsAt (unix seconds)
+	// when its window resets, for limit.
+	Used     float64 `json:"used,omitempty"`
+	ResetsAt int64   `json:"resets_at,omitempty"`
 	// Argv for run: a command the fake runs, as an agent's tool call would
 	// (e.g. `slop-bot ask ...`), with the fake's own environment.
 	Argv []string `json:"argv,omitempty"`
@@ -50,6 +59,7 @@ const (
 	CmdToolEnd          = "tool_end"
 	CmdText             = "text"
 	CmdUsage            = "usage"
+	CmdLimit            = "limit"
 	CmdRun              = "run"
 	CmdExit             = "exit"
 	CmdIgnoreInterrupts = "ignore_interrupts"
@@ -95,4 +105,7 @@ const (
 	EnvControl = "SLOP_BOT_FAKE_CONTROL"
 	// EnvID fixes the id of a new conversation.
 	EnvID = "SLOP_BOT_FAKE_ID"
+	// EnvTranscripts is a directory the fake keeps its transcript in, as
+	// <id>.jsonl in the normalised format; unset, it keeps none.
+	EnvTranscripts = "SLOP_BOT_FAKE_TRANSCRIPTS"
 )

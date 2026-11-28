@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/rpcdriver"
@@ -52,6 +53,12 @@ func (codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) {
 		return []harness.Event{{Kind: harness.ToolEnded, Tool: m.Tool}}, nil
 	case "text":
 		return []harness.Event{{Kind: harness.Text, Text: m.Text}}, nil
+	case "limit":
+		l := &harness.Limit{UsedPercent: m.Used}
+		if m.ResetsAt != 0 {
+			l.ResetsAt = time.Unix(m.ResetsAt, 0).UTC()
+		}
+		return []harness.Event{{Kind: harness.LimitReport, Limit: l}}, nil
 	case "usage":
 		return []harness.Event{{Kind: harness.UsageReport, Usage: &harness.Usage{InputTokens: m.Input, OutputTokens: m.Output}}}, nil
 	default:

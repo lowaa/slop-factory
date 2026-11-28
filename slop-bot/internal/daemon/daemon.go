@@ -23,6 +23,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets/local"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
@@ -62,6 +63,9 @@ type Daemon struct {
 	agents       *agents.Manager
 	ticketRoutes *ticketRoutes
 	agentRoutes  *agentRoutes
+	// transcripts reads agents' transcripts, live or retained.
+	transcripts *transcript.Library
+	archive     *transcript.Archive
 }
 
 // New builds a daemon; nothing starts until Run.
@@ -130,6 +134,7 @@ func New(opts *Options) (*Daemon, error) {
 			StartFunc: d.startFeed,
 			StopFunc:  func(ctx context.Context) error { return d.tickets.Stop(ctx) },
 		},
+		d.archiveComponent(harnesses),
 		d.agentsComponent(harnesses, user, cliPath),
 		&lifecycle.Func{
 			N: "control socket",
@@ -167,6 +172,28 @@ func (d *Daemon) Run(ctx context.Context) error {
 // Ready is closed once every component has started and the socket serves.
 func (d *Daemon) Ready() <-chan struct{} { return d.ready }
 
+// archiveComponent keeps ended agents' transcripts, on state.db's index,
+// and runs their retention sweep.
+func (d *Daemon) archiveComponent(harnesses agents.Harnesses) lifecycle.Component {
+	opts := d.opts
+	return &lifecycle.Func{
+		N: "transcript archive",
+		StartFunc: func(ctx context.Context) error {
+			var err error
+			d.archive, err = transcript.NewArchive(&transcript.ArchiveOptions{
+				Dir: opts.Paths.TranscriptsDir(), Index: d.state.Transcripts, Retain: opts.Config.Retention.Transcripts.D(),
+				Clock: opts.Clock, Logger: opts.Logger,
+			})
+			if err != nil {
+				return err
+			}
+			d.transcripts = transcript.NewLibrary(harnesses, d.archive)
+			return d.archive.Start(ctx)
+		},
+		StopFunc: func(ctx context.Context) error { return d.archive.Stop(ctx) },
+	}
+}
+
 // agentsComponent runs the agent manager, on the ticket feed and state.db
 // the components before it opened.
 func (d *Daemon) agentsComponent(harnesses agents.Harnesses, user tickets.UserID, cliPath string) lifecycle.Component {
@@ -187,7 +214,7 @@ func (d *Daemon) agentsComponent(harnesses agents.Harnesses, user tickets.UserID
 			d.agents, err = agents.New(&agents.Options{
 				Config: opts.Config, Paths: opts.Paths, State: d.state, Tickets: d.tickets,
 				Harnesses: harnesses, Worktrees: wts, User: user, Logger: opts.Logger,
-				Clock: opts.Clock, CLI: cliPath, CLIReference: opts.CLIReference,
+				Clock: opts.Clock, CLI: cliPath, CLIReference: opts.CLIReference, Transcripts: d.transcripts,
 			})
 			if err != nil {
 				return err
@@ -217,6 +244,7 @@ func (d *Daemon) startFeed(ctx context.Context) error {
 func (d *Daemon) routes() {
 	d.ticketRoutes.register(d.server)
 	d.agentRoutes.register(d.server)
+	(&observeRoutes{d: d}).register(d.server)
 	d.server.HandleFunc("GET "+api.PathHealth, func(w http.ResponseWriter, _ *http.Request) {
 		control.WriteJSON(w, http.StatusOK, api.Health{
 			Version:   version.String(),

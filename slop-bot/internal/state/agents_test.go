@@ -149,6 +149,31 @@ func TestATicketGetsANewAgentOnceItsLastEnded(t *testing.T) {
 	assert.Equal(t, ident.AgentID("a2"), live.ID)
 }
 
+func TestLatestForTicketIsTheNewestLiveOrEnded(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	_, err := f.Agents.LatestForTicket(ctx, "1")
+	require.ErrorIs(t, err, state.ErrNotFound)
+
+	// Same millisecond: creation order still decides.
+	f.createAgent(t, "a1", "1")
+	f.setState(t, "a1", state.StateDone)
+	f.createAgent(t, "a2", "1")
+	f.createAgent(t, "b1", "2")
+	latest, err := f.Agents.LatestForTicket(ctx, "1")
+	require.NoError(t, err)
+	assert.Equal(t, ident.AgentID("a2"), latest.ID)
+
+	f.setState(t, "a2", state.StateDone)
+	f.clock.Advance(time.Second)
+	f.createAgent(t, "a0", "1")
+	f.setState(t, "a0", state.StateReleased)
+	latest, err = f.Agents.LatestForTicket(ctx, "1")
+	require.NoError(t, err)
+	assert.Equal(t, ident.AgentID("a0"), latest.ID, "ended, but the newest")
+}
+
 func TestSetStateRecordsHistoryAndSince(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
