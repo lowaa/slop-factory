@@ -101,6 +101,7 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"blank required binary": {"doctor: {require: [gh, \"\"]}\n", "doctor.require[1]: is empty"},
 		"limit over 100":        {"harnesses: {claude-code: {limit_threshold: 101}}\n", "harnesses.claude-code.limit_threshold: 101 isn't a percentage"},
 		"negative limit":        {"harnesses: {claude-code: {limit_threshold: -5}}\n", "limit_threshold: -5"},
+		"pi restricted":         {"default_harness: pi\nharnesses: {pi: {permissive: false}}\n", "harnesses.pi.permissive: pi has no permission prompts"},
 		"negative retention":    {"retention: {transcripts: -1h}\n", "retention: transcripts and events must be positive"},
 		"tiny attach lease":     {"agents: {attach_lease: 10ms}\n", "agents.attach_lease: 10ms is below 1s"},
 		"negative stall":        {"agents: {stall_after: -1m}\n", "stall_after and ask_reminder_after must not be negative"},

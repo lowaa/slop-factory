@@ -44,7 +44,7 @@ Durations are Go duration strings: `15m`, `24h`, `720h`.
 | `autonomy.tickets_per_agent` | int | `10` | Budget of outstanding agent-filed tickets, per agent slot (`max_active + urgent.max_active`). At least 1. |
 | `harnesses.<name>.driver` | string | the harness's only driver | One of the drivers below. |
 | `harnesses.<name>.api_key_opt_in` | bool | `false` | Let the harness's API key variables through from the environment. Off, they are stripped: Claude Code in `-p` mode would otherwise bill an `ANTHROPIC_API_KEY` at API rates instead of using your subscription login. |
-| `harnesses.<name>.permissive` | bool | `true` | Run the harness without permission prompts. Nobody watches a headless agent's dialogs. |
+| `harnesses.<name>.permissive` | bool | `true` | Run the harness without permission prompts. Nobody watches a headless agent's dialogs. pi has no permission prompts, so `false` is refused for it. |
 | `harnesses.<name>.model` | string | blank | The model for agents whose ticket names none. Blank leaves it to the harness; pi's adapter then picks a known-good one and `doctor` warns. |
 | `harnesses.<name>.limit_threshold` | number | `95` | Percent of the plan's allowance at which no new agent starts on this harness until the window resets. Above 0, up to 100. See [plan-limit holds](concepts.md#plan-limit-holds). |
 | `agents.nudges` | int | `3` | How many times an agent that stops without a reason is nudged before it is stalled. At least 1. |

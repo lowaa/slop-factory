@@ -333,6 +333,11 @@ func (c *Config) validateHarnesses(v *validation) {
 		case !slices.Contains(known, h.Driver):
 			v.add("harnesses.%s.driver: %q isn't a driver for %s (have: %s)", name, h.Driver, name, strings.Join(known, ", "))
 		}
+		if name == Pi && h.Permissive != nil && !*h.Permissive {
+			// Accepting it would promise a restricted agent and run an
+			// unrestricted one.
+			v.add("harnesses.pi.permissive: pi has no permission prompts, so it can't run restricted; remove the setting")
+		}
 		if h.LimitThreshold <= 0 || h.LimitThreshold > 100 {
 			v.add("harnesses.%s.limit_threshold: %v isn't a percentage above 0, up to 100", name, h.LimitThreshold)
 		}
