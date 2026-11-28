@@ -109,9 +109,9 @@ func testFeedOrdered(t *testing.T, nb NewBackend) {
 	require.NoError(t, err)
 	_, err = f.sys.AddBlocker(f.ctx, a, a.Ticket, work.ID)
 	require.NoError(t, err)
-	filed := f.filedBy(a, "follow-up")
+	filed := f.filedBy(a, "follow-up", work.ID)
 
-	evs := take(t, ch, 8)
+	evs := take(t, ch, 9)
 	assert.Equal(t, []seen{
 		{tickets.EventCreated, a.Ticket, user},
 		{tickets.EventUpdated, a.Ticket, user},
@@ -121,7 +121,8 @@ func testFeedOrdered(t *testing.T, nb NewBackend) {
 		{tickets.EventAssigned, work.ID, user},
 		{tickets.EventBlockersChanged, a.Ticket, a},
 		{tickets.EventCreated, filed.ID, a},
-	}, seenOf(evs))
+		{tickets.EventBlockersChanged, filed.ID, a},
+	}, seenOf(evs), "a ticket filed with blockers is created first")
 	assertOrdered(t, evs)
 	for _, ev := range evs {
 		assert.NotEmpty(t, ev.Cursor)

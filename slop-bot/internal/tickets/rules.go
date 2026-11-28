@@ -17,9 +17,10 @@ import (
 // malicious one (see ident.Principal).
 
 var (
+	// ErrNotFound is also what a malformed ticket id gets: no ticket has it.
 	ErrNotFound = errors.New("tickets: not found")
 	// ErrInvalid is a request that can never succeed as made: a blank
-	// title, an unknown status, a malformed id.
+	// title, an unknown status, a blank comment.
 	ErrInvalid          = errors.New("tickets: invalid request")
 	ErrInvalidPrincipal = errors.New("tickets: invalid principal")
 	// ErrNotPermitted is the principal not being allowed to make the change.

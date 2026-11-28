@@ -36,9 +36,6 @@ func (s *System) Create(ctx context.Context, by ident.Principal, nt *tickets.New
 		if err != nil {
 			return err
 		}
-		if err := s.event(ctx, tx, a, tickets.EventCreated, id); err != nil {
-			return err
-		}
 		created, err = loadTicket(ctx, tx, id, true)
 		return err
 	})
@@ -62,6 +59,10 @@ func (s *System) insertTicket(ctx context.Context, tx bun.Tx, a *actor, nt *tick
 	}
 	if _, err := tx.NewInsert().Model(row).Exec(ctx); err != nil {
 		return 0, fmt.Errorf("local: filing ticket: %w", err)
+	}
+	// Before the blockers' events: a consumer must hear of the ticket first.
+	if err := s.event(ctx, tx, a, tickets.EventCreated, row.ID); err != nil {
+		return 0, err
 	}
 	if nt.Urgent && nt.UrgentReason != "" {
 		if _, err := s.insertComment(ctx, tx, a, row.ID, urgentComment(nt.UrgentReason)); err != nil {
