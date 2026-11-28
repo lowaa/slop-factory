@@ -11,6 +11,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
 	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
@@ -44,7 +45,7 @@ func (ar *agentRoutes) preTool(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	v := ar.d.checkTool(r.Context(), &mergeguard.Call{Tool: in.Tool, Command: in.Command, Cwd: in.Cwd})
+	v := ar.d.checkTool(r.Context(), control.PrincipalFrom(r.Context()), &mergeguard.Call{Tool: in.Tool, Command: in.Command, Cwd: in.Cwd})
 	out := api.PreToolVerdict{Allow: v.Allow, Reason: v.Reason}
 	if v.Finding != nil {
 		out.Merge = string(v.Finding.Kind)
@@ -52,11 +53,11 @@ func (ar *agentRoutes) preTool(w http.ResponseWriter, r *http.Request) {
 	control.WriteJSON(w, http.StatusOK, out)
 }
 
-// checkTool is the guard's verdict on a tool call by the caller ctx
-// carries, the refusal recorded: for `slop-bot hook pre-tool`, and for a
-// TUI harness's pre-tool hook, relayed by `slop-bot hook tui`.
-func (d *Daemon) checkTool(ctx context.Context, call *mergeguard.Call) *mergeguard.Verdict {
-	by := control.PrincipalFrom(ctx)
+// checkTool is the guard's verdict on a tool call by by, the refusal
+// recorded: for `slop-bot hook pre-tool` and a TUI harness's pre-tool hook
+// (relayed by `slop-bot hook tui`), where by is the caller ctx carries, and
+// for Codex's approvals, asked in-process for the agent the codec runs.
+func (d *Daemon) checkTool(ctx context.Context, by ident.Principal, call *mergeguard.Call) *mergeguard.Verdict {
 	v := d.guard.Check(ctx, by, call)
 	if !v.Allow {
 		payload, _ := json.Marshal(map[string]string{"kind": string(v.Finding.Kind), "detail": v.Finding.Detail})
@@ -71,11 +72,25 @@ func (d *Daemon) checkTool(ctx context.Context, call *mergeguard.Call) *mergegua
 
 // tuiGuard is the TUI kit's Guard: the merge guard, as for any harness.
 func (d *Daemon) tuiGuard(ctx context.Context, call *tuidriver.ToolCall) string {
-	v := d.checkTool(ctx, &mergeguard.Call{Tool: call.Name, Command: call.Command, Cwd: call.Cwd})
+	v := d.checkTool(ctx, control.PrincipalFrom(ctx), &mergeguard.Call{Tool: call.Name, Command: call.Command, Cwd: call.Cwd})
 	if v.Allow {
 		return ""
 	}
 	return v.Reason
+}
+
+// guardFunc is a func as a codex.Guard. The daemon hands Codex
+// guardFunc(d.checkTool), which reads d.guard at each call: the guard is
+// built when its component starts, after the harnesses. It is a func rather
+// than a struct holding the *Daemon because deadcode counts every exported
+// method of a type held in a value converted to an interface as reachable
+// (through reflection), which would hide the daemon's and state.db's dead
+// code.
+type guardFunc func(ctx context.Context, by ident.Principal, call *mergeguard.Call) *mergeguard.Verdict
+
+// Check implements codex.Guard.
+func (f guardFunc) Check(ctx context.Context, by ident.Principal, call *mergeguard.Call) *mergeguard.Verdict {
+	return f(ctx, by, call)
 }
 
 // authoriseMerge is tell's --merge: the user's go-ahead, recorded before

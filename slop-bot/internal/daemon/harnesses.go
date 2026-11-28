@@ -34,17 +34,19 @@ type buildOptions struct {
 	// tui is the TUI drivers' kit: nil without tmux, and a TUI harness is
 	// then left out.
 	tui *tuidriver.Sessions
+	// guard is the merge guard itself, for Codex, which asks it in-process
+	// through its approvals: its hooks don't run under app-server.
+	guard codex.Guard
 }
 
 // builders are the harness implementations this build has, by harness and
-// driver. Codex gets no merge guard: its hooks don't run under app-server
-// (docs/merge_guard.md).
+// driver.
 var builders = map[[2]string]func(o *buildOptions) harness.AIHarness{
 	{config.ClaudeCode, claudecode.Driver}: func(o *buildOptions) harness.AIHarness {
 		return &claudecode.Harness{Logger: o.logger, Clock: o.clock, PreToolHook: o.preToolHook}
 	},
 	{config.Codex, codex.Driver}: func(o *buildOptions) harness.AIHarness {
-		return &codex.Harness{Logger: o.logger, Clock: o.clock, Version: version.String()}
+		return &codex.Harness{Logger: o.logger, Clock: o.clock, Version: version.String(), Guard: o.guard}
 	},
 	{config.Pi, pi.Driver}: func(o *buildOptions) harness.AIHarness {
 		return &pi.Harness{Logger: o.logger, Clock: o.clock, PreToolHook: o.preToolHook}

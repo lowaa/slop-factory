@@ -190,8 +190,8 @@ fresh agent token, so `ask` and `done` work from inside it.
   the attach, the agent just ends.
 - `--no-resume` releases the agent to you: it is `released`, nothing
   resumes it, and the ticket stays assigned, but no new agent is
-  started for it. The merge guard still applies in the TUI
-  ([merge_guard.md](merge_guard.md)).
+  started for it. The merge guard still applies in the TUI, except Codex's,
+  which runs with approvals bypassed ([merge_guard.md](merge_guard.md)).
 
 Only harnesses with a TUI to hand over to can be attached.
 
@@ -287,12 +287,13 @@ and the risk is accepted**. It stops mistakes, not malice.
   (unless `api_key_opt_in`), Claude Code's parent-session variables (not
   `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*` or `CLAUDE_CODE_SKIP_*_AUTH`),
   and other agents' tokens.
-- The merge flag is policy in the briefing, backed where a harness has a
-  pre-tool hook by a guard that refuses obvious merges (`gh pr merge`, a
-  push to the default branch) on a ticket without `AutoMerge` until you
-  run `slop-bot tell <agent> --merge`. Claude Code, pi and agy have the guard.
-  Codex doesn't. The guard is advisory: an agent with a shell can get round
-  it. See [merge_guard.md](merge_guard.md).
+- The merge flag is policy in the briefing, backed by a guard that refuses
+  obvious merges (`gh pr merge`, a push to the default branch) on a ticket
+  without `AutoMerge` until you run `slop-bot tell <agent> --merge`. Claude
+  Code, pi and agy have the guard through a pre-tool hook. Codex has it
+  through its command approvals, but only in permissive mode (the default),
+  and not in the TUI after `attach`. The guard is advisory: an agent with a
+  shell can get round it. See [merge_guard.md](merge_guard.md).
 - `agy` runs on a Google sign-in whose consumer terms may forbid driving it
   from another program. `doctor` says so once; whether to proceed is your
   call.

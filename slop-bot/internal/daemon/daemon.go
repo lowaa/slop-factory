@@ -213,6 +213,7 @@ func (d *Daemon) buildHarnesses(cliPath string) (agents.Harnesses, error) {
 	if harnesses == nil {
 		harnesses = configuredHarnesses(opts.Config, &buildOptions{
 			logger: opts.Logger, clock: opts.Clock, preToolHook: []string{cliPath, "hook", "pre-tool"}, tui: kit,
+			guard: guardFunc(d.checkTool),
 		})
 	}
 	if opts.TUIHarnesses == nil {
