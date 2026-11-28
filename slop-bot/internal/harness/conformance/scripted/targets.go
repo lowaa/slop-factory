@@ -81,32 +81,16 @@ type TargetOptions struct {
 	Binary string
 	// ServerURL is the scripted model's.
 	ServerURL string
-	// Environ is added to the clean base environment (PATH, HOME, TERM):
-	// what every process the harness starts needs, e.g. for its tools.
-	Environ []string
-	// Path, when set, replaces PATH in the base environment.
-	Path string
 	// PreToolHook is the merge guard's argv, for the harnesses that run one.
 	PreToolHook []string
-	Logger      *slog.Logger
 }
 
-func (o *TargetOptions) logger() *slog.Logger {
-	if o.Logger != nil {
-		return o.Logger
-	}
-	return slog.New(slog.DiscardHandler)
-}
+func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // environ is a harness's whole base environment: nothing of the user's
 // beyond PATH, so no credential or config of theirs can reach it.
-func (o *TargetOptions) environ(home string, extra ...string) func() []string {
-	path := o.Path
-	if path == "" {
-		path = os.Getenv("PATH")
-	}
-	base := append([]string{"PATH=" + path, "HOME=" + home, "TERM=xterm"}, extra...)
-	base = append(base, o.Environ...)
+func environ(home string, extra ...string) func() []string {
+	base := append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TERM=xterm"}, extra...)
 	return func() []string { return append([]string(nil), base...) }
 }
 
@@ -151,8 +135,8 @@ func ClaudeCode(t *testing.T, o *TargetOptions) *Target {
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
 		},
 		Harness: &claudecode.Harness{
-			Binary: o.Binary, Logger: o.logger(), Clock: clock.Real{}, PreToolHook: o.PreToolHook,
-			Environ: o.environ(t.TempDir(), "ANTHROPIC_API_KEY="+ClaudeKey),
+			Binary: o.Binary, Logger: discard(), Clock: clock.Real{}, PreToolHook: o.PreToolHook,
+			Environ: environ(t.TempDir(), "ANTHROPIC_API_KEY="+ClaudeKey),
 		},
 	}
 }
@@ -213,10 +197,10 @@ func Codex(t *testing.T, o *TargetOptions) *Target {
 		Shell: CodexShell,
 		Env:   map[string]string{},
 		Harness: &codex.Harness{
-			Binary: o.Binary, Logger: o.logger(), Clock: clock.Real{},
+			Binary: o.Binary, Logger: discard(), Clock: clock.Real{},
 			// A CODEX_HOME of its own: the user's login, config and
 			// sessions are never read or written.
-			Environ:       o.environ(t.TempDir(), "CODEX_HOME="+t.TempDir(), "SCRIPTED_MODEL_API_KEY=scripted-model-not-a-real-key"),
+			Environ:       environ(t.TempDir(), "CODEX_HOME="+t.TempDir(), "SCRIPTED_MODEL_API_KEY=scripted-model-not-a-real-key"),
 			ModelProvider: &codex.ModelProvider{ID: "scripted", BaseURL: o.ServerURL + "/v1", EnvKey: "SCRIPTED_MODEL_API_KEY"},
 			Config:        []string{"check_for_update_on_startup=false", "analytics.enabled=false", "feedback.enabled=false"},
 		},
@@ -234,12 +218,12 @@ func Pi(t *testing.T, o *TargetOptions) *Target {
 			"PI_OFFLINE":             "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0",
 		},
 		Harness: &pi.Harness{
-			Binary: o.Binary, Logger: o.logger(), Clock: clock.Real{}, PreToolHook: o.PreToolHook,
+			Binary: o.Binary, Logger: discard(), Clock: clock.Real{}, PreToolHook: o.PreToolHook,
 			// An agent dir of its own: the user's ~/.pi/agent (login,
 			// settings, sessions) is never read or written. pi's launcher
 			// still finds its install under the real HOME.
 			AgentDir: piAgentDir(t, o.ServerURL),
-			Environ:  o.environ(os.Getenv("HOME")),
+			Environ:  environ(os.Getenv("HOME")),
 		},
 	}
 }

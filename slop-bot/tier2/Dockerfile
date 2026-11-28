@@ -58,7 +58,7 @@ COPY --chown=node:node slop-bot ./slop-bot
 WORKDIR /srv/slop-bot
 
 # Compiled while there is a network, so the run, which has none, only links.
-RUN go test -race -count=1 -run '^$' ./internal/scriptedmodel/... ./internal/harness/...
+RUN go test -race -count=1 -run '^$' ./internal/scriptedmodel/... ./internal/harness/... ./internal/cli
 
 # GOPROXY=off: a module the build somehow lacks fails at once in the
 # offline run, instead of waiting on a proxy it cannot reach.
@@ -66,4 +66,4 @@ ENV SLOP_BOT_TIER2=1 \
     SLOP_BOT_TIER2_CONTAINER=1 \
     GOPROXY=off \
     GOFLAGS=-mod=readonly
-CMD ["go", "test", "-race", "-count=1", "-timeout", "20m", "./internal/scriptedmodel/...", "./internal/harness/..."]
+CMD ["tier2/run_tests.sh"]

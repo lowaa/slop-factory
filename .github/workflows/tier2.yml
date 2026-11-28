@@ -25,6 +25,13 @@ on:
       - slop-bot/internal/mergeguard/**
       - slop-bot/internal/cli/hook.go
       - slop-bot/internal/api/guard.go
+      # The daemon scenarios (internal/cli's TestTier2Scenarios): the agent
+      # manager and daemon that drive the harnesses, and the attach that
+      # runs their TUIs. The rest of the CLI and daemon is tier 1's.
+      - slop-bot/internal/agents/**
+      - slop-bot/internal/daemon/**
+      - slop-bot/internal/cli/attach.go
+      - slop-bot/internal/cli/tier2*_test.go
       - slop-bot/go.mod
       - slop-bot/go.sum
       - go-clock/**

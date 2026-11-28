@@ -116,7 +116,14 @@ func startDaemon(t *testing.T, h *harness) (stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
 	go func() { done <- Execute(ctx, &daemonDeps, []string{"--config", h.config, "daemon"}) }()
-	d := <-ready
+	// A daemon that fails before it is built (a config it refuses) never
+	// reports one.
+	var d *daemon.Daemon
+	select {
+	case d = <-ready:
+	case code := <-done:
+		require.FailNowf(t, "daemon exited", "code %d: %s", code, daemonDeps.Stderr)
+	}
 	select {
 	case <-d.Ready():
 	case code := <-done:

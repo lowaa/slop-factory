@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs tier 2: the real harness CLIs (Claude Code, Codex, pi) driven through
-# slop-bot's adapters against the scripted model, which answers for the
+# slop-bot's adapters, and through a real daemon (internal/cli's
+# TestTier2Scenarios), against the scripted model, which answers for the
 # model, so no credential is used and no token spent. The tests are opt-in
 # (SLOP_BOT_TIER2=1), so test.sh doesn't run them.
 #
@@ -17,19 +18,20 @@
 #                               or home, so the user's own are never touched
 #   HARNESS_LATEST=1 ./tier2.sh each harness at its latest release instead of the pin
 #
-# go test args default to every tier 2 package; e.g.
+# go test args default to tier2/run_tests.sh: every tier 2 package, then the
+# daemon scenarios; e.g.
 #   ./tier2.sh -run TestPiConformance ./internal/harness/conformance/scripted
+#   ./tier2.sh -run 'TestTier2Scenarios/pi/attach' ./internal/cli
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PACKAGES=(./internal/scriptedmodel/... ./internal/harness/...)
 
 if [[ "${NATIVE:-0}" == "1" ]]; then
   cd "${HERE}"
   if (($#)); then
     SLOP_BOT_TIER2=1 exec go test -race -count=1 -timeout 20m "$@"
   fi
-  SLOP_BOT_TIER2=1 exec go test -race -count=1 -timeout 20m "${PACKAGES[@]}"
+  SLOP_BOT_TIER2=1 exec tier2/run_tests.sh
 fi
 
 # The repo root is the build context: slop-bot builds through go.work with

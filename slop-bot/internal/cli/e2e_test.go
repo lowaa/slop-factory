@@ -71,6 +71,8 @@ type e2e struct {
 	stop func()
 	// transcripts is where the fakes keep theirs.
 	transcripts string
+	// timeout bounds each wait, as a safety net only; 0 is 20s.
+	timeout time.Duration
 }
 
 func newE2E(t *testing.T) *e2e {
@@ -115,7 +117,11 @@ func newE2EFrom(t *testing.T, h *harness, cfg string, clk clock.Clock) *e2e {
 }
 
 func (e *e2e) ctx() context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	timeout := e.timeout
+	if timeout == 0 {
+		timeout = 20 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	e.t.Cleanup(cancel)
 	return ctx
 }
