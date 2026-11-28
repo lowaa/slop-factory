@@ -9,6 +9,7 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
 )
@@ -140,14 +141,19 @@ func scenarioMerge(b *t2) {
 	assert.Contains(t, b.h.ok(t, "inbox"), "ready to merge (https://example.test/pr/7)")
 	results := b.lastResults()
 	require.NotEmpty(t, results, b.requests())
-	if b.target.Guarded {
-		assert.Contains(t, results[0], "merge guard refused this", "unauthorised, the merge was refused")
-		assert.NotContains(t, results[0], "GH-STUB-RAN")
-		assert.Equal(t, 1, b.count(daemon.EventMergeRefused, tk.ID), "the refusal is in the event log")
+	require.True(t, b.target.Guarded, "every harness here is guarded")
+	assert.NotContains(t, results[0], "GH-STUB-RAN", "unauthorised, the merge never ran")
+	assert.Equal(t, 1, b.count(daemon.EventMergeRefused, tk.ID), "the refusal is in the event log")
+	if b.target.Name == codex.Name {
+		// Codex has no hook to answer with under app-server: the guard
+		// declines the command's approval and steers its reason in, so the
+		// model reads it in the same turn, beside the declined result.
+		refused, reqs := b.firstWith("merge guard refused this")
+		require.GreaterOrEqual(t, refused, 0, b.requests())
+		assert.NotContains(t, strings.Join(reqs[refused].ToolResults, "\n"), "merge guard refused this", "a steer, not a tool result")
+		assert.NotEmpty(t, newResults(reqs, refused), "in the turn the declined command's result came back in: %s", b.requests())
 	} else {
-		// Codex's hooks don't run under app-server: nothing guards it
-		// (docs/merge_guard.md), which this pins.
-		assert.Contains(t, results[0], "GH-STUB-RAN")
+		assert.Contains(t, results[0], "merge guard refused this", "the hook's reason is the tool's result")
 	}
 
 	b.script(b.shell(shellWords(b.gh, "pr", "merge", "7", "--squash")), b.slopBot("done", "--summary", "Merged."), reply("finished"))

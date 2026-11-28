@@ -4,38 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"regexp"
-	"strings"
-	"time"
 
-	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
-// sessionPrefix names the fake's sessions, so Adopt finds its own.
+// sessionPrefix names the fake's sessions.
 const sessionPrefix = "fake-"
 
 // TUIHarness runs fakeharness --tui under the tuidriver kit: fake/tui.
 type TUIHarness struct {
+	tuidriver.Sessions
 	// Binary is the built fakeharness.
 	Binary string
 	// Control is the Controller's socket, or "" for an autonomous fake.
 	Control string
-	Host    sessionhost.SessionHost
-	Hub     tuidriver.HookHub
-	Pointer func(msgs []*harness.Message) string
-	Logger  *slog.Logger
-	Clock   clock.Clock
-	// PollInterval, HookTrust, ConfirmTimeout and RenderTimeout are
-	// tuidriver.Options'; zero is the kit's default.
-	PollInterval   time.Duration
-	HookTrust      time.Duration
-	ConfirmTimeout time.Duration
-	RenderTimeout  time.Duration
 }
 
 // Name implements harness.AIHarness.
@@ -51,49 +36,17 @@ func (h *TUIHarness) Capabilities() harness.Capabilities {
 
 // Start implements harness.AIHarness.
 func (h *TUIHarness) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
-	conv, err := tuidriver.Start(ctx, h.options(SessionName(ws.Agent)), ws, resume)
-	if err != nil {
-		return nil, err
-	}
-	return conv, nil
+	return h.Sessions.Start(ctx, h.Profile(), sessionPrefix, ws, resume)
 }
 
-// Adopt re-attaches to the fake's sessions that outlived a daemon.
-func (h *TUIHarness) Adopt(ctx context.Context) ([]harness.Conversation, error) {
-	names, err := h.Host.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var convs []harness.Conversation
-	for _, name := range names {
-		if !strings.HasPrefix(name, sessionPrefix) {
-			continue
-		}
-		conv, err := tuidriver.Adopt(ctx, h.options(name))
-		if err != nil {
-			return convs, fmt.Errorf("fake: adopting %s: %w", name, err)
-		}
-		convs = append(convs, conv)
-	}
-	return convs, nil
-}
-
-func (h *TUIHarness) options(session string) *tuidriver.Options {
-	return &tuidriver.Options{
-		Profile: h.Profile(), Host: h.Host, Hub: h.Hub, Session: session,
-		Pointer: h.Pointer, Logger: h.Logger, Clock: h.Clock,
-		PollInterval: h.PollInterval, HookTrust: h.HookTrust, ConfirmTimeout: h.ConfirmTimeout, RenderTimeout: h.RenderTimeout,
-	}
+// AdoptAgent implements harness.Adopter.
+func (h *TUIHarness) AdoptAgent(ctx context.Context, agent ident.AgentID) (harness.Conversation, error) {
+	return h.Adopt(ctx, h.Profile(), sessionPrefix, agent)
 }
 
 // SessionName is the fake's session for an agent.
 func SessionName(agent ident.AgentID) string {
-	return sessionPrefix + strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			return r
-		}
-		return '_'
-	}, string(agent))
+	return tuidriver.SessionName(sessionPrefix, agent)
 }
 
 // Profile is the fake TUI's tuidriver profile.
@@ -114,7 +67,11 @@ func (h *TUIHarness) Profile() *tuidriver.Profile {
 		Quit:      []tuidriver.Input{{Text: "/quit", Keys: []string{"Enter"}}},
 		ParseHook: parseHook,
 		Reply:     replyHook,
-		Injects:   true,
+		Deny: func(reason string) []byte {
+			b, _ := json.Marshal(HookReply{Deny: reason})
+			return b
+		},
+		Injects: true,
 	}
 }
 
@@ -150,6 +107,8 @@ func parseHook(event string, payload []byte) (*tuidriver.HookCall, error) {
 		}
 	case HookToolStart:
 		call.Events = []harness.Event{{Kind: harness.ToolStarted, Tool: p.Tool}}
+		// The call's input is its command line, as for a shell tool.
+		call.Tool = &tuidriver.ToolCall{Name: p.Tool, Command: p.Text}
 	case HookToolEnd:
 		call.Events = []harness.Event{{Kind: harness.ToolEnded, Tool: p.Tool}}
 	case HookText:

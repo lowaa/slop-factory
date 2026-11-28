@@ -7,6 +7,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/testexec"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,7 +75,7 @@ func cancelDuringHook(t *testing.T, repo string) context.Context {
 	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
 	hook := filepath.Join(repo, ".git", "hooks", "post-checkout")
 	body := "#!/bin/sh\necho ready > " + fifo + "\nexec sleep 300\n"
-	require.NoError(t, os.WriteFile(hook, []byte(body), 0o700)) // #nosec G306 -- a hook must be executable
+	testexec.WriteScript(t, hook, body)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {

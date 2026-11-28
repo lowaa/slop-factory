@@ -1,0 +1,37 @@
+      ▄▀▀▄        Antigravity CLI 1.5.18
+     ▀▀▀▀▀▀       user@example.com (Antigravity Starter Quota)
+    ▀▀▀▀▀▀▀▀      Gemini 4 Hydrogen (High)
+   ▄▀▀    ▀▀▄     /home/user/slop-bot/workspace/t7-repo
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> What are the briefing codeword and the fruit word? Reply with just both, or NONE for each you don't know.
+
+  ZEBRA-42
+  GUAVA
+
+────────────────────────────────────────────────────────────
+> Run exactly the shell command 'sleep 12; echo done' with run_command and WaitMsBeforeAsync 60000, wait for it, then reply with just: SLEPT
+
+○ Thought for 3.2s (Requested wait time exceeds the configured maximum threshold of 10000 milliseconds. Clamping the parameter to the upper limit forces backgrounding behavior, conflicting with s...)
+● Ran (sleep 12; echo done) (ctrl+o to expand)
+
+  Launched the command and waiting for it to finish.
+
+  SLEPT
+  STEER-SEEN
+
+────────────────────────────────────────────────────────────
+> Run exactly the shell command 'sleep 9731' with run_command and wait for it.
+
+● Ran (sleep 9731) (ctrl+o to expand)
+
+
+ ┃ Auto is now the default agent mode
+ ┃ Press Shift+Tab to switch agent modes, or change Agent Mode in /config.
+ ┃ esc to dismiss
+  ⎿  Interrupted · What should Antigravity CLI do instead?
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                                                                                          auto · Gemini 4 Hydrogen · high

@@ -1,8 +1,8 @@
 # CLI reference
 
 Checked against the cobra command tree built from `internal/cli` and each
-command's `--help` output (`go build ./cmd/slop-bot`). `slop-bot <command>
---help` is always the final word.
+command's `--help` output, hidden commands included (`go build
+./cmd/slop-bot`). `slop-bot <command> --help` is always the final word.
 
 ## Global flag
 
@@ -169,6 +169,17 @@ Ticket statuses: `preparing`, `discussion`, `open`, `in_progress`,
 
 `events` flags: `--after <n>` (start after this event id), `--follow`.
 
+### Worktrees
+
+A ticket's worktrees are cleaned up when it ends, except any whose removal
+would lose work. These commands find and remove those.
+
+| Command | Meaning |
+| --- | --- |
+| `worktrees` | Every recorded worktree: its ticket, repo, path, branch, agent, and status. `in use` is a live agent's; `kept` is an ended agent's that holds work, listed with why (`uncommitted`, `untracked`, `unpushed`, `in_progress`, `locked`, `nested`); `released` was handed to you by `attach --no-resume`; `removable` holds nothing a clean would lose; `unchecked` couldn't be checked, with the error. `--json` prints JSON. |
+| `worktrees clean <ticket>` | Remove the ticket's worktrees and its local `slop-bot/t<ticket>/` branches, keeping any that hold work, as at the ticket's end, and any released to you by `attach --no-resume`. Besides the recorded ones, it takes any worktree of the ticket's repos on disk that nothing records, as a first start that failed leaves. Refused while the ticket has a live agent or one is starting. git can't remove a worktree with initialised submodules, so one listed `removable` can still fail here: `--force` removes it. |
+| `worktrees clean <ticket> --force` | The same, but discarding the worktrees and branches whatever they hold, a lock or a deleted `.git` link included. It lists what it discards, warning where a worktree couldn't be checked, and asks you to type `discard` first. Still refused, to be removed by hand: a worktree with another worktree inside it (remove that one first), one whose `.git` file points nowhere (it isn't plainly slop-bot's), and one whose repo is no longer in the config. |
+
 ## Agent commands
 
 These are the commands the briefing gives agents. Users may run most too.
@@ -190,7 +201,7 @@ These are the commands the briefing gives agents. Users may run most too.
 | Flag | Meaning |
 | --- | --- |
 | `--all` | every working agent |
-| `--interrupt` | stop the agent's current turn first (user only) |
+| `--interrupt` | stop the agent's current turn first; the message is delivered as the next turn, once the interrupted one ends (user only) |
 | `--merge` | authorise the agent to merge its ticket's work; the text is optional (user only) |
 
 A user's `tell` to an agent with an open `ask` is its answer. A user's
@@ -207,8 +218,16 @@ another agent are information, not instructions.
 | `--log` | the message history (user only) |
 | `--target <agent>` | with `--log`, only messages to or from this agent |
 
-## Not in this build
+## Hidden commands
 
-The design describes `briefing`, `worktrees` and `restart --drain`. None
-is a command here. `hook pre-tool` exists, hidden: harnesses run it as the
-merge guard, and people and agents don't.
+`hook` is run by harnesses, not by people or agents, and is left out of the
+briefing's CLI reference.
+
+| Command | Meaning |
+| --- | --- |
+| `hook pre-tool` | The merge guard for harnesses with a `PreToolUse` hook (Claude Code, pi): reads the call on stdin and answers allow or deny ([merge_guard.md](merge_guard.md)). |
+| `hook tui <session> <event>` | Relays a TUI harness's (agy's) hook to its conversation in the daemon, which answers it, including the merge guard's verdict. |
+
+Not commands: `briefing` (the built-in briefing is rendered at each agent's
+start into `$XDG_STATE_HOME/slop-bot/agents/<agent>/briefing.md`) and
+`restart --drain`.

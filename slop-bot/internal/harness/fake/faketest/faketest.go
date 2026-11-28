@@ -21,6 +21,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost/tmuxtest"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
@@ -136,9 +137,11 @@ func NewTUI(t *testing.T, opts *TUIOptions) *TUI {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = hub.Close() })
 	h := &fake.TUIHarness{
-		Binary: self(t), Control: ctl.Socket(), Host: host, Hub: hub,
-		Pointer: Pointer, Logger: slog.New(slog.DiscardHandler), Clock: clock.Or(opts.Clock),
-		PollInterval: opts.PollInterval, HookTrust: opts.HookTrust, ConfirmTimeout: opts.ConfirmTimeout, RenderTimeout: opts.RenderTimeout,
+		Binary: self(t), Control: ctl.Socket(),
+		Sessions: tuidriver.Sessions{
+			Host: host, Hub: hub, Pointer: Pointer, Logger: slog.New(slog.DiscardHandler), Clock: clock.Or(opts.Clock),
+			PollInterval: opts.PollInterval, HookTrust: opts.HookTrust, ConfirmTimeout: opts.ConfirmTimeout, RenderTimeout: opts.RenderTimeout,
+		},
 	}
 	if h.RenderTimeout == 0 {
 		h.RenderTimeout = renderTimeout

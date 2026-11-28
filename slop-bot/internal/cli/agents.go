@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/agents"
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 )
 
@@ -112,7 +113,13 @@ func (a *app) printInbox(cmd *cobra.Command, path string, asJSON, sayEmpty bool)
 		return err
 	}
 	for _, m := range msgs {
-		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), sender(&m), m.Kind, m.Body); err != nil {
+		body := m.Body
+		if a.deps.Token != "" {
+			// An agent weighs a message by its header, so a body mustn't be
+			// able to print one (a TUI agent reads all its messages here).
+			body = agents.Quote(body)
+		}
+		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), sender(&m), m.Kind, body); err != nil {
 			return err
 		}
 	}
@@ -337,7 +344,7 @@ func (a *app) statusCmd() *cobra.Command {
 			_, _ = fmt.Fprintln(tw, "AGENT\tTICKET\tSTATE\tFOR\tHARNESS\tNOTE")
 			sort.Slice(st.Agents, func(i, j int) bool { return st.Agents[i].Ticket < st.Agents[j].Ticket })
 			for _, ag := range st.Agents {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", ag.ID, ag.Ticket, ag.State,
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", ag.ID, ag.Ticket, ag.StateLabel(),
 					time.Since(ag.Since).Round(time.Second), ag.Harness, dash(ag.Note))
 			}
 			return tw.Flush()

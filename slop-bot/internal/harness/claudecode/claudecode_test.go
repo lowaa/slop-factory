@@ -50,7 +50,7 @@ func fakeHarness(t *testing.T) *Harness {
 	require.NoError(t, err)
 	return &Harness{
 		Binary: self, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{},
-		Environ: func() []string { return []string{fakeClaudeEnv + "=1"} },
+		Environ: func() []string { return []string{fakeClaudeEnv + "=1", "GORACE=atexit_sleep_ms=0"} },
 	}
 }
 

@@ -163,6 +163,17 @@ func TestCleanupSafeguards(t *testing.T) {
 			wt := f.create("9", []string{"a"}, "a")[0]
 			tc.arrange(f, wt)
 
+			// `slop-bot worktrees` lists what Check finds: Cleanup's verdict,
+			// with nothing removed.
+			checked, err := f.m.Check(context.Background(), "9", wt)
+			require.NoError(t, err)
+			if tc.kept == nil {
+				assert.Empty(t, checked)
+			} else {
+				assert.Equal(t, tc.kept, kinds(checked))
+			}
+			assert.True(t, onDisk(t, wt.Path))
+
 			res := f.m.Cleanup(context.Background(), "9", []*Worktree{wt})
 			require.Len(t, res, 1)
 			r := res[0]

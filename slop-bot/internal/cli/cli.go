@@ -20,6 +20,8 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
 	"github.com/lowaa/slop-factory/slop-bot/internal/doctor"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
@@ -44,12 +46,20 @@ type Deps struct {
 	// Stdin answers `uninstall --purge`'s confirmation, and is the terminal
 	// an attached TUI reads.
 	Stdin io.Reader
+	// EndSessions ends the TUI agents' sessions (slop-bot's tmux server),
+	// for `uninstall`; nil leaves them. Only the real outside world sets
+	// it: a test must never end the machine's real server.
+	EndSessions func(ctx context.Context) error
 
 	// daemonBuilt lets in-package tests see the daemon `slop-bot daemon`
 	// builds, to wait on its Ready.
 	daemonBuilt func(*daemon.Daemon)
 	// harnesses lets in-package tests run the daemon on a fake harness.
 	harnesses daemon.Harnesses
+	// tuiHarnesses and tmuxSocket let them run a TUI fake on the daemon's
+	// own tmux server (one per test) and hook hub.
+	tuiHarnesses func(kit *tuidriver.Sessions) daemon.Harnesses
+	tmuxSocket   string
 	// clock lets in-package tests run the daemon on a fake clock.
 	clock clock.Clock
 	// tuiGrace shortens the daemon's wait for a hung-up TUI in tests.
@@ -69,7 +79,17 @@ func FromOS() (*Deps, error) {
 		Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv),
 		ServiceRunner: service.ExecRunner{}, FindBinary: service.NewBinaryFinder().Find,
 		Commands: doctor.ExecCommands{Timeout: probeTimeout}, Stdin: os.Stdin,
+		EndSessions: endSessions,
 	}, nil
+}
+
+// endSessions ends slop-bot's own tmux server, the daemon's default one.
+func endSessions(ctx context.Context) error {
+	host, err := sessionhost.NewTmux(&sessionhost.TmuxOptions{})
+	if err != nil {
+		return nil // no tmux, so no sessions
+	}
+	return host.KillServer(ctx)
 }
 
 // probeTimeout bounds each of doctor's probes. agy's model list and
@@ -105,6 +125,7 @@ func (a *app) root() *cobra.Command {
 		a.installCmd(),
 		a.uninstallCmd(),
 		a.ticketCmd(),
+		a.worktreesCmd(),
 		a.tuiCmd(),
 		a.hookCmd(),
 	)
@@ -185,6 +206,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 			opts := &daemon.Options{
 				Config: cfg, Paths: p, Logger: logger, Clock: clock.Or(a.deps.clock), TUIGrace: a.deps.tuiGrace,
+				TUIHarnesses: a.deps.tuiHarnesses, TmuxSocket: a.deps.tmuxSocket,
 				CLIReference: AgentReference(cmd.Root()),
 			}
 			// Only when set: a nil map in the interface would read as

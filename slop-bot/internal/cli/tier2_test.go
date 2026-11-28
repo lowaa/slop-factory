@@ -18,7 +18,10 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx/gitxtest"
 	sbharness "github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
+	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
+	"github.com/lowaa/slop-factory/slop-bot/internal/testexec"
 	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 )
 
@@ -58,6 +61,14 @@ type tier2Harness struct {
 	sbharness.AIHarness
 	env    map[string]string
 	starts chan *tier2Start
+}
+
+// daemonGuard is the running daemon's merge guard, for Codex, which is
+// made before the daemon is (and outlives its restarts).
+type daemonGuard struct{ h *harness }
+
+func (g *daemonGuard) Check(ctx context.Context, by ident.Principal, call *mergeguard.Call) *mergeguard.Verdict {
+	return g.h.built.Load().MergeGuard().Check(ctx, by, call)
 }
 
 // tier2Start is a conversation the daemon started.
@@ -124,10 +135,12 @@ func newT2(t *testing.T, tt *tier2Target, bin string) *t2 {
 	self, err := os.Executable()
 	require.NoError(t, err)
 	stubs := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(stubs, "gh"), []byte(ghStub), 0o700)) // #nosec G306 -- an executable stub
+	testexec.WriteScript(t, filepath.Join(stubs, "gh"), ghStub)
 	target := tt.target(t, &scripted.TargetOptions{
 		Binary: bin, ServerURL: server.URL(),
-		PreToolHook: []string{self, "hook", "pre-tool"},
+		// What the daemon gives each harness itself: the hook for those that
+		// run one, its own guard, in-process, for Codex.
+		PreToolHook: []string{self, "hook", "pre-tool"}, Guard: &daemonGuard{h: h},
 	})
 	env := map[string]string{
 		// The agent's slop-bot (its tool calls, and the merge guard's hook)

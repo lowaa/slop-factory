@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -34,9 +35,8 @@ type terminal struct {
 
 	mu  sync.Mutex
 	out bytes.Buffer
-	// changed is closed, and replaced, on each write: what a test waiting
-	// for the screen to show something blocks on.
-	changed chan struct{}
+	// wrote is signalled whenever the terminal shows more.
+	wrote chan struct{}
 	// read is closed once the terminal has nothing left to show.
 	read   chan struct{}
 	exited chan int
@@ -45,14 +45,15 @@ type terminal struct {
 func (e *e2e) attachTerminal(args ...string) *terminal {
 	e.t.Helper()
 	cmd := exec.Command(e.self, append([]string{"attach"}, args...)...) // #nosec G204 -- the test binary
-	// TERM is set, not inherited: a real harness's TUI needs one, and the
-	// tier 2 container has none.
+	// TERM: a joined attach runs a tmux client, and a hand-over a real
+	// harness's TUI, which both need one; the test's own environment (the
+	// tier 2 container) may have none.
 	cmd.Env = append(os.Environ(), cliReexec+"=1", fakeReexec+"=", control.TokenEnv+"=",
 		"HOME="+e.h.home, "XDG_RUNTIME_DIR="+e.h.runtime, "GORACE=atexit_sleep_ms=0", "TERM=xterm-256color")
 	// A size, as a person's terminal has: a real TUI lays itself out by it.
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	require.NoError(e.t, err)
-	term := &terminal{t: e.t, cmd: cmd, pty: f, changed: make(chan struct{}), read: make(chan struct{}), exited: make(chan int, 1)}
+	term := &terminal{t: e.t, cmd: cmd, pty: f, read: make(chan struct{}), exited: make(chan int, 1), wrote: make(chan struct{}, 1)}
 	go func() {
 		defer close(term.read)
 		_, _ = io.Copy(term, f)
@@ -76,9 +77,23 @@ func (e *e2e) attachTerminal(args ...string) *terminal {
 func (term *terminal) Write(p []byte) (int, error) {
 	term.mu.Lock()
 	defer term.mu.Unlock()
-	close(term.changed)
-	term.changed = make(chan struct{})
+	select {
+	case term.wrote <- struct{}{}:
+	default:
+	}
 	return term.out.Write(p)
+}
+
+// shows waits for the terminal to show text.
+func (term *terminal) shows(ctx context.Context, text string) {
+	term.t.Helper()
+	for !strings.Contains(term.screen(), text) {
+		select {
+		case <-term.wrote:
+		case <-ctx.Done():
+			require.FailNow(term.t, "the terminal never showed "+text, term.screen())
+		}
+	}
 }
 
 // typeLine types a line at whatever runs in the terminal.
@@ -187,6 +202,9 @@ func TestAttachHandsTheAgentToATUIAndBack(t *testing.T) {
 	assert.Contains(t, screen, "Quitting the TUI hands the agent back")
 	assert.Contains(t, screen, "fake-tui "+s.ID+" (resumed)")
 	assert.Contains(t, screen, "back to slop-bot: resumed")
+	// The daemon closes the stream as it hands back: that is the attach
+	// ending, not the daemon going away.
+	assert.NotContains(t, screen, "lost the daemon")
 }
 
 func TestASecondAttachIsRefusedAndDetachEndsTheFirst(t *testing.T) {
@@ -207,6 +225,7 @@ func TestASecondAttachIsRefusedAndDetachEndsTheFirst(t *testing.T) {
 	code, screen := term.done(e.ctx())
 	assert.Equal(t, 0, code, screen)
 	assert.Contains(t, screen, "detached from another terminal")
+	assert.NotContains(t, screen, "lost the daemon")
 	e.resumed(s.ID)
 }
 
@@ -339,4 +358,24 @@ func TestAnAttachWhoseCLIDidntComeBackIsHandedBackWhenItsLeaseExpires(t *testing
 	assert.Contains(t, string(ev.Payload), "lease expired")
 	e.resumed(s.ID)
 	_ = agent
+}
+
+// The daemon closes the stream right after telling the CLI the attach is
+// over: the CLI ends the TUI rather than reconnecting to a daemon that never
+// went away.
+func TestAnAttachEndedByTheDaemonEndsTheTUIQuietly(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC))
+	e := newE2EOn(t, "user: ada\nagents: {attach_lease: 30s}\n", clk)
+	s, agent := e.working("t")
+	term := e.attachTerminal("--now", agent)
+	e.tui(s.ID)
+	e.h.ok(t, "ticket", "cancel", "1")
+	e.await("agent.finished", nil)
+	// The next lease renewal finds the agent ended.
+	clk.Advance(11 * time.Second)
+	code, screen := term.done(e.ctx())
+	assert.Equal(t, 0, code, screen)
+	assert.Contains(t, screen, "handed back without this terminal")
+	assert.NotContains(t, screen, "lost the daemon")
 }

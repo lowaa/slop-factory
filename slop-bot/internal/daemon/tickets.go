@@ -90,6 +90,35 @@ func (tr *ticketRoutes) view(t *tickets.Ticket) api.Ticket {
 	return out
 }
 
+// checkRepos refuses repos this machine's repo lookup doesn't have, or a
+// repo named twice, at filing or edit time. Accepted, they would fail the
+// worktree creation for every repo of the ticket, the good ones too, and on
+// a live ticket be retried on each later ticket event.
+func (tr *ticketRoutes) checkRepos(repos []string) error {
+	seen := map[string]bool{}
+	for _, name := range repos {
+		if seen[name] {
+			return fmt.Errorf("%w: repo %q is named twice", tickets.ErrInvalid, name)
+		}
+		seen[name] = true
+		if _, ok := tr.cfg.Repo(name); !ok && strings.TrimSpace(name) != "" {
+			return fmt.Errorf("%w: repo %q isn't in this machine's config (repos: %s)", tickets.ErrInvalid, name, tr.repoNames())
+		}
+	}
+	return nil
+}
+
+func (tr *ticketRoutes) repoNames() string {
+	names := make([]string, 0, len(tr.cfg.Repos))
+	for _, r := range tr.cfg.Repos {
+		names = append(names, r.Name)
+	}
+	if len(names) == 0 {
+		return "none configured"
+	}
+	return strings.Join(names, ", ")
+}
+
 // checkSpec refuses a spec this machine can't run, at filing or edit time.
 func (tr *ticketRoutes) checkSpec(spec tickets.AgentSpec) error {
 	return agentspec.Validate(agentspec.Resolve(spec, tr.cfg), tr.cfg)
@@ -107,7 +136,7 @@ func (tr *ticketRoutes) create(w http.ResponseWriter, r *http.Request) {
 	for _, b := range in.BlockedOn {
 		nt.BlockedOn = append(nt.BlockedOn, ident.TicketID(b))
 	}
-	if err := tr.checkSpec(nt.Agent); err != nil {
+	if err := errors.Join(tr.checkSpec(nt.Agent), tr.checkRepos(nt.Repos)); err != nil {
 		fail(w, err)
 		return
 	}
@@ -206,6 +235,12 @@ func (tr *ticketRoutes) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ch := &tickets.TicketChange{Title: in.Title, Body: in.Body, AutoMerge: in.AutoMerge, Repos: in.Repos}
+	if in.Repos != nil {
+		if err := tr.checkRepos(*in.Repos); err != nil {
+			fail(w, err)
+			return
+		}
+	}
 	if in.Status != nil {
 		st := tickets.Status(*in.Status)
 		ch.Status = &st

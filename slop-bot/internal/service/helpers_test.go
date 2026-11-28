@@ -12,6 +12,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service/servicetest"
+	"github.com/lowaa/slop-factory/slop-bot/internal/testexec"
 )
 
 const testUID = 1000
@@ -77,7 +78,7 @@ func newFixture(t *testing.T, fo *fixtureOpts) *fixture {
 	}
 	if filepath.IsAbs(binary) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(binary), 0o700))
-		require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o700)) // #nosec G306 -- a test stand-in that must be executable
+		testexec.WriteScript(t, binary, "#!/bin/sh\n")
 	}
 	pathVar := strings.Join([]string{
 		filepath.Join(home, ".local", "bin"), filepath.Join(home, "go", "bin"),

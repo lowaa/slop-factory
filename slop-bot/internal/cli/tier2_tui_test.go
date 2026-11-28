@@ -87,9 +87,8 @@ func (term *terminal) text() string {
 func (term *terminal) until(ctx context.Context, from int, match func(string) int) int {
 	term.t.Helper()
 	for {
-		term.mu.Lock()
-		ch := term.changed
-		term.mu.Unlock()
+		// wrote holds a signal for any write since it was last taken, so
+		// one that lands after this read still wakes the wait below.
 		txt := term.text()
 		if from < len(txt) {
 			if at := match(txt[from:]); at >= 0 {
@@ -97,7 +96,7 @@ func (term *terminal) until(ctx context.Context, from int, match func(string) in
 			}
 		}
 		select {
-		case <-ch:
+		case <-term.wrote:
 		case <-ctx.Done():
 			require.FailNow(term.t, "the TUI never showed what was waited for", "screen:\n%s", txt[min(from, len(txt)):])
 		}

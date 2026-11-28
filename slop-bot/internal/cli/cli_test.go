@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,8 @@ type harness struct {
 	home, runtime string
 	// config is a slop-bot-config.yaml under home naming a fixed user.
 	config string
+	// built is the daemon startDaemon last ran.
+	built atomic.Pointer[daemon.Daemon]
 }
 
 func newHarness(t *testing.T) *harness {
@@ -111,7 +114,10 @@ func startDaemon(t *testing.T, h *harness) (stop func()) {
 	t.Helper()
 	ready := make(chan *daemon.Daemon, 1)
 	daemonDeps := *h.deps
-	daemonDeps.daemonBuilt = func(d *daemon.Daemon) { ready <- d }
+	daemonDeps.daemonBuilt = func(d *daemon.Daemon) {
+		h.built.Store(d)
+		ready <- d
+	}
 	daemonDeps.Stdout, daemonDeps.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)

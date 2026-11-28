@@ -11,6 +11,7 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service/servicetest"
+	"github.com/lowaa/slop-factory/slop-bot/internal/testexec"
 )
 
 // newServiceHarness is the CLI harness with a fake service runner, so no
@@ -35,7 +36,7 @@ func newServiceHarness(t *testing.T) (*harness, *servicetest.Runner) {
 func standInBinary(t *testing.T, path string) string {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o700)) // #nosec G306 -- a test stand-in that must be executable
+	testexec.WriteScript(t, path, "#!/bin/sh\n")
 	return path
 }
 

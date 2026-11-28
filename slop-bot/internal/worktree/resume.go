@@ -22,7 +22,7 @@ type resume struct {
 // resumePath sits beside the worktree in the workspace, which Manager owns.
 // The leading dot keeps it out of the t<ticket>-<repo> namespace.
 func (m *Manager) resumePath(ticket ident.TicketID, repo string) string {
-	return filepath.Join(m.workspace, "."+dirName(ticket, repo)+".resume")
+	return filepath.Join(m.workspace, "."+DirName(ticket, repo)+".resume")
 }
 
 func (m *Manager) writeResume(ticket ident.TicketID, repo string, r *resume) error {

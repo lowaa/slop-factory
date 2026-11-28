@@ -73,6 +73,9 @@ type harnessHooks struct {
 	noSteer bool
 	// stop runs before each Stop.
 	stop func(agent ident.AgentID)
+	// attached makes a Stop without force refuse, as a TUI driver's does
+	// with a person in the session.
+	attached bool
 }
 
 func (h *harnessHooks) onStop(agent ident.AgentID) {
@@ -85,6 +88,15 @@ func (h *harnessHooks) onStop(agent ident.AgentID) {
 	if stop != nil {
 		stop(agent)
 	}
+}
+
+func (h *harnessHooks) isAttached() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.attached
 }
 
 func (h *harnessHooks) set(f func(h *harnessHooks)) {
@@ -149,6 +161,9 @@ func (c *hookedConversation) Send(ctx context.Context, msg *harness.Message) err
 
 func (c *hookedConversation) Stop(ctx context.Context, force bool) error {
 	c.hooks.onStop(c.agent)
+	if c.hooks.isAttached() && !force {
+		return harness.ErrAttached
+	}
 	return c.Conversation.Stop(ctx, force)
 }
 

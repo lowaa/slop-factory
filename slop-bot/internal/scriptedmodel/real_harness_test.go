@@ -202,6 +202,9 @@ func agyCommand(t *testing.T, serverURL, dir, prompt string) ([]string, []string
 			"HOME=" + t.TempDir(),
 			"AGY_LLM_GATEWAY_URL=" + serverURL,
 			"AGY_LLM_GATEWAY_API_KEY=scripted-model-not-a-real-key",
+			// Each start otherwise spawns an updater that would replace the
+			// installed agy, which is not this test's to change.
+			"AGY_CLI_DISABLE_AUTO_UPDATE=true",
 		}
 }
 

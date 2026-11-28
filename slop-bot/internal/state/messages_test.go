@@ -127,6 +127,44 @@ func TestMarkReadIsScopedToTheRecipient(t *testing.T) {
 	assert.Empty(t, unread)
 }
 
+func TestAPointedMessageStaysInTheAgentsInboxUntilRead(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	pushed := f.enqueue(t, tell(state.UserParty, "a1", "pushed"))
+	before := f.enqueue(t, tell(state.UserParty, "a1", "pointed, then delivered"))
+	after := f.enqueue(t, tell(state.UserParty, "a1", "delivered, then pointed"))
+	queued := f.enqueue(t, tell(state.UserParty, "a1", "still queued"))
+	require.NoError(t, f.Messages.MarkDelivered(ctx, pushed.ID, state.DeliveryHook))
+	// Typed while idle: the pointer goes in, then the send that typed it
+	// returns and marks the message delivered.
+	require.NoError(t, f.Messages.MarkPointed(ctx, []int64{before.ID}))
+	require.NoError(t, f.Messages.MarkDelivered(ctx, before.ID, state.DeliveryTurn))
+	// Sent mid-turn: marked delivered as the send returns, pointed at once
+	// the turn ends without a hook to carry it.
+	require.NoError(t, f.Messages.MarkDelivered(ctx, after.ID, state.DeliverySteer))
+	require.NoError(t, f.Messages.MarkPointed(ctx, []int64{after.ID}))
+
+	inbox, err := f.Messages.AgentInbox(ctx, "a1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"pointed, then delivered", "delivered, then pointed", "still queued"}, bodies(inbox),
+		"what reached the model already isn't shown again")
+	for _, m := range inbox[:2] {
+		assert.Equal(t, state.DeliveryPointer, m.DeliveryPath)
+		assert.Equal(t, state.StatusDelivered, m.Status)
+	}
+
+	_, err = f.Messages.MarkRead(ctx, "a1", []int64{before.ID, after.ID, queued.ID})
+	require.NoError(t, err)
+	inbox, err = f.Messages.AgentInbox(ctx, "a1")
+	require.NoError(t, err)
+	assert.Empty(t, inbox)
+	require.NoError(t, f.Messages.MarkPointed(ctx, []int64{queued.ID}))
+	log, err := f.Messages.Log(ctx, &state.LogQuery{Party: "a1"})
+	require.NoError(t, err)
+	assert.Equal(t, state.DeliveryInbox, log[3].DeliveryPath, "a read message keeps how it went")
+}
+
 func TestAsksAndAnswers(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

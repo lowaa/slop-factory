@@ -16,6 +16,7 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx/gitxtest"
+	"github.com/lowaa/slop-factory/slop-bot/internal/testexec"
 )
 
 func newGit(t *testing.T, env []string) *gitx.Git {
@@ -128,7 +129,7 @@ func TestCommandTimeoutStopsAHungCommand(t *testing.T) {
 	fifo := filepath.Join(dir, "never")
 	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
 	bin := filepath.Join(dir, "hung-git")
-	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\nread _ < "+fifo+"\n"), 0o700)) // #nosec G306 -- an executable test script
+	testexec.WriteScript(t, bin, "#!/bin/sh\nread _ < "+fifo+"\n")
 	g, err := gitx.New(&gitx.Options{Bin: bin, Env: gitxtest.Env(t), CommandTimeout: time.Millisecond})
 	require.NoError(t, err)
 
@@ -141,7 +142,7 @@ func hookRepo(t *testing.T, g *gitx.Git, body string) string {
 	t.Helper()
 	dir := initRepo(t, g)
 	hook := filepath.Join(dir, ".git", "hooks", "post-commit")
-	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\n"+body+"\n"), 0o700)) // #nosec G306 -- a hook must be executable
+	testexec.WriteScript(t, hook, "#!/bin/sh\n"+body+"\n")
 	return dir
 }
 

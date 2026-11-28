@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 	"time"
 
@@ -37,6 +36,11 @@ type Harnesses interface {
 type Worktrees interface {
 	Create(ctx context.Context, ticket ident.TicketID, repos []string, primary string) ([]*worktree.Worktree, error)
 	Cleanup(ctx context.Context, ticket ident.TicketID, wts []*worktree.Worktree) []*worktree.CleanupResult
+	// Check is what Cleanup would keep a worktree for, removing nothing.
+	Check(ctx context.Context, ticket ident.TicketID, wt *worktree.Worktree) ([]worktree.Reason, error)
+	// ForceCleanup discards a worktree whatever it holds, on the user's
+	// say-so.
+	ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *worktree.Worktree) error
 }
 
 // Options are the Manager's dependencies.
@@ -81,19 +85,29 @@ type Manager struct {
 	mu      sync.Mutex
 	runners map[ident.AgentID]*runner
 	// wantSlot are idle agents with a message to deliver and no free slot,
-	// in the order they started waiting: an answered agent goes ahead of
-	// new work.
-	wantSlot []ident.AgentID
+	// live or parked, in the order they started waiting: an answered agent
+	// goes ahead of new work. state.db's queue keeps the same order, so a
+	// restart serves it unchanged (slotqueue.go).
+	wantSlot []slotWait
+	// parked are live agents stopped to free a process past max_live, to be
+	// resumed by id when they next have work (parking.go).
+	parked map[ident.AgentID]*parkedAgent
 	// starting are tickets whose agent is being started or resumed off the
 	// scheduler goroutine, with the pool it starts in: each holds a slot and
 	// a live place until its start settles, so starts in flight can't
 	// overfill a pool.
 	starting map[ident.TicketID]state.Pool
+	// settledCh has a channel per entry in starting, closed when that start
+	// settles: a start on the caller's goroutine waits on it for its turn.
+	settledCh map[ident.TicketID]chan struct{}
 	// recoverAfter are agents whose harness died while a start for their
 	// ticket was still in flight (a resume, still delivering): each is
 	// recovered once that start settles, rather than lost.
 	recoverAfter map[ident.TicketID]*runner
-	stopping     bool
+	// startBusy, set by tests, runs when a start on the caller's goroutine
+	// (claimStart) finds its ticket's place taken.
+	startBusy func(ident.TicketID)
+	stopping  bool
 	// streams counts the attached CLIs' open streams per agent.
 	streams map[ident.AgentID]int
 
@@ -140,7 +154,9 @@ func New(opts *Options) (*Manager, error) {
 		opts:         opts,
 		runners:      map[ident.AgentID]*runner{},
 		starting:     map[ident.TicketID]state.Pool{},
+		settledCh:    map[ident.TicketID]chan struct{}{},
 		recoverAfter: map[ident.TicketID]*runner{},
+		parked:       map[ident.AgentID]*parkedAgent{},
 		streams:      map[ident.AgentID]int{},
 		limits:       newLimits(),
 		guardTold:    map[string]time.Time{},
@@ -153,17 +169,21 @@ func New(opts *Options) (*Manager, error) {
 	}, nil
 }
 
-// Start resumes live agents, each on its own goroutine, and starts the
-// scheduler.
+// Start resumes live agents, each on its own goroutine (a parked one stays
+// parked until it has work), and starts the scheduler.
 func (m *Manager) Start(ctx context.Context) error {
 	if err := m.loadLimits(ctx); err != nil {
+		return err
+	}
+	// Before any resume: a resuming agent takes its place in the queue.
+	if err := m.loadQueue(ctx); err != nil {
 		return err
 	}
 	if err := m.resumeAll(ctx); err != nil {
 		return err
 	}
-	go m.schedule() // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
-	go m.sweeper()  // #nosec G118 -- like the scheduler, it runs until Stop
+	go m.schedule()                                      // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
+	go m.sweeper(m.opts.Clock.NewTicker(m.sweepEvery())) // #nosec G118 -- like the scheduler, it runs until Stop
 	m.Kick()
 	return nil
 }
@@ -240,10 +260,32 @@ func (m *Manager) goStartLocked(ticket ident.TicketID, pool state.Pool, admit bo
 	if m.stopping {
 		return false
 	}
-	if _, busy := m.starting[ticket]; busy || (admit && !m.admitsLocked(pool)) {
+	if _, busy := m.starting[ticket]; busy {
 		return false
 	}
-	m.starting[ticket] = pool
+	if admit {
+		ok, victim := m.admitLocked(pool)
+		if !ok {
+			return false
+		}
+		if victim != nil {
+			// Parked first, on this start's goroutine, so the live
+			// processes never exceed max_live.
+			parked := m.parkLocked(victim)
+			if parked == nil {
+				return false // it stopped being parkable: the next pass looks again
+			}
+			then := start
+			start = func(ctx context.Context) {
+				// No room after all: the ticket is still eligible, and the
+				// next pass tries again.
+				if m.park(ctx, victim, parked) {
+					then(ctx)
+				}
+			}
+		}
+	}
+	m.holdStartLocked(ticket, pool)
 	m.starts.Go(func() {
 		defer m.settled(ticket)
 		ctx, cancel := context.WithTimeout(m.base, m.startTimeout())
@@ -253,9 +295,18 @@ func (m *Manager) goStartLocked(ticket ident.TicketID, pool state.Pool, admit bo
 	return true
 }
 
+// holdStartLocked takes ticket's start place, in pool. Call it holding mu,
+// with the place free; settled gives it back.
+func (m *Manager) holdStartLocked(ticket ident.TicketID, pool state.Pool) {
+	m.starting[ticket] = pool
+	m.settledCh[ticket] = make(chan struct{})
+}
+
 func (m *Manager) settled(ticket ident.TicketID) {
 	m.mu.Lock()
 	delete(m.starting, ticket)
+	close(m.settledCh[ticket])
+	delete(m.settledCh, ticket)
 	if r, ok := m.recoverAfter[ticket]; ok {
 		delete(m.recoverAfter, ticket)
 		m.goStartLocked(ticket, r.pool, false, func(ctx context.Context) { m.recover(ctx, r.id) })
@@ -319,8 +370,9 @@ func (m *Manager) runner(id ident.AgentID) (*runner, bool) {
 func (m *Manager) forget(id ident.AgentID) {
 	m.mu.Lock()
 	delete(m.runners, id)
+	delete(m.parked, id)
 	// A gone agent mustn't hold its pool's queue.
-	m.wantSlot = slices.DeleteFunc(m.wantSlot, func(w ident.AgentID) bool { return w == id })
+	m.dequeueLocked(id)
 	m.mu.Unlock()
 	m.Kick()
 }

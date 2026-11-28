@@ -71,7 +71,7 @@ type e2e struct {
 	stop func()
 	// transcripts is where the fakes keep theirs.
 	transcripts string
-	// timeout bounds each wait, as a safety net only; 0 is 20s.
+	// timeout bounds each step; 0 is 20s, for a fake.
 	timeout time.Duration
 }
 

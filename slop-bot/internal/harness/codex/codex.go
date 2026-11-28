@@ -22,6 +22,8 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agentproc"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex/protocol"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/rpcdriver"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
+	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
 )
 
@@ -48,6 +50,17 @@ type Harness struct {
 	// Config are further `key=value` overrides of the user's config.toml,
 	// for this session only (Codex's `-c`).
 	Config []string
+	// Guard, when set, is the merge guard, asked before each command a
+	// permissive agent runs (approvals.go). Nil runs Codex unguarded.
+	Guard Guard
+}
+
+// Guard decides whether one of an agent's tool calls may run;
+// *mergeguard.Guard is one. It is asked in-process, through Codex's
+// approvals, because Codex's own hooks don't run under app-server
+// (docs/merge_guard.md).
+type Guard interface {
+	Check(ctx context.Context, by ident.Principal, call *mergeguard.Call) *mergeguard.Verdict
 }
 
 // ModelProvider is a model provider defined for one session, through
@@ -106,15 +119,9 @@ func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harn
 		return nil, err
 	}
 	env := h.env(ws)
-	opts := &codecOptions{logger: h.Logger, version: h.version(), effort: ws.Effort, permissive: ws.Permissive}
-	opts.start, opts.resumeParams = threadParams(ws)
-	if resume != nil {
-		opts.resume = resume.ID
-		opts.resumeParams.ThreadID = resume.ID
-	}
 	spec := &harness.LaunchSpec{Path: bin, Args: append([]string{"app-server"}, common...), Env: env, Dir: ws.Dir}
 	return rpcdriver.Start(ctx, &rpcdriver.Options{
-		Harness: Name, Driver: Driver, Codec: newCodec(opts), Spec: spec,
+		Harness: Name, Driver: Driver, Codec: newCodec(h.codecOptions(ws, resume)), Spec: spec,
 		Logger: h.Logger, Clock: h.Clock,
 		Attach: func(id string) *harness.LaunchSpec {
 			return &harness.LaunchSpec{Path: bin, Args: attachArgs(id, ws, common), Env: env, Dir: ws.Dir}
@@ -122,21 +129,52 @@ func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harn
 	})
 }
 
+// codecOptions are one conversation's. Only a permissive agent is guarded
+// (threadParams says why).
+func (h *Harness) codecOptions(ws *harness.Workspace, resume *harness.ConversationRef) *codecOptions {
+	opts := &codecOptions{logger: h.Logger, version: h.version(), effort: ws.Effort, permissive: ws.Permissive}
+	if h.Guard != nil && ws.Permissive {
+		opts.guard, opts.by = h.Guard, ident.AgentPrincipal(ws.Agent, ws.Ticket)
+	}
+	opts.start, opts.resumeParams = threadParams(ws, opts.guard != nil)
+	if resume != nil {
+		opts.resume = resume.ID
+		opts.resumeParams.ThreadID = resume.ID
+	}
+	return opts
+}
+
 // threadParams are thread/start's and thread/resume's: the same settings,
 // so a resumed thread runs as it started.
-func threadParams(ws *harness.Workspace) (*protocol.ThreadStartParams, *protocol.ThreadResumeParams) {
-	// Nobody is at a terminal to answer an approval, so Codex never asks,
-	// permissive or not; Permissive also lifts the sandbox. Without it the
-	// sandbox is whatever the user's config says.
+//
+// Nobody is at a terminal to answer an approval, so an unguarded Codex
+// never asks, permissive or not; Permissive also lifts the sandbox. Without
+// it the sandbox is whatever the user's config says.
+//
+// A guarded agent is asked about instead: "untrusted" is the only policy
+// under which Codex sends the client every command it runs, `ls` included
+// ("on-request" and granular ones sent none under danger-full-access: the
+// guard spike, docs/merge_guard.md). The codec answers each at once, so the
+// agent stays permissive. It is never used for a sandboxed agent: an
+// approved command runs outside the sandbox (a read-only one let an
+// approved `touch` write), so every answer would escalate it. The reviewer
+// is pinned to the client, so a user's `approvals_reviewer` can't hand the
+// verdicts to Codex's own reviewer, which would never ask slop-bot.
+func threadParams(ws *harness.Workspace, guarded bool) (*protocol.ThreadStartParams, *protocol.ThreadResumeParams) {
+	policy := any(protocol.AskForApprovalNever)
+	var reviewer protocol.ApprovalsReviewer
+	if guarded && ws.Permissive {
+		policy, reviewer = protocol.AskForApprovalUntrusted, protocol.ApprovalsReviewerUser
+	}
 	start := &protocol.ThreadStartParams{
-		Cwd: ws.Dir, ApprovalPolicy: protocol.AskForApprovalNever, Model: ws.Model,
+		Cwd: ws.Dir, ApprovalPolicy: policy, ApprovalsReviewer: reviewer, Model: ws.Model,
 		// The briefing goes in as developer instructions: nothing is
 		// written to the worktree, and the thread keeps it across a resume
 		// and an attach (it is in the rollout once, protocol spike).
 		DeveloperInstructions: ws.Briefing,
 	}
 	resume := &protocol.ThreadResumeParams{
-		Cwd: ws.Dir, ApprovalPolicy: protocol.AskForApprovalNever, Model: ws.Model,
+		Cwd: ws.Dir, ApprovalPolicy: policy, ApprovalsReviewer: reviewer, Model: ws.Model,
 		DeveloperInstructions: ws.Briefing,
 	}
 	if ws.Permissive {

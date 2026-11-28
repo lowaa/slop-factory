@@ -22,6 +22,7 @@ var decoders = map[string]func() any{
 	MethodItemCompleted:                              func() any { return &ItemCompletedNotification{} },
 	MethodThreadTokenUsageUpdated:                    func() any { return &ThreadTokenUsageUpdatedNotification{} },
 	MethodAccountRateLimitsUpdated:                   func() any { return &AccountRateLimitsUpdatedNotification{} },
+	MethodItemCommandExecutionRequestApproval:        func() any { return &CommandExecutionRequestApprovalParams{} },
 	"<" + MethodInitialize + ">":                     func() any { return &InitializeResponse{} },
 	"<" + MethodThreadStart + ">":                    func() any { return &ThreadStartResponse{} },
 	"<" + MethodThreadResume + ">":                   func() any { return &ThreadResumeResponse{} },
@@ -32,7 +33,9 @@ var decoders = map[string]func() any{
 }
 
 type envelope struct {
-	ID     string          `json:"id"`
+	// ID is a fixture marker (a string) on a response, Codex's own number
+	// on a server request.
+	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
 	Result json.RawMessage `json:"result"`
@@ -58,7 +61,8 @@ func TestRecordedMessagesDecodeStrictly(t *testing.T) {
 			require.NoError(t, json.Unmarshal(sc.Bytes(), &env))
 			key, body := env.Method, env.Params
 			if key == "" {
-				key, body = env.ID, env.Result
+				body = env.Result
+				_ = json.Unmarshal(env.ID, &key)
 			}
 			mk, ok := decoders[key]
 			if !ok || body == nil {

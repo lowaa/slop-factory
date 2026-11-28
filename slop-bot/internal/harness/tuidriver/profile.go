@@ -13,6 +13,7 @@ package tuidriver
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -49,6 +50,13 @@ type Profile struct {
 	// Injects means some hook replies can carry messages to the model (see
 	// HookCall.Inject).
 	Injects bool
+	// Deny, optional, is the reply that refuses the tool call a hook asks
+	// about (HookCall.Tool), with the reason the model is given. With it,
+	// the kit puts such calls to its Guard.
+	Deny func(reason string) []byte
+	// Default is the reply when slop-bot's daemon can't answer: what the
+	// harness does on its own (agy's PreToolUse must allow explicitly).
+	Default func(event string) []byte
 	// Rendered says whether a paste of text shows on screen, given the
 	// screen before it and now. nil is the default: text appears more often
 	// than it did before (the same pointer may still be on screen from an
@@ -94,12 +102,48 @@ type HookCall struct {
 	// ConversationID is the harness's id, where the payload has one.
 	ConversationID string
 	// Events are what the hook says happened. Ready means the session can
-	// take a message; TurnStarted and TurnEnded bracket a turn.
+	// take a message; TurnStarted and TurnEnded bracket a turn. Until Ready,
+	// only Ready counts: work before it is the harness's own start-up (agy
+	// names a new conversation only once it has run a prompt, so its profile
+	// launches with one), and no part of the conversation the core drives.
 	Events []harness.Event
 	// Submitted means the harness took a prompt: the confirmation a pasted
 	// pointer waits for.
 	Submitted bool
 	Inject    InjectPoint
+	// Tool is the tool call a pre-tool hook asks about, which the reply
+	// can refuse (Profile.Deny).
+	Tool *ToolCall
+}
+
+// ToolCall is a tool call a harness asks its pre-tool hook about.
+type ToolCall struct {
+	// Name is the harness's tool name, e.g. agy's "run_command".
+	Name string
+	// Command is a shell tool's command line.
+	Command string
+	// Cwd is where it runs.
+	Cwd string
+}
+
+// Guard decides whether a tool call may run: "" lets it, anything else is
+// why not. ctx is the hook's, as relayed: the daemon's carries the agent.
+type Guard func(ctx context.Context, call *ToolCall) (refusal string)
+
+// Offline is the reply to a hook slop-bot's daemon couldn't take: the
+// profile's Default, but a tool call guard refuses is refused, so that the
+// daemon being away never waves through what it would have stopped.
+func (p *Profile) Offline(ctx context.Context, event string, payload []byte, guard Guard) ([]byte, error) {
+	if p.ParseHook == nil || p.Default == nil {
+		return nil, fmt.Errorf("tuidriver: %s's profile has no offline reply", p.Harness)
+	}
+	call, err := p.ParseHook(event, payload)
+	if err == nil && call.Tool != nil && p.Deny != nil && guard != nil {
+		if why := guard(ctx, call.Tool); why != "" {
+			return p.Deny(why), nil
+		}
+	}
+	return p.Default(event), nil
 }
 
 // HookHub routes the hooks a harness runs (`slop-bot hook <event>`) to the

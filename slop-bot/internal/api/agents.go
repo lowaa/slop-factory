@@ -133,6 +133,18 @@ type AgentStatus struct {
 	Pool     string    `json:"pool"`
 	Note     string    `json:"note,omitempty"`
 	Nudges   int       `json:"nudges,omitempty"`
+	// ParkedAt is when the agent was stopped to free a process past
+	// max_live: it has no process, and is resumed when it next has work.
+	ParkedAt *time.Time `json:"parked_at,omitempty"`
+}
+
+// StateLabel is the agent's state as `status` shows it: what it waits on,
+// and whether it is parked.
+func (a *AgentStatus) StateLabel() string {
+	if a.ParkedAt != nil {
+		return a.State + " (parked)"
+	}
+	return a.State
 }
 
 // Status is GET /v1/status.

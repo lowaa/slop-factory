@@ -105,7 +105,7 @@ func (m *Model) allRows() [][]string {
 			a.Ticket, a.Title, dash(a.TicketStatus),
 			// The time in state is as of the last event: the TUI never polls,
 			// so it can read stale until something happens.
-			a.State + " " + humanDuration(now.Sub(a.Since)),
+			a.StateLabel() + " " + humanDuration(now.Sub(a.Since)),
 			a.Harness, modelEffort(a), a.Pool, dash(strings.Join(a.Blockers, ",")), dash(a.Note),
 		})
 	}

@@ -115,8 +115,9 @@ openai    gpt-6.2-sol               272K     128K     yes       yes
 )
 
 // Healthy is a fake on which every check passes: each tool on PATH under
-// bin, at a tested version, signed in. Repos still need their
-// `git -C <path> rev-parse --git-dir` answered.
+// bin, at a tested version, signed in. Repos still need worktree.CheckRepo's
+// probes answered: `git -C <path> rev-parse --is-bare-repository`, then
+// `--show-toplevel` (or `--absolute-git-dir` for a bare repo).
 func Healthy(bin string) *Commands {
 	c := NewCommands()
 	for _, name := range []string{"git", "tmux", "claude", "codex", "pi", "agy"} {

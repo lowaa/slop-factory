@@ -1,6 +1,7 @@
 package scripted
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/claudecode"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
+	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 )
 
 // The targets' setup without the harnesses: what each one points its
@@ -83,7 +86,11 @@ func TestCodexTargetPointsItsProviderAtTheServer(t *testing.T) {
 	t.Parallel()
 	tg := Codex(t, &TargetOptions{Binary: "/bin/codex", ServerURL: testURL})
 	assert.Equal(t, codex.Name, tg.Name)
-	assert.False(t, tg.Guarded, "app-server runs no hooks")
+	assert.False(t, tg.Guarded, "no guard given, none runs")
+	guard := fakeGuard{}
+	guarded := Codex(t, &TargetOptions{ServerURL: testURL, Guard: guard})
+	assert.True(t, guarded.Guarded)
+	assert.Equal(t, codex.Guard(guard), guarded.Harness.(*codex.Harness).Guard)
 	h, ok := tg.Harness.(*codex.Harness)
 	require.True(t, ok)
 	assert.Equal(t, testURL+"/v1", h.ModelProvider.BaseURL)
@@ -155,4 +162,11 @@ func TestBinarySkipsWhatIsntInstalled(t *testing.T) {
 	assert.Empty(t, found)
 	t.Run("present", func(t *testing.T) { found = Binary(t, "sh") })
 	assert.NotEmpty(t, found)
+}
+
+// fakeGuard allows everything; only its identity is checked.
+type fakeGuard struct{}
+
+func (fakeGuard) Check(context.Context, ident.Principal, *mergeguard.Call) *mergeguard.Verdict {
+	return &mergeguard.Verdict{Allow: true}
 }

@@ -94,7 +94,7 @@ func TestTranscriptAndWatchFollowAnAgentToItsEnd(t *testing.T) {
 	watch := e.stream("watch", tk.ID)
 	assert.Contains(t, watch.next(), "watching "+agent+" (ticket "+tk.ID+")")
 	follow := e.stream("transcript", tk.ID, "--follow")
-	assert.Contains(t, follow.next(), `user: You've been assigned ticket `+tk.ID)
+	assert.Contains(t, follow.next(), `user: [slop-bot] You've been assigned ticket `+tk.ID)
 
 	e.do(s, fake.CmdTurnStart)
 	_, err = s.Do(e.ctx(), fake.Command{Cmd: fake.CmdToolStart, Tool: "shell", Text: "go test ./..."})

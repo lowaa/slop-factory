@@ -14,6 +14,7 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/setup"
@@ -291,6 +292,14 @@ func (a *app) uninstall(cmd *cobra.Command, purge, yes bool) error {
 		return err
 	default:
 		out.printf("stopped and removed the slop-bot service: %s\n", m.UnitPath())
+	}
+	// The TUI agents' sessions outlive the daemon by design, in a tmux
+	// server of slop-bot's own: with no daemon to come back, they would
+	// work on, unheard, in what purge is about to delete.
+	if a.deps.EndSessions != nil {
+		if err := a.deps.EndSessions(cmd.Context()); err != nil {
+			out.printf("couldn't end the TUI agents' sessions: %v; `tmux -L %s kill-server` ends them\n", err, sessionhost.DefaultSocket)
+		}
 	}
 	if !purge {
 		out.printf("kept slop-bot's files (config, tickets, state); `slop-bot uninstall --purge` deletes them\n")

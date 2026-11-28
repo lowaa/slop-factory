@@ -3,6 +3,7 @@ package scripted_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake/faketest"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
 )
 
@@ -31,7 +33,8 @@ const stepTimeout = 60 * time.Second
 func TestMain(m *testing.M) {
 	scripted.ExecIfLauncher()
 	execIfHook()
-	os.Exit(m.Run())
+	// Last: as the fake harness, this binary is agy's hook relay (agy_test.go).
+	faketest.Main(m)
 }
 
 func optIn(t *testing.T) {
@@ -44,45 +47,89 @@ func binary(t *testing.T, name string) string {
 	return scripted.Binary(t, name)
 }
 
-// newTarget is one of scripted's Target constructors.
-type newTarget func(*testing.T, *scripted.TargetOptions) *scripted.Target
+// fixture is what every harness's subject shares: a scripted model, a
+// puppet on it, and one workspace, reused for the resume (a harness finds a
+// conversation to resume by its directory).
+type fixture struct {
+	server *scriptedmodel.Server
+	puppet *scripted.Puppet
+	// bin and env launch the harness through the puppet's launcher.
+	bin string
+	env map[string]string
+	ws  *harness.Workspace
+}
 
-// subject is a harness's conformance subject: a scripted model, a puppet on
-// it, and one workspace, reused for the resume (a harness finds a
-// conversation to resume by its directory). The harness is launched through
-// the puppet's launcher, which reports its pid for the crash test.
-func subject(t *testing.T, name, bin string, shell *scripted.Shell, target newTarget) *conformance.Subject {
+// newFixture fills in opts' Server and Briefing; the rest is the harness's.
+func newFixture(t *testing.T, name, target string, opts *scripted.Options) *fixture {
 	t.Helper()
+	// The first TempDir registers their removal, and cleanups run last
+	// first: so it runs after the puppet's, which ends the harnesses still
+	// writing to them.
+	briefingFile := filepath.Join(t.TempDir(), "briefing.md")
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
 	briefing := "TIER2-BRIEFING-" + name + "-5c1e"
-	puppet, err := scripted.New(t, &scripted.Options{Server: server, Shell: shell, Briefing: briefing})
+	o := *opts
+	o.Server, o.Briefing = server, briefing
+	puppet, err := scripted.New(t, &o)
 	require.NoError(t, err)
-	launcher, env, err := puppet.Launcher(bin)
+	bin, env, err := puppet.Launcher(target)
 	require.NoError(t, err)
-	tg := target(t, &scripted.TargetOptions{Binary: launcher, ServerURL: server.URL()})
-	briefingFile := filepath.Join(t.TempDir(), "briefing.md")
 	require.NoError(t, os.WriteFile(briefingFile, []byte(briefing), 0o600))
-	ws := &harness.Workspace{
-		Agent: "a1", Ticket: "7", Dir: t.TempDir(), Permissive: true,
-		Briefing: briefing, BriefingFile: briefingFile, Env: env,
+	return &fixture{
+		server: server, puppet: puppet, bin: bin, env: env,
+		ws: &harness.Workspace{
+			Agent: "a1", Ticket: "7", Dir: t.TempDir(), Permissive: true,
+			Briefing: briefing, BriefingFile: briefingFile,
+		},
 	}
-	tg.Workspace(ws)
+}
+
+func (f *fixture) subject(h harness.AIHarness, extraEnv map[string]string) *conformance.Subject {
+	for k, v := range f.env {
+		extraEnv[k] = v
+	}
+	f.ws.Env = extraEnv
 	return &conformance.Subject{
-		Harness:   puppet.Harness(tg.Harness),
-		Workspace: func(*testing.T) *harness.Workspace { return ws },
-		Puppet:    puppet,
+		Harness:   f.puppet.Harness(h),
+		Workspace: func(*testing.T) *harness.Workspace { return f.ws },
+		Puppet:    f.puppet,
 		Timeout:   stepTimeout,
 	}
 }
+
+// newTarget is one of scripted's Target constructors.
+type newTarget func(*testing.T, *scripted.TargetOptions) *scripted.Target
+
+// targetSubject is the subject for a harness scripted has a Target for,
+// launched through the puppet's launcher; o says how the Target is built,
+// less its binary and server, which are the fixture's.
+func targetSubject(t *testing.T, name, bin string, shell *scripted.Shell, target newTarget, o scripted.TargetOptions) *conformance.Subject {
+	t.Helper()
+	f := newFixture(t, name, bin, &scripted.Options{Shell: shell})
+	o.Binary, o.ServerURL = f.bin, f.server.URL()
+	tg := target(t, &o)
+	tg.Workspace(f.ws)
+	return f.subject(tg.Harness, f.ws.Env)
+}
+
+// environ is a harness's whole base environment: nothing of the user's
+// beyond PATH, so no credential or config of theirs can reach it.
+func environ(home string, extra ...string) func() []string {
+	return func() []string {
+		return append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TERM=xterm"}, extra...)
+	}
+}
+
+func logger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func TestClaudeCodeConformance(t *testing.T) {
 	t.Parallel()
 	optIn(t)
 	bin := binary(t, "claude")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		return subject(t, "claude", bin, scripted.ClaudeCodeShell, scripted.ClaudeCode)
+		return targetSubject(t, "claude", bin, scripted.ClaudeCodeShell, scripted.ClaudeCode, scripted.TargetOptions{})
 	})
 }
 
@@ -91,7 +138,9 @@ func TestCodexConformance(t *testing.T) {
 	optIn(t)
 	bin := binary(t, "codex")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		return subject(t, "codex", bin, scripted.CodexShell, scripted.Codex)
+		// Guarded, as the daemon runs it: every command goes through an
+		// approval, which must not slow or break anything else.
+		return targetSubject(t, "codex", bin, scripted.CodexShell, scripted.Codex, scripted.TargetOptions{Guard: codexGuard(t)})
 	})
 }
 
@@ -100,7 +149,7 @@ func TestPiConformance(t *testing.T) {
 	optIn(t)
 	bin := binary(t, "pi")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		return subject(t, "pi", bin, scripted.PiShell, scripted.Pi)
+		return targetSubject(t, "pi", bin, scripted.PiShell, scripted.Pi, scripted.TargetOptions{})
 	})
 }
 
@@ -149,6 +198,7 @@ func TestContainerHarnessVersions(t *testing.T) {
 		"claude": os.Getenv("CLAUDE_CODE_VERSION"),
 		"codex":  os.Getenv("CODEX_VERSION"),
 		"pi":     os.Getenv("PI_VERSION"),
+		"agy":    os.Getenv("AGY_VERSION"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -163,4 +213,23 @@ func TestContainerHarnessVersions(t *testing.T) {
 			assert.Contains(t, string(out), pin, fmt.Sprintf("%s --version", name))
 		})
 	}
+}
+
+// The TUI harnesses run under the image's tmux, which must be one slop-bot
+// supports (doctor's minimum, internal/doctor/versions.go): Debian
+// bookworm's own is 3.3a, so the image takes backports'.
+func TestContainerTmuxIsSupported(t *testing.T) {
+	t.Parallel()
+	optIn(t)
+	if os.Getenv(scripted.ContainerEnv) != "1" {
+		t.Skipf("%s=1 is the container, which installs tmux", scripted.ContainerEnv)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), stepTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, binary(t, "tmux"), "-V").CombinedOutput() // #nosec G204 -- a fixed command
+	require.NoError(t, err, string(out))
+	var major, minor int
+	_, err = fmt.Sscanf(string(out), "tmux %d.%d", &major, &minor)
+	require.NoError(t, err, string(out))
+	assert.True(t, major > 3 || major == 3 && minor >= 4, "tmux %d.%d is below 3.4", major, minor)
 }

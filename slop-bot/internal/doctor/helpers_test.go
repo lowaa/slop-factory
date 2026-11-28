@@ -16,6 +16,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service/servicetest"
+	"github.com/lowaa/slop-factory/slop-bot/internal/testexec"
 )
 
 const testUID = 1000
@@ -78,7 +79,7 @@ func (f *fixture) manager(p *paths.Paths) service.Manager {
 	f.t.Helper()
 	bin := filepath.Join(f.home, ".local", "bin", "slop-bot")
 	require.NoError(f.t, os.MkdirAll(filepath.Dir(bin), 0o700))
-	require.NoError(f.t, os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o700)) // #nosec G306 -- a test stand-in that must be executable
+	testexec.WriteScript(f.t, bin, "#!/bin/sh\n")
 	m, err := service.New(&service.Options{
 		Paths: p, Home: f.home, UID: testUID, GOOS: f.goos, Binary: bin, PATH: "/usr/bin",
 		Runner: f.runner, Logger: slog.New(slog.DiscardHandler),
@@ -110,7 +111,8 @@ func (f *fixture) repo(name string) string {
 	f.t.Helper()
 	dir := filepath.Join(f.home, "src", name)
 	require.NoError(f.t, os.MkdirAll(dir, 0o700))
-	f.cmds.Answer("git -C "+dir+" rev-parse --git-dir", &service.Result{Stdout: ".git\n"})
+	f.cmds.Answer("git -C "+dir+" rev-parse --is-bare-repository", &service.Result{Stdout: "false\n"})
+	f.cmds.Answer("git -C "+dir+" rev-parse --show-toplevel", &service.Result{Stdout: dir + "\n"})
 	return dir
 }
 

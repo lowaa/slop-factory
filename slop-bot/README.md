@@ -20,12 +20,14 @@ session.
 
 A harness is a coding-agent CLI. A driver is how slop-bot drives it.
 
-| Harness (`harnesses.<name>`) | Driver | Status in this build |
+| Harness (`harnesses.<name>`) | Driver | Notes |
 | --- | --- | --- |
-| `claude-code` | `stream-json` | runs |
-| `codex` | `app-server` | runs |
-| `pi` | `rpc` | runs |
-| `agy` | `tui` (in tmux) | accepted by the config, not runnable yet: `doctor` warns, and its tickets become `misconfigured` |
+| `claude-code` | `stream-json` | |
+| `codex` | `app-server` | |
+| `pi` | `rpc` | |
+| `agy` | `tui` (in tmux) | agy's own TUI in slop-bot's tmux server (`tmux -L slop-bot`); needs tmux. Its sessions outlive a daemon restart, and `attach` joins them. On a consumer Google sign-in, see `doctor`'s terms warning; `api_key_opt_in` with `GEMINI_API_KEY` runs it on a key instead |
+
+The merge guard covers all four ([merge guard](docs/merge_guard.md)).
 
 ## Quickstart
 
@@ -52,8 +54,12 @@ slop-bot tell <agent> "yes, use A" # a user tell is the answer to an open ask
 
 `slop-bot attach <agent|ticket>` takes an agent's session over in its
 harness's own TUI, in your terminal; quitting the TUI hands the agent back.
-`slop-bot detach` hands it back from another terminal. See
-[concepts](docs/concepts.md#attach-and-hand-back).
+`slop-bot detach` hands it back from another terminal. `slop-bot tui` is a
+live, read-only table of every agent, and `slop-bot transcript` reads an
+agent's conversation. See [concepts](docs/concepts.md#attach-and-hand-back).
+
+Worktrees that hold work outlive their ticket: `slop-bot worktrees` lists
+them and `slop-bot worktrees clean <ticket>` removes them.
 
 ## Documentation
 
@@ -61,10 +67,12 @@ harness's own TUI, in your terminal; quitting the TUI hands the agent back.
   annotated example
 - [CLI](docs/cli.md): every command and flag, user versus agent commands
 - [Concepts](docs/concepts.md): the agent lifecycle, declarations, slots,
-  the autonomous loop, transcripts, plan-limit holds, the briefing, and the
-  trust model
-- [Development](docs/development.md): repo layout, the test scripts, the
-  fake harness, and how to add a harness
+  the autonomous loop, transcripts and retention, plan-limit holds, the
+  briefing, and the trust model
+- [Merge guard](docs/merge_guard.md): what it refuses, and how each harness
+  enforces it
+- [Development](docs/development.md): repo layout, the test scripts and
+  tiers, mutation testing, the fake harness, and how to add a harness
 - [Prerequisites](docs/dev_setup.md): what a machine needs, per OS
 
 ## Where files live

@@ -64,8 +64,12 @@ type Options struct {
 	// ConfirmTimeout is how long a submit, cancel or quit waits for the
 	// harness to act before it is retried or given up on.
 	ConfirmTimeout time.Duration
-	// RenderTimeout bounds the wait for a paste to show on screen.
+	// RenderTimeout bounds the wait for a paste to show on screen, and a
+	// graceful Stop's wait for the idle prompt before it types the quit.
 	RenderTimeout time.Duration
+	// Guard, optional, is put every tool call a pre-tool hook asks about,
+	// where the profile can refuse one (the daemon's merge guard).
+	Guard Guard
 }
 
 func (o *Options) normalised() (*Options, error) {
@@ -438,6 +442,9 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 	})
 	// Also retries a tag that failed before.
 	c.recordID(ctx)
+	if refusal, refused := c.guard(ctx, call); refused {
+		return refusal, nil // a pre-tool hook carries no messages
+	}
 	reply, err := c.p.Reply(call, inject)
 	if err != nil && len(inject) > 0 {
 		// Not delivered: hold them again. A turn end this hook would have
@@ -449,10 +456,26 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 	return reply, err
 }
 
+// guard puts a pre-tool hook's tool call to the Guard, and returns the
+// profile's refusal if it says no.
+func (c *Conversation) guard(ctx context.Context, call *HookCall) ([]byte, bool) {
+	if call.Tool == nil || c.p.Deny == nil || c.opts.Guard == nil {
+		return nil, false
+	}
+	why := c.opts.Guard(ctx, call.Tool)
+	if why == "" {
+		return nil, false
+	}
+	return c.p.Deny(why), true
+}
+
 // hookEvents applies a hook's events to the turn state; c.mu is held.
 func (c *Conversation) hookEvents(call *HookCall, injected bool) []harness.Event {
 	var evs []harness.Event
 	for _, ev := range call.Events {
+		if !c.ready && ev.Kind != harness.Ready {
+			continue // start-up work (see HookCall.Events)
+		}
 		switch ev.Kind {
 		case harness.Ready:
 			if c.id == "" {
@@ -501,6 +524,11 @@ func (c *Conversation) readScreen(ctx context.Context) {
 	}
 	st := c.p.Markers.classify(screen)
 	cancelled := c.p.Markers.interrupted(screen)
+	if st == screenUnknown && cancelled {
+		// A cancel can hide the idle footer (agy moves a queued message
+		// into the prompt): the cancel itself says the turn is over.
+		st = screenIdle
+	}
 	c.apply(func() []harness.Event {
 		// A hook during the read, or just before it, may not have reached
 		// the screen yet: the hook is the better witness.
@@ -517,6 +545,9 @@ func (c *Conversation) readScreen(ctx context.Context) {
 func (c *Conversation) screenEvents(st screenState, cancelled bool) []harness.Event {
 	switch st {
 	case screenBusy:
+		if !c.ready {
+			return nil // start-up work (see HookCall.Events)
+		}
 		return c.turnStarted()
 	case screenIdle:
 		var evs []harness.Event
@@ -740,8 +771,9 @@ func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message)
 	}
 	switch {
 	case errors.Is(err, ErrAttached):
-		// Not ErrAttached itself, which promises nothing was typed.
-		return true, ErrUnsubmitted
+		// Not ErrAttached alone, which promises nothing was typed: wrapped,
+		// it says why the submit stopped (a person is at the prompt).
+		return true, fmt.Errorf("%w: %w", ErrUnsubmitted, ErrAttached)
 	case err != nil:
 		// Whatever failed, the pointer may be in the prompt.
 		return true, fmt.Errorf("%w: %w", ErrUnsubmitted, err)
@@ -941,6 +973,13 @@ func (c *Conversation) beginQuit() bool {
 
 // quit types the quit sequence; c.keys is held.
 func (c *Conversation) quit(ctx context.Context) error {
+	if err := c.notAttached(ctx); err != nil {
+		return err // not delayed: a person's typing can keep the screen busy
+	}
+	c.awaitIdleScreen(ctx)
+	if err := c.usable(); err != nil {
+		return err // closed or exited during the wait: type nothing
+	}
 	for _, in := range c.p.Quit {
 		if err := c.notAttached(ctx); err != nil {
 			return err
@@ -957,6 +996,34 @@ func (c *Conversation) quit(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// awaitIdleScreen waits, up to RenderTimeout, for the screen to show the
+// idle prompt. A hook's turn end can come before the TUI has finished the
+// turn (agy runs Stop with its turn still on screen), and the quit sequence
+// is meant for the idle prompt: mid-turn, a TUI can read the same keys
+// otherwise. Past the timeout the quit is typed anyway, and Stop's confirm
+// or kill takes over. Like awaitRendered, it polls on the wall clock: a
+// sub-second wait on the TUI's redraw.
+func (c *Conversation) awaitIdleScreen(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, c.opts.RenderTimeout)
+	defer cancel()
+	tick := time.NewTicker(renderPoll)
+	defer tick.Stop()
+	for {
+		screen, err := c.host.Capture(ctx, c.opts.Session)
+		if err == nil && c.p.Markers.classify(screen) == screenIdle {
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-c.bg.Done():
+			return // closed or exited
+		case <-ctx.Done():
+			c.opts.Logger.Info("tuidriver: quitting without an idle screen", "screen", lastLine(screen))
+			return
+		}
+	}
 }
 
 // kill ends the session and waits for the exit to be reported.
@@ -992,6 +1059,14 @@ func (c *Conversation) kill(ctx context.Context) error {
 func (c *Conversation) AttachPlan(context.Context) (*harness.AttachPlan, error) {
 	argv := c.host.AttachCommand(c.opts.Session)
 	return &harness.AttachPlan{Kind: harness.Join, Command: &harness.LaunchSpec{Path: argv[0], Args: argv[1:]}}, nil
+}
+
+// Held implements harness.Lasting: the messages Send took that no hook or
+// pointer has delivered yet, which a Close leaves undelivered.
+func (c *Conversation) Held() []*harness.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*harness.Message(nil), c.pending...)
 }
 
 // Close lets go of the session without ending it, as a daemon shutting down

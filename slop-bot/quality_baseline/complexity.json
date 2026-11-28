@@ -1,33 +1,89 @@
 {
-  "functions": 2,
+  "functions": 1710,
   "cyclomatic": {
     "threshold": 15,
-    "mean": 2,
-    "p90": 3,
-    "max": 3,
+    "mean": 3.72,
+    "p90": 8,
+    "max": 15,
     "over_threshold": 0
   },
   "cognitive": {
     "threshold": 20,
-    "mean": 1,
-    "p90": 2,
-    "max": 2,
+    "mean": 3.14,
+    "p90": 9,
+    "max": 20,
     "over_threshold": 0
   },
   "longest": [
     {
-      "file": "cmd/slop-bot/main.go",
-      "function": "main",
-      "lines": 8,
-      "cyclomatic": 3,
-      "cognitive": 2
+      "file": "internal/daemon/daemon.go",
+      "function": "New",
+      "lines": 102,
+      "cyclomatic": 11,
+      "cognitive": 9
     },
     {
-      "file": "internal/version/version.go",
-      "function": "String",
-      "lines": 1,
-      "cyclomatic": 1,
-      "cognitive": 0
+      "file": "internal/doctor/commands.go",
+      "function": "(ExecCommands).Run",
+      "lines": 77,
+      "cyclomatic": 14,
+      "cognitive": 10
+    },
+    {
+      "file": "internal/cli/attach.go",
+      "function": "(*attachRun).run",
+      "lines": 65,
+      "cyclomatic": 15,
+      "cognitive": 18
+    },
+    {
+      "file": "internal/agents/spawn.go",
+      "function": "(*Manager).spawnAgent",
+      "lines": 63,
+      "cyclomatic": 13,
+      "cognitive": 16
+    },
+    {
+      "file": "internal/harness/agy/profile.go",
+      "function": "(*Harness).command",
+      "lines": 59,
+      "cyclomatic": 13,
+      "cognitive": 13
+    },
+    {
+      "file": "internal/cli/install.go",
+      "function": "(*installSummary).write",
+      "lines": 55,
+      "cyclomatic": 9,
+      "cognitive": 7
+    },
+    {
+      "file": "internal/agents/attach.go",
+      "function": "(*Manager).stopForAttach",
+      "lines": 51,
+      "cyclomatic": 14,
+      "cognitive": 14
+    },
+    {
+      "file": "internal/cli/observe.go",
+      "function": "(*app).transcriptCmd",
+      "lines": 51,
+      "cyclomatic": 10,
+      "cognitive": 20
+    },
+    {
+      "file": "internal/harness/fake/process.go",
+      "function": "Main",
+      "lines": 51,
+      "cyclomatic": 13,
+      "cognitive": 14
+    },
+    {
+      "file": "internal/scriptedmodel/openai_chat.go",
+      "function": "(openAIChat).encode",
+      "lines": 51,
+      "cyclomatic": 8,
+      "cognitive": 8
     }
   ]
 }

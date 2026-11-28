@@ -17,6 +17,9 @@ if [[ -n ${unformatted} ]]; then
   exit 1
 fi
 go vet ./...
+# The race detector sleeps a second at every process exit by default; the
+# suite re-runs its own test binary as fake agents and hooks, so each pays it.
+export GORACE="${GORACE:-atexit_sleep_ms=0}"
 if (($#)); then
   go test -race "$@"
 else

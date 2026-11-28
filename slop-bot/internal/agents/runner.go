@@ -2,8 +2,10 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -41,8 +43,11 @@ type runner struct {
 	conv harness.Conversation
 	caps harness.Capabilities
 
-	mu      sync.Mutex
-	st      state.AgentState
+	mu sync.Mutex
+	st state.AgentState
+	// since is when the agent entered st: who has waited longest, for
+	// parking.
+	since   time.Time
 	inTurn  bool
 	decl    declared
 	summary string
@@ -67,6 +72,26 @@ type runner struct {
 	// holdsSlot carries an attached agent's slot into its first turn after
 	// the hand-back, so it can't lose it to new work in between.
 	holdsSlot bool
+	// parking is the agent being stopped to free a process: it takes no
+	// slot, and a message for it queues it to be resumed.
+	parking bool
+	// settling is a turn's end being acted on.
+	settling bool
+	// adoptedSession is a TUI session that outlived a daemon restart and was
+	// taken back as it ran: a person may be in it, so it is never parked.
+	adoptedSession bool
+	// personIn is a person found in its TUI session when a park tried to
+	// stop it: it isn't parked again until its next turn.
+	personIn bool
+	// joinable says a person attaches by joining conv's session (a TUI),
+	// which runs on through the attach instead of stopping.
+	joinable bool
+	// redelivering is a held delivery's retry, waiting (redeliverLater).
+	redelivering bool
+	// joinedExit and rejoined settle which came first for a joined session:
+	// its exit (the hand-back resumes it) or its hand-back (an exit is then
+	// a crash). See runner.joined.
+	joinedExit, rejoined bool
 	// exited is closed when the conversation's events end.
 	exited chan struct{}
 }
@@ -98,10 +123,17 @@ func (r *runner) setAttaching(on bool) {
 	r.attaching = on
 }
 
-// stopConv stops the conversation, if this runner has one.
+// stopConv stops the conversation for good, if this runner has one. A TUI
+// driver won't type its quit while a person is in the session; the agent
+// is ending regardless (its ticket is done or gone), so the session is
+// killed instead, or the stop would wait for the person forever.
 func (r *runner) stopConv(ctx context.Context, force bool) {
-	if r.conv != nil {
-		_ = r.conv.Stop(ctx, force)
+	if r.conv == nil {
+		return
+	}
+	if err := r.conv.Stop(ctx, force); errors.Is(err, harness.ErrAttached) {
+		r.m.opts.Logger.Info("agents: ending a session a person is in", "agent", r.id)
+		_ = r.conv.Stop(ctx, true)
 	}
 }
 
@@ -116,6 +148,9 @@ func (r *runner) setState(ctx context.Context, to state.AgentState, reason strin
 	r.mu.Lock()
 	from := r.st
 	r.st = to
+	if from != to {
+		r.since = r.m.opts.Clock.Now()
+	}
 	r.mu.Unlock()
 	if from == to {
 		return
@@ -163,7 +198,9 @@ func (r *runner) run(ctx context.Context) {
 			r.handle(ctx, &ev)
 		case <-stall:
 			stall = r.m.opts.Clock.After(stallAfter)
-			if r.active() && r.state() != state.StateStalled {
+			// A person in a joined session is the one at work: quiet isn't
+			// stalled.
+			if st := r.state(); r.active() && st != state.StateStalled && st != state.StateAttached {
 				r.setState(ctx, state.StateStalled, fmt.Sprintf("no activity for %s", stallAfter))
 				r.m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) has gone quiet for %s mid-turn: `slop-bot events` shows its last activity, "+
 					"and `slop-bot tell --interrupt %s ...` stops the turn and steers it.", r.id, r.ticket, stallAfter, r.id))
@@ -197,18 +234,27 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 	switch ev.Kind {
 	case harness.TurnStarted:
 		r.mu.Lock()
-		r.inTurn = true
+		r.inTurn, r.personIn = true, false
 		r.mu.Unlock()
-		r.setState(ctx, r.workingState(ctx), "turn started")
+		// A person's turn in a joined session leaves the agent attached.
+		if r.state() != state.StateAttached {
+			r.setState(ctx, r.workingState(ctx), "turn started")
+		}
 	case harness.ToolStarted, harness.ToolEnded, harness.Text:
 		if r.state() == state.StateStalled {
 			r.setState(ctx, r.workingState(ctx), "active again")
 		}
 	case harness.TurnEnded:
 		r.mu.Lock()
-		r.inTurn = false
+		// Settling until turnEnded returns: what it does next (a delivery,
+		// a nudge) isn't visible until then, so it mustn't be parked.
+		r.inTurn, r.settling = false, true
 		r.mu.Unlock()
 		r.turnEnded(ctx, ev)
+		r.mu.Lock()
+		r.settling = false
+		r.mu.Unlock()
+		r.m.Kick()
 	case harness.Exited:
 		r.exitedWith(ctx, ev)
 	}
@@ -231,7 +277,13 @@ func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
 	// pre-empt it with another turn don't lose it.
 	r.mu.Lock()
 	decl, summary, stopping := r.decl, r.summary, r.stopping || r.attaching
+	// Joined by a person (a TUI attach): the person is driving, and what
+	// the agent declared is acted on at the hand-back, as after a hand-over.
+	joined := r.st == state.StateAttached
 	r.mu.Unlock()
+	if joined {
+		return
+	}
 	if decl == declDone {
 		err := r.m.finish(ctx, r, summary)
 		if err == nil {
@@ -296,8 +348,20 @@ func (r *runner) settle(ctx context.Context, decl declared, ev *harness.Event) {
 func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 	r.mu.Lock()
 	stopping := r.stopping || r.attaching
+	// Not if a hand-back has claimed the session (joined): it is no longer
+	// the person's, and this exit a crash like any other.
+	joined := r.st == state.StateAttached && !r.rejoined
+	r.joinedExit = joined
 	r.mu.Unlock()
 	if stopping {
+		return
+	}
+	if joined {
+		// The person quit the TUI they joined. The agent stays attached,
+		// its runner with nothing running, like one handed over: the
+		// hand-back, when the person's tmux client ends with the session,
+		// resumes the conversation.
+		r.m.event(ctx, EventJoinedExit, r.id, r.ticket, map[string]int{"exit": ev.ExitCode})
 		return
 	}
 	to := state.StateExited
@@ -314,14 +378,38 @@ func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 	r.m.goRecover(r)
 }
 
-// shutdown stops the conversation for a daemon stop: it finishes the turn
-// and stays resumable.
+// shutdown lets go of the conversation for a daemon stop. One whose session
+// outlives the daemon (a TUI's) is let go of as it is, mid-turn or with a
+// person in it, for the next daemon to adopt; any other finishes its turn
+// and stops, resumable by id.
 func (r *runner) shutdown(ctx context.Context) {
 	r.mu.Lock()
 	r.stopping = true
 	r.mu.Unlock()
+	if lasting, ok := r.conv.(harness.Lasting); ok {
+		select {
+		case <-r.exited:
+		default:
+			_ = lasting.Close()
+			r.requeue(ctx, lasting.Held())
+		}
+		<-r.exited
+		return
+	}
 	r.stopConv(ctx, false)
 	<-r.exited
+}
+
+// requeue queues again the messages a let-go conversation held, which were
+// marked delivered when it took them, so the next daemon delivers them.
+func (r *runner) requeue(ctx context.Context, held []*harness.Message) {
+	var ids []int64
+	for _, msg := range held {
+		ids = append(ids, msg.IDs...)
+	}
+	if err := r.m.opts.State.Messages.Requeue(context.WithoutCancel(ctx), ids); err != nil {
+		r.m.opts.Logger.Warn("agents: queueing held messages again", "agent", r.id, "err", err)
+	}
 }
 
 func eventPayload(ev *harness.Event) map[string]any {

@@ -18,6 +18,9 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
 	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
@@ -52,6 +55,13 @@ type Options struct {
 	// TUIGrace is how long a hung-up attach's TUI gets to exit on SIGHUP
 	// before it is killed; 0 is DefaultTUIGrace.
 	TUIGrace time.Duration
+	// TUIHarnesses builds implementations on the daemon's TUI kit (its tmux
+	// server and hook hub), for tests that run a TUI fake; they go over
+	// Harnesses, or over the configured ones.
+	TUIHarnesses func(kit *tuidriver.Sessions) Harnesses
+	// TmuxSocket names the daemon's tmux server (tmux -L); "" is
+	// sessionhost.DefaultSocket. Tests use one each.
+	TmuxSocket string
 }
 
 // Daemon is the running slop-bot.
@@ -73,6 +83,10 @@ type Daemon struct {
 	// transcripts reads agents' transcripts, live or retained.
 	transcripts *transcript.Library
 	archive     *transcript.Archive
+	// host and hub are the TUI harnesses' tmux server and hook hub; nil
+	// when no harness runs under the tui driver.
+	host sessionhost.SessionHost
+	hub  *hookHub
 }
 
 // New builds a daemon; nothing starts until Run.
@@ -102,11 +116,9 @@ func New(opts *Options) (*Daemon, error) {
 			return nil, fmt.Errorf("daemon: finding its own binary: %w", err)
 		}
 	}
-	harnesses := opts.Harnesses
-	if harnesses == nil {
-		harnesses = configuredHarnesses(opts.Config, &buildOptions{
-			logger: opts.Logger, clock: opts.Clock, preToolHook: []string{cliPath, "hook", "pre-tool"},
-		})
+	harnesses, err := d.buildHarnesses(cliPath)
+	if err != nil {
+		return nil, err
 	}
 	var lock *instanceLock
 	var listener *control.Listener
@@ -168,13 +180,60 @@ func New(opts *Options) (*Daemon, error) {
 			// socket file.
 			StopFunc: d.server.Stop,
 		},
+		// Stopped after the agents, which let go of their sessions first;
+		// started after them, once they have taken their sessions back.
+		d.tuiSessions(),
 		&lifecycle.Func{
 			N:         "agents",
 			StartFunc: func(ctx context.Context) error { return d.agents.Start(ctx) },
 			StopFunc:  func(ctx context.Context) error { return d.agents.Stop(ctx) },
 		},
+		d.orphanedSessions(),
 	)
 	return d, nil
+}
+
+// buildHarnesses is opts' harnesses, or the configured ones, with any built
+// on the TUI kit over them. The kit, and so tmux, is needed only when a
+// harness runs under the tui driver: without tmux such a harness is left
+// out (its tickets are misconfigured, and doctor says why).
+func (d *Daemon) buildHarnesses(cliPath string) (agents.Harnesses, error) {
+	opts := d.opts
+	var kit *tuidriver.Sessions
+	if opts.TUIHarnesses != nil || needsTUI(opts.Config) {
+		var err error
+		if kit, err = d.tuiKit(cliPath); err != nil {
+			if opts.TUIHarnesses != nil {
+				return nil, err
+			}
+			opts.Logger.Warn("daemon: no tmux, so the tui harnesses can't run", "err", err)
+		}
+	}
+	harnesses := opts.Harnesses
+	if harnesses == nil {
+		harnesses = configuredHarnesses(opts.Config, &buildOptions{
+			logger: opts.Logger, clock: opts.Clock, preToolHook: []string{cliPath, "hook", "pre-tool"}, tui: kit,
+			guard: guardFunc(d.checkTool),
+		})
+	}
+	if opts.TUIHarnesses == nil {
+		return harnesses, nil
+	}
+	return overlay{over: opts.TUIHarnesses(kit), under: harnesses}, nil
+}
+
+// overlay finds a harness in over first, then under.
+type overlay struct {
+	over  Harnesses
+	under agents.Harnesses
+}
+
+// Harness implements agents.Harnesses.
+func (o overlay) Harness(name string) (harness.AIHarness, bool) {
+	if h, ok := o.over[name]; ok {
+		return h, true
+	}
+	return o.under.Harness(name)
 }
 
 // Run starts every component, serves until ctx ends, then stops them.
@@ -220,8 +279,8 @@ func (d *Daemon) archiveComponent(harnesses agents.Harnesses) lifecycle.Componen
 }
 
 // retentionSweep deletes what is past its retention, on the clock:
-// retained transcripts, and the event log, which holds some of what agents
-// said.
+// retained transcripts; the event log and delivered messages, which hold
+// some of what agents said; agents' state history; and ended agents.
 func (d *Daemon) retentionSweep() lifecycle.Component {
 	return &lifecycle.Periodic{
 		N: "retention sweep", Every: SweepEvery, Clock: d.opts.Clock, Logger: d.opts.Logger,
@@ -230,8 +289,13 @@ func (d *Daemon) retentionSweep() lifecycle.Component {
 }
 
 func (d *Daemon) sweep(ctx context.Context) error {
-	cutoff := d.opts.Clock.Now().Add(-d.opts.Config.Retention.Events.D())
-	_, err := d.state.Pruner.Prune(ctx, &state.PruneCutoffs{Events: cutoff})
+	now, r := d.opts.Clock.Now(), &d.opts.Config.Retention
+	_, err := d.state.Pruner.Prune(ctx, &state.PruneCutoffs{
+		Events:            now.Add(-r.Events.D()),
+		StateChanges:      now.Add(-r.StateChanges.D()),
+		DeliveredMessages: now.Add(-r.Messages.D()),
+		EndedAgents:       now.Add(-r.Agents.D()),
+	})
 	return errors.Join(d.archive.Sweep(ctx), err)
 }
 
@@ -284,6 +348,8 @@ func (d *Daemon) routes() {
 	d.agentRoutes.register(d.server)
 	d.attachRoutes.register(d.server)
 	(&observeRoutes{d: d}).register(d.server)
+	d.server.HandleFunc("POST "+api.PathHookTUI, d.hookTUI)
+	(&worktreeRoutes{d: d}).register(d.server)
 	d.server.HandleFunc("GET "+api.PathHealth, func(w http.ResponseWriter, _ *http.Request) {
 		control.WriteJSON(w, http.StatusOK, api.Health{
 			Version:   version.String(),

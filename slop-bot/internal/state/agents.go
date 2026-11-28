@@ -106,6 +106,9 @@ type Agent struct {
 	CreatedAt  time.Time
 	// EndedAt is set once the agent entered a state that Ends.
 	EndedAt *time.Time
+	// ParkedAt is when the agent was stopped to free a process past
+	// max_live; nil while it has one.
+	ParkedAt *time.Time
 }
 
 // NewAgent is what Create needs.
@@ -196,6 +199,7 @@ type agentRow struct {
 	TokenHash       string `bun:"token_hash"`
 	CreatedAt       int64  `bun:"created_at"`
 	EndedAt         *int64 `bun:"ended_at"`
+	ParkedAt        *int64 `bun:"parked_at"`
 }
 
 func (r *agentRow) agent() *Agent {
@@ -221,6 +225,7 @@ func (r *agentRow) agent() *Agent {
 		Recoveries:      r.Recoveries,
 		CreatedAt:       fromMillis(r.CreatedAt),
 		EndedAt:         fromMillisPtr(r.EndedAt),
+		ParkedAt:        fromMillisPtr(r.ParkedAt),
 	}
 	if r.LeaseExpiresAt != nil {
 		a.Lease = &Lease{Holder: r.LeaseHolder, ExpiresAt: fromMillis(*r.LeaseExpiresAt)}
@@ -350,11 +355,26 @@ func (a *Agents) LatestForTicket(ctx context.Context, ticket ident.TicketID) (*A
 }
 
 // ListLive returns every agent that hasn't ended, oldest first: the ones the
-// daemon resumes on start.
+// daemon takes on at start (resumed, or left parked).
 func (a *Agents) ListLive(ctx context.Context) ([]*Agent, error) {
 	var rows []agentRow
 	if err := a.db.NewSelect().Model(&rows).Where("ended_at IS NULL").Order("created_at", "id").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("state: listing live agents: %w", err)
+	}
+	return a.withWorktrees(ctx, a.db, rows)
+}
+
+// WithWorktrees returns every agent, live or ended, that still has a
+// worktree recorded, oldest first: an ended agent's are those its cleanup
+// kept.
+func (a *Agents) WithWorktrees(ctx context.Context) ([]*Agent, error) {
+	var rows []agentRow
+	err := a.db.NewSelect().Model(&rows).
+		Where("EXISTS (SELECT 1 FROM agent_worktrees w WHERE w.agent_id = agent_row.id)").
+		// rowid breaks a tie between agents created in the same millisecond.
+		OrderExpr("created_at, rowid").Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("state: listing agents with worktrees: %w", err)
 	}
 	return a.withWorktrees(ctx, a.db, rows)
 }
@@ -455,6 +475,19 @@ func (a *Agents) RotateTokenHash(ctx context.Context, id ident.AgentID, hash str
 func (a *Agents) SetDeclared(ctx context.Context, id ident.AgentID, declared, summary string) error {
 	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
 		return q.Set("declared = ?", declared).Set("declared_summary = ?", summary)
+	})
+}
+
+// SetParked records whether the agent is parked: stopped to free a process,
+// to be resumed by id when it next has work.
+func (a *Agents) SetParked(ctx context.Context, id ident.AgentID, parked bool) error {
+	var at *int64
+	if parked {
+		ms := toMillis(a.clock.Now())
+		at = &ms
+	}
+	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
+		return q.Set("parked_at = ?", at)
 	})
 }
 

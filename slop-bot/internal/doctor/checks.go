@@ -13,6 +13,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
+	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
 func (d *Doctor) checkConfig() {
@@ -188,12 +189,17 @@ func (d *Doctor) checkRepos(ctx context.Context, cfg *config.Config) {
 			d.add(g, r.Name, Skip, r.Path+": git isn't on PATH to check it", "")
 			continue
 		}
-		res, err := d.run(ctx, git, "-C", r.Path, "rev-parse", "--git-dir")
-		if err != nil || res.ExitCode != 0 {
-			d.add(g, r.Name, Fail, r.Path+" isn't a git repo", "point repos."+r.Name+".path at a git checkout")
-			continue
+		// The worktree manager's own check: `rev-parse --git-dir` passes
+		// anywhere inside a repo, and a subdirectory would pass here only to
+		// park every ticket naming it as misconfigured.
+		switch err := worktree.CheckRepo(ctx, &doctorGit{d: d, git: git}, r.Path); {
+		case errors.Is(err, worktree.ErrNotTopLevel):
+			d.add(g, r.Name, Fail, err.Error(), "point repos."+r.Name+".path at the repo's top level")
+		case err != nil:
+			d.add(g, r.Name, Fail, r.Path+" isn't a git repo: "+err.Error(), "point repos."+r.Name+".path at a git checkout")
+		default:
+			d.add(g, r.Name, Pass, r.Path, "")
 		}
-		d.add(g, r.Name, Pass, r.Path, "")
 	}
 	d.checkWorkspace(cfg.WorkspaceDir)
 }
@@ -385,4 +391,22 @@ func describe(path string, err error) string {
 		err = pe.Err
 	}
 	return path + ": " + err.Error()
+}
+
+// doctorGit runs git through doctor's probes, for checks shared with the
+// packages that run it for real.
+type doctorGit struct {
+	d   *Doctor
+	git string
+}
+
+func (g *doctorGit) Run(ctx context.Context, dir string, args ...string) (string, error) {
+	res, err := g.d.run(ctx, g.git, append([]string{"-C", dir}, args...)...)
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", fmt.Errorf("git %s exited %d: %s", strings.Join(args, " "), res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return res.Stdout, nil
 }

@@ -2,8 +2,7 @@
 
 Where this describes behaviour, it is checked against `internal/agents`,
 `internal/state`, `internal/tickets`, `internal/daemon` and
-`internal/briefing`. Where a design exists that the code doesn't have yet,
-the text says so.
+`internal/briefing`.
 
 ## Tickets and agents
 
@@ -63,11 +62,19 @@ the user is told. slop-bot then resumes it by its conversation id, up to 3
 times in a row. The count resets only when a turn completes: a failed turn
 doesn't reset it. Past 3, or when a resume fails, the agent is `released`
 and its worktrees are cleaned up (any holding work are kept, and the user
-is told). A `preparing` or `open` ticket is then parked as `misconfigured`,
+is told; `slop-bot worktrees` lists them, and `worktrees clean` removes them). A `preparing` or `open` ticket is then parked as `misconfigured`,
 so a new agent isn't started into the same failure. A harness that fails to
 start is treated the same way. `slop-bot ticket set <id> --status preparing`
-puts a parked ticket back in line. On a daemon restart, live agents are
-resumed by their conversation id.
+puts a parked ticket back in line. A resume happens in the directory the
+conversation started in, with any worktree gained since added.
+
+On a daemon restart, live agents are resumed by their conversation id,
+except those parked to free a process (see [slots](#slots)), which wait for
+work. A TUI agent's (agy's) session outlives the daemon instead, and is
+adopted as it runs, with its token: one caught mid-work is told that its
+slop-bot calls may have failed meanwhile. `slop-bot uninstall` ends those
+sessions. A ticket that is done or cancelled ends its agent, running or not,
+at restart too.
 
 ## Declarations, nudges and stalls
 
@@ -76,8 +83,8 @@ CLI commands:
 
 | Declaration | Effect |
 | --- | --- |
-| `ask` | files a question for the user and returns at once; the agent carries on with what doesn't depend on the answer. When the turn ends, the agent is `waiting_user`. A user `tell` to an agent with open asks is the answer, mid-turn included. Broadcasts and slop-bot's own notices never answer. |
-| `discuss` | for a risky, costly-to-undo decision: moves the ticket to `discussion`, writes the options and recommendation as a ticket comment, tells the user. The agent is `discussion` at turn end. `discussions resolve <ticket> <text>` moves the ticket back to `open` and tells the agent. |
+| `ask` | files a question for the user and returns at once; the agent carries on with what doesn't depend on the answer. When the turn ends, the agent is `waiting_user`. A user `tell` to an agent with open asks is the answer, mid-turn included. Broadcasts and slop-bot's own notices never answer. An ask still open `agents.ask_reminder_after` (default 24h) after it was asked brings you one reminder in your inbox. |
+| `discuss` | for a risky, costly-to-undo decision: moves the ticket to `discussion`, writes the options and recommendation as a ticket comment, tells the user. The agent is `discussion` at turn end. `discussions resolve <ticket> <text>` moves the ticket back to `open` and tells the agent. Leaving `discussion` is the user's alone: the agent can't move the ticket out (to any status, cancel included), and `done` is refused while it is there. |
 | `ready-to-merge` | on a ticket without `AutoMerge`: comments (with the PR URL, if given), tells the user, and the agent is `waiting_merge`. Merge when the user tells the agent to. Refused if the ticket has `AutoMerge`. |
 | `done --summary` | the ticket's goal is met, not merely merged: there may be checks or a deploy to verify first. The agent finishes when the turn ends; the summary goes on the ticket as a comment, the ticket becomes `done`, the transcript is kept, and worktrees are cleaned up. |
 
@@ -98,6 +105,22 @@ Separately, an agent that is in a turn but emits no event for
 how to `watch` it or `tell --interrupt` it. It returns to working when
 events resume.
 
+## Blockers
+
+A ticket's blockers gate its work, not its refinement. While a ticket is
+blocked, a live agent hears about it as a notice from slop-bot, not from the
+user (so it carries no authority and answers no asks), each time the ticket
+goes between blocked and unblocked, in any live status:
+
+- blocked while `preparing`: carry on refining, don't start the work
+- blocked later: stop at a safe point and end the turn
+- unblocked: finish refining, or carry on with the work
+
+What the agent was last told is kept in `state.db`, so the notice isn't
+repeated. An agent that ends a turn with no declaration on a blocked ticket
+waits: it is `idle`, not nudged. `done` is refused for a blocked ticket whose
+work hasn't started. An agent may lift only blockers it added.
+
 ## Messages
 
 `tell` queues a message; `inbox` lists what an agent has. Delivery:
@@ -107,8 +130,11 @@ events resume.
   woken for a message goes ahead of new tickets in its pool's queue
 - held while a person is attached, and delivered at the hand-back
 
-Each message says who sent it: the text is quoted with `> ` under a
-`[slop-bot] Message from ...` header line, so only slop-bot writes a header.
+Each message says who sent it: the text is quoted with `> ` on every line
+under a `[slop-bot] Message from ...` header line, the user's included, so
+only slop-bot writes a header. slop-bot's own notices aren't quoted.
+`tell --interrupt` delivers its message as the next turn, once the
+interrupted one ends, not as a steer into it.
 A message from **user** carries the user's authority; one from another agent is information to weigh, not an
 instruction. A loop guard stops ping-pong and flooding: at most 30
 messages a minute from one sender, and 20 between one pair in ten minutes,
@@ -124,19 +150,31 @@ Two limits bound how many agents run. Both are counted per daemon.
   urgent tickets, so a red main branch never queues behind normal work.
 - `concurrency.max_live` (default the larger of 3 times `max_active` and
   `max_active` plus `urgent.max_active`) caps live harness
-  processes, working or waiting. At the cap, no new agent starts.
+  processes, working or waiting. At the cap, a start that needs a process
+  stops the agent that has waited longest, between turns, on a person
+  (`waiting_user`, `discussion`, `waiting_merge`, or `idle` after an
+  interrupt) or on its ticket's blockers (`idle`). It is **parked**: it keeps
+  its state, and its messages queue as usual. The first message for it, or a
+  change to its ticket it must hear of (its blockers, a new repo), queues it
+  for a slot, and it is resumed by its conversation id when it gets one,
+  parking another if need be. A restart leaves a parked agent parked.
+  `slop-bot status` shows it as `<state> (parked)` (`parked_at` in
+  `--json`). A TUI session is never parked while a person is in it, or once
+  joined, or adopted after a restart: stopping it would end their session. An
+  agent in a turn, starting, attached, finishing, `stalled`, or with a
+  message waiting for a slot is parked only for a parked agent ahead of it
+  in the queue (it keeps its place). When no agent can be parked, the start
+  waits.
 
 An agent that has an answer or message to act on is served before new
-tickets. New work never jumps an agent already queued for a slot.
+tickets, parked or not, first come first served per pool. New work never
+jumps an agent already queued for a slot. The queue's order is kept in
+`state.db`, so a restart serves it in the same order.
 
 An urgent ticket is one the user marked `--urgent`, or an agent did, when
 `agents_may_set_urgent` is true, with a required `--reason` that goes on the
 ticket as a comment; the user isn't told separately. The briefing tells
 agents to use it only for something breaking the pipeline.
-
-The design also stops the longest-waiting agent to free a live place when
-`max_live` is reached, resuming it later by id. This build only refuses new
-starts at the cap.
 
 ## The autonomous loop and its budget
 
@@ -158,6 +196,19 @@ pick them up: `preparing`, then the work.
 
 ## Attach and hand-back
 
+A harness gets one of two attaches, by its driver.
+
+- **Join** (TUI harnesses: agy). `attach` runs `tmux attach` on the agent's
+  own session, which runs on: nothing stops, and nothing is typed under you.
+  Messages are held while you're in it (retried every 2s), your turns leave
+  the agent `attached`, declarations wait for the hand-back, and detaching
+  (`Ctrl-b d`, or `slop-bot detach`) hands it back with the held messages.
+  `--now` interrupts the agent's turn first. Quitting agy ends the session,
+  and the hand-back resumes the conversation. `--no-resume` is refused.
+- **Hand-over** (programmatic harnesses: Claude Code, Codex, pi), below.
+
+The rest of this section is the hand-over, except where it says otherwise.
+
 `slop-bot attach <agent|ticket>` lets a person take over an agent's session.
 It stops the programmatic session at the end of the agent's turn (with
 `--now`, it interrupts the turn instead of waiting), then runs the harness's
@@ -165,10 +216,16 @@ own TUI, resuming the same conversation, in your terminal. The TUI gets a
 fresh agent token, so `ask` and `done` work from inside it.
 
 - one attach per agent. A second is told who holds it.
-- the attach holds a **lease**, renewed by the CLI's heartbeat. If the
-  heartbeat stops for `agents.attach_lease` (default 30s), the agent is
-  handed back without the CLI. After a daemon restart the CLI has that long
-  to reconnect.
+- a parked agent (see [slots](#slots)) has no session to take over:
+  `attach` queues it to be resumed, without a message (a `tell` to an
+  agent with open asks would answer them), and asks you to attach again in a
+  moment.
+- the attach holds a **lease**, renewed by the CLI's heartbeat (a third of
+  the lease apart), for both kinds. If the heartbeat stops for
+  `agents.attach_lease` (default 30s), the agent is handed back without the
+  CLI. After a daemon restart the CLI has that long to reconnect. Other
+  renewal errors, such as a busy database, are logged and retried, never a
+  reason to end the attach.
 - while attached, messages are held, not typed into the session, and are
   delivered at the hand-back with a note that a person worked with the agent
 - the agent is handed back, and resumed by its conversation id, when you
@@ -180,10 +237,13 @@ fresh agent token, so `ask` and `done` work from inside it.
   the attach, the agent just ends.
 - `--no-resume` releases the agent to you: it is `released`, nothing
   resumes it, and the ticket stays assigned, but no new agent is
-  started for it. The merge guard still applies in the TUI
-  ([merge_guard.md](merge_guard.md)).
+  started for it. The merge guard still applies in the TUI, except Codex's,
+  which runs with approvals bypassed ([merge_guard.md](merge_guard.md)).
 
-Only harnesses with a TUI to hand over to can be attached.
+A hand-back's resume is a start: it takes the ticket's start place, waits
+for a start already in flight for the ticket, and is bounded by the start
+timeout (2 minutes). A ticket cancelled, or a daemon stopped, mid hand-back
+ends the agent instead.
 
 ## Transcripts and retention
 
@@ -200,11 +260,16 @@ Retention sweeps run on a timer:
 - retained transcripts are deleted `retention.transcripts` after their agent
   ends (default 30 days)
 - events older than `retention.events` are deleted (default 30 days)
+- agents' state history older than `retention.state_changes` (default 30
+  days)
+- messages delivered or read more than `retention.messages` ago (default
+  30 days); queued messages are kept
+- ended agents, with their history, `retention.agents` after they ended
+  (default 90 days)
 
-The state database also has pruning for old state changes, read messages and
-ended agents; the daemon's sweep currently applies only the event cutoff.
 An open `ask` is never pruned, and neither is an agent that still has
-worktrees recorded.
+worktrees recorded, nor one released to a person with `attach --no-resume`:
+its record is what keeps a new agent off the ticket the person took over.
 
 ## Plan-limit holds
 
@@ -221,6 +286,41 @@ user is told once per hold, and an event is logged per held ticket.
 A held ticket that left its harness, model and effort blank, and was never
 started, goes to another configured harness that isn't held. Any other
 ticket waits: it named its harness, or its conversation lives in one.
+
+## agy
+
+agy is Google's Antigravity CLI, run as its own TUI in tmux (`tui` driver):
+slop-bot types into it and reads its hooks, where the other harnesses are
+driven over a protocol.
+
+- **tmux.** Sessions live in a tmux server of their own on socket
+  `slop-bot` (`tmux -L slop-bot`), named `agy-<agent>`. Under a user's
+  systemd manager the server is started in a transient scope
+  (`slop-bot-tmux-slop-bot`), so stopping or restarting the service doesn't
+  end the sessions with its cgroup; the unit's `KillMode=mixed` still ends
+  the daemon's other children. launchd ends only the job's process group,
+  which tmux leaves. Needs tmux 3.4 or later (`doctor` checks).
+- **Sessions outlive the daemon.** A daemon stop lets go of them and a
+  restart adopts them, see [the lifecycle](#the-agent-lifecycle-and-states).
+  Messages reach agy as a pointer ("run `slop-bot inbox`"), and stay in the
+  agent's inbox until read. `attach` joins the session.
+- **Sidecar.** agy has no flag for a hooks file or a system prompt, so
+  slop-bot writes `<worktree>.slop-bot-agy/` beside the primary worktree,
+  with `.agents/hooks.json` (the merge guard's `PreToolUse` hook, running
+  `slop-bot hook tui`) and `AGENTS.md` (the briefing), and adds it with
+  `--add-dir`. Nothing goes into the worktree, where an agent could commit
+  it, or into your agy config. The folder is removed when the agent's
+  workspace is forgotten. The session also gets `--settings` marking its
+  folders trusted.
+- **Sign-in.** agy runs on your own login (`~/.gemini`). On a consumer
+  Google sign-in, Google's terms may forbid driving agy from another
+  program: `doctor` warns once, and the choice is yours. With
+  `harnesses.agy.api_key_opt_in: true` and a non-empty `GEMINI_API_KEY`, its
+  sessions run on the key (billed per token) through a session-only
+  `modelProvider` setting, and your own agy keeps its sign-in. A service
+  doesn't read your shell profile: `doctor` says how to import the key into
+  it.
+- **Effort.** `low` to `max`, as Claude Code.
 
 ## The briefing
 
@@ -277,15 +377,17 @@ and the risk is accepted**. It stops mistakes, not malice.
   (unless `api_key_opt_in`), Claude Code's parent-session variables (not
   `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*` or `CLAUDE_CODE_SKIP_*_AUTH`),
   and other agents' tokens.
-- The merge flag is policy in the briefing, backed where a harness has a
-  pre-tool hook by a guard that refuses obvious merges (`gh pr merge`, a
-  push to the default branch) on a ticket without `AutoMerge` until you
-  run `slop-bot tell <agent> --merge`. Claude Code and pi have the guard.
-  Codex doesn't. The guard is advisory: an agent with a shell can get round
-  it. See [merge_guard.md](merge_guard.md).
+- The merge flag is policy in the briefing, backed by a guard that refuses
+  obvious merges (`gh pr merge`, a push to the default branch) on a ticket
+  without `AutoMerge` until you run `slop-bot tell <agent> --merge`. Claude
+  Code, pi and agy have the guard through a pre-tool hook. Codex has it
+  through its command approvals, but only in permissive mode (the default),
+  and not in the TUI after `attach`. The guard is advisory: an agent with a
+  shell can get round it. See [merge_guard.md](merge_guard.md).
 - `agy` runs on a Google sign-in whose consumer terms may forbid driving it
   from another program. `doctor` says so once; whether to proceed is your
-  call.
+  call. With `api_key_opt_in` and a `GEMINI_API_KEY`, agents run agy on the
+  key instead (billed per token), set for their sessions only.
 
 Run slop-bot only against repos and on machines where an agent running as
 you is an acceptable risk.

@@ -34,8 +34,9 @@ repo's `go.work`. Tests use the `go-clock` module's fake clock, never
 | `internal/doctor`, `internal/setup`, `internal/service` | `doctor`, `install`'s config and briefing stubs, and the systemd and launchd managers |
 | `internal/scriptedmodel` | a model server that plays back a script (see its README) |
 | `internal/lifecycle` | components with ordered `Start` and `Stop` |
-| `tier2/` | the tier 2 Dockerfile, `harness_versions.env`, and `run_tests.sh`, its default run |
-| `quality_baseline/`, `deadcode/` | ratchet baselines |
+| `tier1/` | the tier 1 Dockerfile (and its `.dockerignore` allowlist) |
+| `tier2/` | the tier 2 Dockerfile, `harness_versions.env`, `install_agy.sh`, and `run_tests.sh`, its default run |
+| `quality_baseline/`, `deadcode/`, `mutation_baseline/` | ratchet baselines (mutation: `score.txt`, and `packages.txt` naming the packages a run covers) |
 
 Under `internal/harness`:
 
@@ -44,7 +45,8 @@ Under `internal/harness`:
 | `agentproc` | an `os/exec` child in its own process group, with the harness environment (denylist) and exit capture |
 | `rpcdriver` | the kit behind every programmatic driver |
 | `tuidriver` | the kit behind every TUI driver, over `sessionhost` (tmux) |
-| `claudecode`, `codex`, `pi` | the real harness adapters |
+| `claudecode`, `codex`, `pi`, `agy` | the real harness adapters. `agy` is a TUI harness: its `Profile` for `tuidriver`, with its hooks and briefing in a sidecar folder (see [agy](concepts.md#agy)) |
+| `sessionhost` | the tmux session host behind `tuidriver`: a tmux server on its own socket (`-L slop-bot`), started in a systemd scope of its own when the daemon runs under a user's systemd manager, so sessions outlive a daemon restart |
 | `fake` | the fake harness, as `fake/rpc` and `fake/tui`, and its controller |
 | `conformance` | the `Conversation` suite every harness runs; `conformance/scripted` runs it against the real CLIs |
 
@@ -52,23 +54,42 @@ The harness-to-driver registry is `builders` in `internal/daemon/harnesses.go`.
 
 ## The scripts
 
-All run from `slop-bot/`. CI runs `test.sh` and `quality.sh`, and
-`tier2.sh` in its own workflow; `scan.sh` is run locally. Before pushing, per the repo's
-`CLAUDE.md`, run `dev-tools/lint/lint.sh --changed` from the repo root, then
-`test.sh`, `scan.sh` and `quality.sh`.
+All run from `slop-bot/`. CI runs `test.sh`, `quality.sh` and `tier1.sh` as
+separate jobs, `tier2.sh` in its own workflow, and an advisory macOS job;
+`scan.sh` is run locally. Before pushing, per the repo's `CLAUDE.md`, run
+`dev-tools/lint/lint.sh --changed` from the repo root, then `test.sh`,
+`scan.sh` and `quality.sh`.
 
 | Script | What it runs |
 | --- | --- |
 | `test.sh [go test args]` | the linters and the deadcode check (`dev-tools/lint/go.sh`), `gofmt -l`, `go vet`, then `go test -race ./...`. Arguments replace `./...`, so `./test.sh -run TestScheduler ./internal/agents` filters. |
 | `scan.sh` | the repo's security scan: `scan_go` and `scan_secrets` (`dev-tools/security/README.md`), SARIF to `$SCAN_REPORT_DIR` |
 | `quality.sh` | coverage, complexity and test time, ratcheted against `quality_baseline/` (`dev-tools/quality/README.md`). `--prune` after an improvement, `--rebaseline --only=<measure>` only for a deliberate regression, `--report` for the full reports. |
+| `tier1.sh` | the same tests as `test.sh` in a Docker container: a clean Linux with git and tmux, an unprivileged user, no network. A second run, as root, covers the control socket's peer-uid check against another uid, which skips elsewhere |
 | `tier2.sh` | the real harness CLIs driven through slop-bot's adapters, and through a real daemon, against the scripted model |
+
+Mutation testing is repo-wide tooling, not a slop-bot script:
+`dev-tools/mutation/mutation.sh slop-bot` (see [below](#mutation-testing)).
+
+### Tier 1
+
+`./tier1.sh [go test args]` builds `tier1/Dockerfile` and runs `go test -race
+-count=1` offline in it; arguments filter as in `test.sh`, and a filtered run
+skips the root-only second run. `ATTACH=1 ./tier1.sh` is a shell in that image
+with `slop-bot` and `go-clock` mounted, for iterating. It is not a substitute
+for `test.sh`, which also runs the linters.
 
 ### Tier 2
 
-Tier 2 runs real Claude Code, Codex and pi binaries, with the scripted model
-answering for the model: no credential, no tokens, no network. The tests are
-opt-in (`SLOP_BOT_TIER2=1`), so `test.sh` skips them.
+Tier 2 runs real Claude Code, Codex, pi and agy binaries, with the scripted
+model answering for the model: no credential and no tokens. The scripted
+model speaks the Anthropic, OpenAI (responses and chat) and Gemini wire
+APIs; agy is driven against its scripted Gemini model. In Docker there is
+no network either; natively, agy still posts its telemetry to Google (no switch
+for it was found), though never a model request. The tests are opt-in
+(`SLOP_BOT_TIER2=1`), so `test.sh` skips them. CI runs it on changes to the
+harness code, weekly, and on demand; a second job runs each harness at its
+latest release, as a signal rather than a gate.
 
 It has two parts. The conformance suite (`internal/harness/conformance/scripted`)
 drives each adapter directly. The daemon scenarios (`TestTier2Scenarios` in
@@ -84,13 +105,36 @@ harness's setup (temp config dirs, dummy keys, its shell tool) is one
 | --- | --- |
 | `./tier2.sh [go test args]` | in Docker, each harness at its pin in `tier2/harness_versions.env`, source baked into the image, `--network none` |
 | `ATTACH=1 ./tier2.sh` | a shell in that image, offline, with `slop-bot` and `go-clock` mounted, for iterating |
-| `NATIVE=1 ./tier2.sh [args]` | on this machine with the harnesses installed (a missing one skips); each gets a temp config dir, so yours are untouched |
+| `NATIVE=1 ./tier2.sh [args]` | on this machine with the harnesses installed (a missing one skips); each gets a temp config dir or `HOME`, so yours are untouched |
 | `HARNESS_LATEST=1 ./tier2.sh` | each harness at its latest release instead of the pin |
 
 To bump a harness, edit its line in `tier2/harness_versions.env`, run
-`tier2.sh`, and commit the pin with whatever the new release changed.
+`tier2.sh`, and commit the pin with whatever the new release changed. agy's
+pin is four lines, bumped together: its version, the release in its download
+URL, and the two SHA-512s, all from its release manifests (see the file).
 `doctor`'s tested version ranges are in `internal/doctor/versions.go`; widen
 one only after the live and scripted tests pass on the new version.
+
+### Mutation testing
+
+Coverage says the tests ran a line; mutation testing says whether they would
+notice it being wrong. `dev-tools/mutation/mutation.sh slop-bot` mutates
+`mutation_baseline/packages.txt`'s packages (`internal/agents`,
+`internal/state`, `internal/tickets` and `tickets/local`) and ratchets each
+package's score against `mutation_baseline/score.txt`: a drop of more than 2
+points fails, and a new package must reach 80%. It is slow, so it runs weekly
+and on demand (`.github/workflows/mutation.yml`), never on a pull request.
+`--report` lists the survivors, `--prune` tightens the baseline after an
+improvement, and `--rebaseline` is for a deliberate loosening, saying why in
+the commit. Details: `dev-tools/mutation/README.md`.
+
+### macOS
+
+The `slop-bot-macos` CI job builds, vets and runs `go test -race ./...` on a
+Mac runner, for what only runs there: the peer-credential check
+(`LOCAL_PEERCRED`), launchd, the `$TMPDIR` socket-path limit and the BSD
+tools. It is advisory: `continue-on-error`, with the result in the job
+summary, and no linters or Docker suites.
 
 ## Test patterns
 
@@ -189,7 +233,10 @@ only `harness.AIHarness` and `harness.Conversation`
 6. **Test the adapter's own parts**: codec tests from recorded protocol
    lines in `testdata/`, the transcript reader, and a fake CLI via the
    re-exec pattern. Add a `SLOP_BOT_LIVE_<NAME>` gated test.
-7. **Briefing quirks**: the briefing data has a `HarnessNotes` field, rendered
+7. **Merge guard**: wire the harness's pre-tool hook (or its approvals) to
+   `mergeguard.Guard` ([merge_guard.md](merge_guard.md)), and add a tier 2
+   test that a merge is refused.
+8. **Briefing quirks**: the briefing data has a `HarnessNotes` field, rendered
    under "Notes for this harness". No adapter fills it yet; use it for
    behaviour agents should know of.
 

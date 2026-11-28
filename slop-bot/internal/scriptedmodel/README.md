@@ -82,7 +82,7 @@ prompt count (`prompt_tokens`/`input_tokens`/`promptTokenCount` = input + cache 
 `cached_tokens`/`cachedContentTokenCount`), and have no cache-write counter, so `cache_creation_input_tokens` is
 dropped.
 
-Gemini, from Google's API reference and what agy 1.5.18 sends:
+Gemini, from Google's API reference and what agy 1.5.18 and 1.5.19 send (through its gateway and in API-key mode):
 
 - Request: `contents[]` of `{role: user|model, parts[]}`, a part being `text` (with `thought: true` for the
   model's thoughts, which are left out of `MessageText`), `functionCall {name, args}` or
@@ -129,7 +129,7 @@ the seed of tier 2, whose conformance suite runs in `internal/harness/conformanc
 | Claude Code | 2.1.332 | `Bash` `{command, description}` | `CLAUDE_CONFIG_DIR=<temp>`, `ANTHROPIC_BASE_URL=<url>`, `ANTHROPIC_API_KEY=sk-ant-scripted-model-not-a-real-key`, `DISABLE_AUTOUPDATER=1`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_TELEMETRY=1`, `DISABLE_ERROR_REPORTING=1`, `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`; `claude -p <prompt> --output-format stream-json --verbose --dangerously-skip-permissions` |
 | Codex | 0.172.0 | `exec_command` `{cmd}` | `CODEX_HOME=<temp>`, `SCRIPTED_MODEL_API_KEY=<dummy>`; `codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c model_provider=scripted -c model=scripted-model-1 -c 'model_providers.scripted={name="scripted",base_url="<url>/v1",env_key="SCRIPTED_MODEL_API_KEY",wire_api="responses"}' -c check_for_update_on_startup=false -c analytics.enabled=false -c feedback.enabled=false <prompt>` |
 | pi | 1.4.0 | `bash` `{command}` | `PI_CODING_AGENT_DIR=<temp>` holding `models.json` (provider `scripted`: `baseUrl <url>/v1`, `api openai-completions`, `apiKey $SCRIPTED_MODEL_API_KEY`, model `scripted-model-1`, as `harness_e2e/harnesses/pi.py` writes it) and `settings.json`, `SCRIPTED_MODEL_API_KEY=<dummy>`, `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1`, `PI_TELEMETRY=0`; `pi -p --provider scripted --model scripted-model-1 <prompt>` |
-| agy | 1.5.18 | `run_command` `{CommandLine, toolSummary, WaitMsBeforeAsync}` | `HOME=<temp>`, `AGY_LLM_GATEWAY_URL=<url>`, `AGY_LLM_GATEWAY_API_KEY=<dummy>`; `agy -p <prompt> --dangerously-skip-permissions --settings '{"trustedWorkspaces":["<dir>"]}'`; model list `gemini-3.1-pro-preview` |
+| agy | 1.5.19 | `run_command` `{CommandLine, toolSummary, WaitMsBeforeAsync}` | `HOME=<temp>`, `AGY_LLM_GATEWAY_URL=<url>`, `AGY_LLM_GATEWAY_API_KEY=<dummy>`, `AGY_CLI_DISABLE_AUTO_UPDATE=true`; `agy -p <prompt> --dangerously-skip-permissions --settings '{"trustedWorkspaces":["<dir>"]}'`; model list `gemini-3.1-pro-preview` |
 
 Each gets a config or home directory of its own, so none writes `~/.claude`, `~/.claude.json`, `~/.codex`
 or `~/.gemini` (checked by file times after a run; pi's launcher still reads its install under
@@ -144,6 +144,19 @@ or `~/.gemini` (checked by file times after a run; pi's launcher still reads its
   It sends the tool's output back as `functionResponse.response.output` (with "Created At", exit code and
   "Command output:" lines around it). It retries a 500 eight times with backoff (about two and a half minutes), so
   an unexpected request makes a slow failure.
+- **agy in API-key mode** is what the conformance suite runs, the documented way to give agy a key:
+  `--settings '{"modelProvider":"gemini",...}'` (session-only; the agy harness adds it when an opted-in
+  `GEMINI_API_KEY` is set), `GEMINI_API_KEY=<dummy>` and `GOOGLE_GEMINI_BASE_URL=<url>`. It calls only
+  `POST /v1beta/models/<model>:streamGenerateContent?alt=sse`, with the key in `x-goog-api-key`, and no model
+  list; a request with no tools, to `gemini-3.1-flash-lite-preview`, titles the conversation (auxiliary).
+  Without `modelProvider` the key is ignored and agy starts a Google sign-in, which in a temp `HOME` fails.
+- **agy's TUI in a fresh `HOME`** stops at its onboarding (a colour scheme, then the data-use terms) unless
+  `~/.gemini/antigravity-cli/cache/onboarding.json` says `"onboardingComplete": true`, which the test writes.
+- **agy updates itself**: every start spawns a background updater that replaces the installed binary, unless
+  `AGY_CLI_DISABLE_AUTO_UPDATE=true` (`1` is not enough). It also posts telemetry to `play.googleapis.com/log`,
+  in API-key mode too, and no switch to turn that off was found (`--settings` refuses keys it doesn't know,
+  so guesses fail loudly). Tier 2's container has no network; a native run sends it. Nothing else reaches
+  Google in API-key mode: run offline, it completes its turns.
 - **agy resumes a conversation cut off mid-turn** the next time it starts with the same `~/.gemini`: a run killed
   while retrying replayed its turn against the next run's script (and ran its tool calls). Hence the test's own
   `HOME`, which works because the gateway needs no Google sign-in.

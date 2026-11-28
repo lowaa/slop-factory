@@ -40,7 +40,8 @@ var (
 	ErrNotOurs = errors.New("worktree does not belong to this ticket")
 	// ErrBroken is a worktree git doesn't see as a working one: its .git
 	// link was deleted or points nowhere, its creation was interrupted, or it
-	// is locked while its directory is missing. ForceCleanup clears all but a
+	// is locked while its directory is missing. ForceCleanup (`slop-bot worktrees
+	// clean --force`) clears all but a
 	// .git link pointing nowhere, which it won't delete unseen: that one the
 	// user removes by hand.
 	ErrBroken = errors.New("worktree isn't a working git worktree")
@@ -192,7 +193,7 @@ func (m *Manager) repoPath(ctx context.Context, name string) (string, error) {
 }
 
 func (m *Manager) path(ticket ident.TicketID, repo string) string {
-	return filepath.Join(m.workspace, dirName(ticket, repo))
+	return filepath.Join(m.workspace, DirName(ticket, repo))
 }
 
 // probeTimeout bounds the git calls that find out what a failed operation

@@ -68,8 +68,9 @@ type Target struct {
 	APIKeyOptIn bool
 	// Env is what each workspace's Env must add.
 	Env map[string]string
-	// Guarded says its driver runs the pre-tool hook (the merge guard).
-	// Codex's hooks don't run under app-server (docs/merge_guard.md).
+	// Guarded says the merge guard checks its tool calls: the pre-tool hook
+	// for Claude Code and pi, TargetOptions.Guard for Codex, whose hooks
+	// don't run under app-server (docs/merge_guard.md).
 	Guarded bool
 	// Harness is the adapter.
 	Harness harness.AIHarness
@@ -85,6 +86,9 @@ type TargetOptions struct {
 	ServerURL string
 	// PreToolHook is the merge guard's argv, for the harnesses that run one.
 	PreToolHook []string
+	// Guard is Codex's merge guard, which answers its command approvals
+	// in-process; nil runs it unguarded.
+	Guard codex.Guard
 }
 
 func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -197,11 +201,11 @@ func (tg *Target) TrustClaudeFolder(t *testing.T, dir string) {
 func Codex(t *testing.T, o *TargetOptions) *Target {
 	t.Helper()
 	return &Target{
-		Name: codex.Name, Model: "scripted-model-1",
+		Name: codex.Name, Model: "scripted-model-1", Guarded: o.Guard != nil,
 		Shell: CodexShell,
 		Env:   map[string]string{},
 		Harness: &codex.Harness{
-			Binary: o.Binary, Logger: discard(), Clock: clock.Real{},
+			Binary: o.Binary, Logger: discard(), Clock: clock.Real{}, Guard: o.Guard,
 			// A CODEX_HOME of its own: the user's login, config and
 			// sessions are never read or written.
 			Environ:       environ(t.TempDir(), "CODEX_HOME="+t.TempDir(), "SCRIPTED_MODEL_API_KEY=scripted-model-not-a-real-key"),
