@@ -100,6 +100,7 @@ func (m *Manager) evaluate(ctx context.Context) {
 			m.noteHeld(ctx, t, hold)
 			continue
 		}
+		m.unheld(t.ID)
 		if err := m.spawn(ctx, t, pool, spec); err != nil && !errors.Is(err, errMisconfigured) {
 			m.opts.Logger.Warn("agents: spawning", "ticket", t.ID, "err", err)
 		}

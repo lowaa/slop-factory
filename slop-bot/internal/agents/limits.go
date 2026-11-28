@@ -192,6 +192,14 @@ func (m *Manager) noteHeld(ctx context.Context, t *tickets.Ticket, hold *errHeld
 	}
 }
 
+// unheld forgets t's hold once it starts, so a later hold is noted again
+// and the map doesn't grow with every ticket ever held.
+func (m *Manager) unheld(t ident.TicketID) {
+	m.limits.mu.Lock()
+	delete(m.limits.heldTickets, t)
+	m.limits.mu.Unlock()
+}
+
 // wakeAt has the scheduler look again at t, when a held harness's window
 // resets. An earlier wake already set stands: that pass sets the next.
 // Only the scheduler goroutine calls it.
