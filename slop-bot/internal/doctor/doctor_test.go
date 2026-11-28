@@ -383,17 +383,24 @@ func TestRepos(t *testing.T) {
 	f := newFixture(t, "linux")
 	notGit := filepath.Join(f.home, "plain")
 	require.NoError(t, os.MkdirAll(notGit, 0o700))
-	f.cmds.Answer("git -C "+notGit+" rev-parse --git-dir", &service.Result{ExitCode: 128, Stderr: "fatal: not a git repository"})
+	f.cmds.Answer("git -C "+notGit+" rev-parse --is-bare-repository", &service.Result{ExitCode: 128, Stderr: "fatal: not a git repository"})
+	// A directory inside a repo: git answers from the enclosing one.
+	sub := filepath.Join(f.home, "src", "mono", "app")
+	require.NoError(t, os.MkdirAll(sub, 0o700))
+	f.cmds.Answer("git -C "+sub+" rev-parse --is-bare-repository", &service.Result{Stdout: "false\n"})
+	f.cmds.Answer("git -C "+sub+" rev-parse --show-toplevel", &service.Result{Stdout: filepath.Dir(sub) + "\n"})
 	file := filepath.Join(f.home, "file")
 	require.NoError(t, os.WriteFile(file, nil, 0o600))
 	f.config("repos:\n  - {name: good, path: " + f.repo("good") + "}\n  - {name: plain, path: ~/plain}\n" +
-		"  - {name: file, path: ~/file}\n  - {name: gone, path: ~/gone}\n")
+		"  - {name: file, path: ~/file}\n  - {name: gone, path: ~/gone}\n  - {name: sub, path: " + sub + "}\n")
 	r := f.run()
 	assert.Equal(t, doctor.Pass, f.result(r, "repos", "good").Level)
 	assert.Contains(t, f.result(r, "repos", "plain").Detail, "isn't a git repo")
 	assert.Contains(t, f.result(r, "repos", "file").Detail, "isn't a directory")
 	assert.Contains(t, f.result(r, "repos", "gone").Detail, "no such file or directory")
-	for _, n := range []string{"plain", "file", "gone"} {
+	assert.Contains(t, f.result(r, "repos", "sub").Detail, "not a repo of its own")
+	assert.Contains(t, f.result(r, "repos", "sub").Fix, "top level")
+	for _, n := range []string{"plain", "file", "gone", "sub"} {
 		assert.Equal(t, doctor.Fail, f.result(r, "repos", n).Level, n)
 	}
 }
