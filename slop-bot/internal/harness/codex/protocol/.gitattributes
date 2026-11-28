@@ -1,0 +1,3 @@
+# protocol_gen.go is written by slop-bot/cmd/gencodexproto
+# (`go generate ./internal/harness/codex/protocol`).
+protocol_gen.go linguist-generated=true
