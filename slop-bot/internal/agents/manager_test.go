@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -377,7 +378,7 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	})
 	f.mgr = f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: f.transcripts, Logger: quiet, Clock: clock.Real{}}, names: names, hooks: f.hooks})
 	require.NoError(t, f.mgr.Start(ctx))
-	t.Cleanup(func() { _ = f.mgr.Stop(context.Background()) })
+	stopInCleanup(t, func() *agents.Manager { return f.mgr })
 	// Cleanups run last-first: closing the controller first makes every
 	// fake exit, so the managers' drains don't wait on turns the test left
 	// open.
@@ -398,7 +399,7 @@ func (f *fixture) restartWith(between func()) *agents.Manager {
 	require.NoError(f.t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
 	require.NoError(f.t, m.Start(context.Background()))
-	f.t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	stopInCleanup(f.t, func() *agents.Manager { return m })
 	f.t.Cleanup(func() { _ = f.ctl.Close() })
 	f.mgr = m
 	return m
@@ -779,7 +780,7 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 	require.NoError(t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
 	require.NoError(t, m.Start(context.Background()))
-	t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	stopInCleanup(t, func() *agents.Manager { return m })
 	t.Cleanup(func() { _ = f.ctl.Close() })
 	resumed := f.session()
 	assert.True(t, resumed.Resumed)
@@ -787,6 +788,32 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 	note := f.user(resumed)
 	assert.Contains(t, note.Text, "slop-bot restarted")
 	_ = tk
+}
+
+// stopBound is how long a test's closing Stop may drain: far past any
+// drain the tests make, so reaching it is a hang.
+const stopBound = 2 * time.Minute
+
+// stopInCleanup stops the manager get returns (read when the test ends, so
+// a restart's is the one stopped) once the test is done. A drain that never
+// ends fails the test there, with every goroutine's stack, rather than the
+// package running into go test's timeout with no word of which test hung.
+func stopInCleanup(t *testing.T, get func() *agents.Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		m := get()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = m.Stop(context.Background())
+		}()
+		select {
+		case <-done:
+		case <-time.After(stopBound): // a safety net, never a synchronisation
+			buf := make([]byte, 8<<20)
+			t.Errorf("the manager's Stop didn't return within %s; goroutines:\n%s", stopBound, buf[:runtime.Stack(buf, true)])
+		}
+	})
 }
 
 // logBuffer is the manager's log, for a test to read what it warned of.
