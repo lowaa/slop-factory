@@ -53,7 +53,28 @@ type Conversation interface {
 	AttachPlan(ctx context.Context) (*AttachPlan, error)
 }
 
+// Adopter is a harness whose sessions outlive the daemon (a TUI driver's,
+// in slop-bot's tmux server). Its conversations are Lasting: at shutdown the
+// daemon lets go of them instead of stopping them, and after a restart
+// takes each back with AdoptAgent instead of resuming it, so a turn in
+// flight carries on rather than being cut short.
+type Adopter interface {
+	// AdoptAgent takes over agent's session, which outlived the daemon that
+	// started it: ErrNoSession if it didn't.
+	AdoptAgent(ctx context.Context, agent ident.AgentID) (Conversation, error)
+}
+
+// Lasting is a conversation whose session can outlive it (see Adopter).
+type Lasting interface {
+	// Close lets go of the session without ending it: Events closes with no
+	// Exited, and the session runs on for a later AdoptAgent.
+	Close() error
+}
+
 var (
+	// ErrNoSession means there is no session to adopt: it ended with the
+	// daemon, or never started.
+	ErrNoSession = errors.New("harness: no session to adopt")
 	// ErrAttached means a person is attached to a TUI session, so the driver
 	// won't type into it. Nothing was typed.
 	ErrAttached = errors.New("harness: a person is attached to the session")
@@ -84,6 +105,11 @@ type ConversationRef struct {
 type Message struct {
 	From ident.Principal
 	Text string
+	// IDs are the inbox messages Text renders. A driver that can't put Text
+	// in front of the model (a TUI, idle) points the agent at its inbox
+	// instead, and says so through the daemon's pointer, which keeps these
+	// in the agent's inbox until it reads them.
+	IDs []int64
 }
 
 // Workspace is everything a harness needs to run one agent.

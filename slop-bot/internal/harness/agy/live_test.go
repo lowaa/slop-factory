@@ -247,7 +247,7 @@ func (p *livePuppet) logged(kind, text string) error {
 // Interrupted implements conformance.Puppet: agy reports a cancel on screen
 // only.
 func (p *livePuppet) Interrupted(ctx context.Context) error {
-	screen, err := p.h.Host.Capture(ctx, SessionName("a1"))
+	screen, err := p.h.Host.Capture(ctx, tuidriver.SessionName(sessionPrefix, "a1"))
 	if err != nil {
 		return err
 	}
@@ -259,7 +259,7 @@ func (p *livePuppet) Interrupted(ctx context.Context) error {
 
 // Crash implements conformance.Puppet: SIGKILL to agy, the pane's process.
 func (p *livePuppet) Crash(ctx context.Context) error {
-	out, err := exec.CommandContext(ctx, "tmux", "-L", p.socket, "display-message", "-p", "-t", SessionName("a1"), "#{pane_pid}").Output() // #nosec G204 -- the test's own tmux server
+	out, err := exec.CommandContext(ctx, "tmux", "-L", p.socket, "display-message", "-p", "-t", tuidriver.SessionName(sessionPrefix, "a1"), "#{pane_pid}").Output() // #nosec G204 -- the test's own tmux server
 	if err != nil {
 		return err
 	}

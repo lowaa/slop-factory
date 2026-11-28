@@ -82,7 +82,7 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 	}
 	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
-	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: kickoff(t)}); err != nil {
+	if err := m.kickOff(ctx, r, t); err != nil {
 		m.abortStart(ctx, r, t, err)
 		return err
 	}
@@ -90,6 +90,30 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 	// open ticket's work starts now: no event may come to say so.
 	m.sync(ctx, t.ID)
 	return nil
+}
+
+// kickOff gives a new agent its ticket. It goes through the inbox like any
+// message, so a TUI agent that is pointed there finds it; and it is sent
+// at once, on the slot the start holds. A person already in the agent's
+// TUI session holds it, as any message, for the next delivery.
+func (m *Manager) kickOff(ctx context.Context, r *runner, t *tickets.Ticket) error {
+	r.deliverMu.Lock()
+	defer r.deliverMu.Unlock()
+	kick, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{
+		From: state.UserParty, To: state.AgentParty(r.id), Kind: state.KindSystem, Body: kickoff(t),
+	})
+	if err != nil {
+		return err
+	}
+	err = m.send(ctx, r, []state.Message{*kick}, state.DeliveryTurn)
+	if errors.Is(err, harness.ErrAttached) || errors.Is(err, harness.ErrUnsubmitted) {
+		m.opts.Logger.Info("agents: the kick-off waits: a person is in the session", "agent", r.id, "err", err)
+		if r.state() != state.StateAttached {
+			r.setState(ctx, state.StateIdle, "a person is in its session")
+		}
+		return nil
+	}
+	return err
 }
 
 // misconfigure parks a ticket whose spec can't run, and tells the user how

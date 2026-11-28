@@ -2,6 +2,7 @@ package tuidriver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -38,40 +39,53 @@ func (s *Sessions) Options(p *Profile, session string) *Options {
 	}
 }
 
-// jscpd:ignore-start -- fake/tuiharness.go has its own copy of AdoptAll and
-// SessionName from before these were shared; moving fake/tui onto Sessions
-// is left to its own change.
-
-// AdoptAll adopts every session on the host whose name starts with prefix,
-// the harness's own: those that outlived a daemon.
-func (s *Sessions) AdoptAll(ctx context.Context, p *Profile, prefix string) ([]harness.Conversation, error) {
-	names, err := s.Host.List(ctx)
+// Start launches p's session for ws's agent, named with prefix (see
+// SessionName).
+func (s *Sessions) Start(ctx context.Context, p *Profile, prefix string, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
+	conv, err := Start(ctx, s.Options(p, SessionName(prefix, ws.Agent)), ws, resume)
 	if err != nil {
 		return nil, err
 	}
-	var convs []harness.Conversation
-	for _, name := range names {
-		if !strings.HasPrefix(name, prefix) {
-			continue
-		}
-		conv, err := Adopt(ctx, s.Options(p, name))
-		if err != nil {
-			return convs, fmt.Errorf("%s: adopting %s: %w", p.Harness, name, err)
-		}
-		convs = append(convs, conv)
+	return conv, nil
+}
+
+// Adopt takes over agent's session, p's, named with prefix, which outlived
+// the daemon that started it: harness.ErrNoSession if there is none.
+func (s *Sessions) Adopt(ctx context.Context, p *Profile, prefix string, agent ident.AgentID) (harness.Conversation, error) {
+	session := SessionName(prefix, agent)
+	conv, err := Adopt(ctx, s.Options(p, session))
+	if errors.Is(err, sessionhost.ErrNoSession) || errors.Is(err, sessionhost.ErrNoServer) {
+		return nil, fmt.Errorf("%w: %s: %w", harness.ErrNoSession, session, err)
 	}
-	return convs, nil
+	if err != nil {
+		return nil, fmt.Errorf("%s: adopting %s: %w", p.Harness, session, err)
+	}
+	return conv, nil
 }
 
 // SessionName is an agent's session: prefix, then the agent's id with
-// anything tmux would read specially replaced.
+// anything tmux would read specially replaced. A prefix is the harness's
+// own, lowercase letters then a dash, so that a name says whose session it
+// is (see OwnsSession).
 func SessionName(prefix string, agent ident.AgentID) string {
-	return prefix + strings.Map(func(r rune) rune {
+	return prefix + sanitise(agent)
+}
+
+// OwnsSession says whether session is agent's, under any harness's prefix:
+// a hook relayed for a session must come from that session's own agent.
+func OwnsSession(session string, agent ident.AgentID) bool {
+	prefix, rest, ok := strings.Cut(session, "-")
+	if !ok || prefix == "" || strings.Trim(prefix, "abcdefghijklmnopqrstuvwxyz") != "" {
+		return false
+	}
+	return rest == sanitise(agent)
+}
+
+func sanitise(agent ident.AgentID) string {
+	return strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
 			return r
 		}
 		return '_'
 	}, string(agent))
 }
-
-// jscpd:ignore-end

@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -98,10 +99,17 @@ func (r *runner) setAttaching(on bool) {
 	r.attaching = on
 }
 
-// stopConv stops the conversation, if this runner has one.
+// stopConv stops the conversation for good, if this runner has one. A TUI
+// driver won't type its quit while a person is in the session; the agent
+// is ending regardless (its ticket is done or gone), so the session is
+// killed instead, or the stop would wait for the person forever.
 func (r *runner) stopConv(ctx context.Context, force bool) {
-	if r.conv != nil {
-		_ = r.conv.Stop(ctx, force)
+	if r.conv == nil {
+		return
+	}
+	if err := r.conv.Stop(ctx, force); errors.Is(err, harness.ErrAttached) {
+		r.m.opts.Logger.Info("agents: ending a session a person is in", "agent", r.id)
+		_ = r.conv.Stop(ctx, true)
 	}
 }
 
@@ -225,7 +233,13 @@ func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
 	// pre-empt it with another turn don't lose it.
 	r.mu.Lock()
 	decl, summary, stopping := r.decl, r.summary, r.stopping || r.attaching
+	// Joined by a person (a TUI attach): the person is driving, and what
+	// the agent declared is acted on at the hand-back, as after a hand-over.
+	joined := r.st == state.StateAttached
 	r.mu.Unlock()
+	if joined {
+		return
+	}
 	if decl == declDone {
 		err := r.m.finish(ctx, r, summary)
 		if err == nil {
@@ -290,8 +304,17 @@ func (r *runner) settle(ctx context.Context, decl declared, ev *harness.Event) {
 func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 	r.mu.Lock()
 	stopping := r.stopping || r.attaching
+	joined := r.st == state.StateAttached
 	r.mu.Unlock()
 	if stopping {
+		return
+	}
+	if joined {
+		// The person quit the TUI they joined. The agent stays attached,
+		// its runner with nothing running, like one handed over: the
+		// hand-back, when the person's tmux client ends with the session,
+		// resumes the conversation.
+		r.m.event(ctx, EventJoinedExit, r.id, r.ticket, map[string]int{"exit": ev.ExitCode})
 		return
 	}
 	to := state.StateExited
@@ -308,12 +331,23 @@ func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 	r.m.goRecover(r)
 }
 
-// shutdown stops the conversation for a daemon stop: it finishes the turn
-// and stays resumable.
+// shutdown lets go of the conversation for a daemon stop. One whose session
+// outlives the daemon (a TUI's) is let go of as it is, mid-turn or with a
+// person in it, for the next daemon to adopt; any other finishes its turn
+// and stops, resumable by id.
 func (r *runner) shutdown(ctx context.Context) {
 	r.mu.Lock()
 	r.stopping = true
 	r.mu.Unlock()
+	if lasting, ok := r.conv.(harness.Lasting); ok {
+		select {
+		case <-r.exited:
+		default:
+			_ = lasting.Close()
+		}
+		<-r.exited
+		return
+	}
 	r.stopConv(ctx, false)
 	<-r.exited
 }

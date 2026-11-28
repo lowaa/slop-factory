@@ -112,11 +112,14 @@ func (ar *agentRoutes) inbox(w http.ResponseWriter, r *http.Request) {
 		control.WriteJSON(w, http.StatusOK, apiMessages(log))
 		return
 	}
-	// An agent has had its delivered messages pushed into its conversation;
-	// replaying them would repeat old instructions.
+	// An agent has had its delivered messages pushed into its conversation,
+	// all but those a pointer sent it here for; replaying the rest would
+	// repeat old instructions.
 	list := msgs.Unread
 	if !by.IsUser() {
-		list = msgs.Pending
+		list = func(ctx context.Context, _ state.Party) ([]state.Message, error) {
+			return msgs.AgentInbox(ctx, by.Agent)
+		}
 	}
 	unread, err := list(r.Context(), me)
 	if err != nil {

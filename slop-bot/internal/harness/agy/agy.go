@@ -47,16 +47,12 @@ func (h *Harness) Capabilities() harness.Capabilities {
 
 // Start implements harness.AIHarness.
 func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
-	conv, err := tuidriver.Start(ctx, h.Options(h.Profile(), SessionName(ws.Agent)), ws, resume)
-	if err != nil {
-		return nil, err
-	}
-	return conv, nil
+	return h.Sessions.Start(ctx, h.Profile(), sessionPrefix, ws, resume)
 }
 
-// Adopt re-attaches to agy sessions that outlived a daemon.
-func (h *Harness) Adopt(ctx context.Context) ([]harness.Conversation, error) {
-	return h.AdoptAll(ctx, h.Profile(), sessionPrefix)
+// AdoptAgent implements harness.Adopter.
+func (h *Harness) AdoptAgent(ctx context.Context, agent ident.AgentID) (harness.Conversation, error) {
+	return h.Adopt(ctx, h.Profile(), sessionPrefix, agent)
 }
 
 // ForgetWorkspace removes what Start wrote for ws, its sidecar folder, once
@@ -72,7 +68,3 @@ func (h *Harness) logger() *slog.Logger {
 	return h.Logger
 }
 
-// SessionName is agy's session for an agent.
-func SessionName(agent ident.AgentID) string {
-	return tuidriver.SessionName(sessionPrefix, agent)
-}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,7 +41,12 @@ type TmuxOptions struct {
 	TmpDir string
 	// ExitRecheck bounds each WaitExit (see there); 0 is a second.
 	ExitRecheck time.Duration
-	Logger      *slog.Logger
+	// Scope, when set, is the argv prefix the server is started under, to
+	// give it a cgroup of its own (SystemdScope): sessions outlive the
+	// daemon only if the server isn't in the daemon's cgroup, which its
+	// service manager ends with it.
+	Scope  []string
+	Logger *slog.Logger
 }
 
 // Tmux is a SessionHost on slop-bot's own tmux server.
@@ -57,6 +63,9 @@ type Tmux struct {
 	// startMu serialises Start: it sets update-environment, a server-global
 	// option, for the session it is creating.
 	startMu sync.Mutex
+	// scopeMu serialises starting the server in its scope, so two starts
+	// can't both find it missing and both make one.
+	scopeMu sync.Mutex
 	bufSeq  atomic.Uint64
 }
 
@@ -94,7 +103,7 @@ func NewTmux(opts *TmuxOptions) (*Tmux, error) {
 		return nil, fmt.Errorf("sessionhost: env is not installed: %w", err)
 	}
 	return &Tmux{
-		run:    &runner{bin: bin, socket: socket, tmpdir: opts.TmpDir},
+		run:    &runner{bin: bin, socket: socket, tmpdir: opts.TmpDir, envBin: env, scope: slices.Clone(opts.Scope)},
 		logger: logger, recheck: recheck, env: env,
 		socketPath: socketPath(opts.TmpDir, socket),
 	}, nil
@@ -119,6 +128,11 @@ func socketPath(tmpdir, socket string) string {
 // whichever client started the server. Empty, it can't leak one agent's
 // environment (its token) into another's.
 func (t *Tmux) ensureServer(ctx context.Context) error {
+	if err := t.startScoped(ctx); err != nil {
+		// Agents still run, in a server the service manager ends with the
+		// daemon: worth a warning, not a refusal.
+		t.logger.Warn("sessionhost: couldn't start tmux in a scope of its own; starting it as the daemon's child", "err", err)
+	}
 	// pane-died signals the session's wait-for channel. wait-for doesn't
 	// expand formats, so run-shell does it, in the background so a slow
 	// shell never stalls the server.
@@ -136,6 +150,26 @@ func (t *Tmux) ensureServer(ctx context.Context) error {
 		// the harness's own last words are what explain a crash.
 		[]string{"set-option", "-g", "remain-on-exit-format", ""},
 		[]string{"set-hook", "-g", "pane-died", died},
+	)})
+	return err
+}
+
+// startScoped starts the server under the scope, if there is one and the
+// server isn't running.
+func (t *Tmux) startScoped(ctx context.Context) error {
+	if len(t.run.scope) == 0 {
+		return nil
+	}
+	t.scopeMu.Lock()
+	defer t.scopeMu.Unlock()
+	if _, err := t.run.do(ctx, &call{args: []string{"list-sessions"}}); !errors.Is(err, ErrNoServer) {
+		return nil // running, or failing in a way the plain start reports
+	}
+	// exit-empty in the same invocation: with no session yet, the server
+	// would otherwise exit as soon as this client does.
+	_, err := t.run.do(ctx, &call{env: []string{}, scoped: true, args: chain(
+		[]string{"start-server"},
+		[]string{"set-option", "-s", "exit-empty", "off"},
 	)})
 	return err
 }
@@ -411,6 +445,9 @@ var (
 // runner runs the tmux binary against one server.
 type runner struct {
 	bin, socket, tmpdir string
+	// envBin is env(1); scope is the prefix a scoped call runs under.
+	envBin string
+	scope  []string
 }
 
 type call struct {
@@ -418,6 +455,8 @@ type call struct {
 	stdin io.Reader
 	// env is the client's environment; nil is the minimal one.
 	env []string
+	// scoped runs the call under the runner's scope.
+	scoped bool
 }
 
 func (r *runner) do(ctx context.Context, c *call) (string, error) {
@@ -427,6 +466,14 @@ func (r *runner) do(ctx context.Context, c *call) (string, error) {
 	}
 	cmd := exec.CommandContext(ctx, r.bin, args...) // #nosec G204 -- tmux is run with slop-bot's own arguments; session names are validated
 	cmd.Env = r.env(c.env)
+	if c.scoped {
+		// The scope's tool needs the daemon's way to its service manager
+		// (the bus); env -i keeps that, and the rest of the daemon's
+		// environment, out of the server's, which every pane inherits.
+		inner := append(append([]string{r.envBin, "-i"}, cmd.Env...), r.bin)
+		cmd = exec.CommandContext(ctx, r.scope[0], append(append(slices.Clone(r.scope[1:]), inner...), args...)...) // #nosec G204 -- the scope prefix is slop-bot's own (SystemdScope)
+		cmd.Env = scopeEnv()
+	}
 	cmd.Stdin = c.stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

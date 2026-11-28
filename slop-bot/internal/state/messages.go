@@ -73,6 +73,9 @@ const (
 	DeliveryAttach DeliveryPath = "attach"
 	// DeliveryInbox is the recipient pulling it with `slop-bot inbox`.
 	DeliveryInbox DeliveryPath = "inbox"
+	// DeliveryPointer is a TUI agent told to run `slop-bot inbox`, its text
+	// not typed: the message stays in the agent's inbox until it reads it.
+	DeliveryPointer DeliveryPath = "pointer"
 )
 
 // Message is one inbox message.
@@ -260,6 +263,35 @@ func (m *Messages) Pending(ctx context.Context, to Party) ([]Message, error) {
 	})
 }
 
+// AgentInbox returns what an agent's `slop-bot inbox` shows, oldest first:
+// what is still queued for it, and what a pointer sent it to read. The rest
+// of what was delivered was put in front of its model already; shown again,
+// it would repeat old instructions.
+func (m *Messages) AgentInbox(ctx context.Context, agent ident.AgentID) ([]Message, error) {
+	return m.list(ctx, func(q *bun.SelectQuery) *bun.SelectQuery {
+		return q.Where("recipient = ?", string(AgentParty(agent))).
+			WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+				return q.Where("status = ?", string(StatusQueued)).
+					WhereOr("status = ? AND delivery_path = ?", string(StatusDelivered), string(DeliveryPointer))
+			}).Order("id")
+	})
+}
+
+// MarkPointed records that the agent was pointed at its inbox for these
+// messages, delivered or not yet: AgentInbox shows them until it reads them.
+// Read ones are left as they are.
+func (m *Messages) MarkPointed(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := m.db.NewUpdate().Table("messages").Set("delivery_path = ?", string(DeliveryPointer)).
+		Where("id IN (?)", bun.List(ids)).Where("status <> ?", string(StatusRead)).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("state: marking messages pointed at: %w", err)
+	}
+	return nil
+}
+
 // Unread returns to's messages not yet read, delivered or not, oldest first:
 // what `slop-bot inbox` shows.
 func (m *Messages) Unread(ctx context.Context, to Party) ([]Message, error) {
@@ -270,10 +302,13 @@ func (m *Messages) Unread(ctx context.Context, to Party) ([]Message, error) {
 
 // MarkDelivered records that a queued message reached its recipient by
 // path. A message already delivered or read is ErrConflict, so two
-// delivery paths can't both claim it.
+// delivery paths can't both claim it. One a pointer was typed for keeps
+// DeliveryPointer, which is how it really went (the pointer is typed during
+// the send that path names).
 func (m *Messages) MarkDelivered(ctx context.Context, id int64, path DeliveryPath) error {
 	res, err := m.db.NewUpdate().Table("messages").
-		Set("status = ?", string(StatusDelivered)).Set("delivery_path = ?", string(path)).
+		Set("status = ?", string(StatusDelivered)).
+		Set("delivery_path = CASE WHEN delivery_path = ? THEN delivery_path ELSE ? END", string(DeliveryPointer), string(path)).
 		Set("delivered_at = ?", toMillis(m.clock.Now())).
 		Where("id = ?", id).Where("status = ?", string(StatusQueued)).Exec(ctx)
 	if err != nil {

@@ -252,23 +252,76 @@ func (m *Manager) deliverPending(ctx context.Context, r *runner) bool {
 			return true
 		}
 	}
-	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: render(pending)}); err != nil {
+	err = m.send(ctx, r, pending, path)
+	switch {
+	case err == nil:
+	case errors.Is(err, harness.ErrAttached), errors.Is(err, harness.ErrUnsubmitted):
+		// A person is in the TUI session (attached without slop-bot, or
+		// just as the pointer was typed). Nothing is typed into it: the
+		// messages wait in the inbox, for the next delivery, or for the
+		// person to submit the pointer they can see. No nudge: it isn't the
+		// agent that stopped.
+		m.opts.Logger.Info("agents: holding messages: a person is in the session", "agent", r.id, "err", err)
+		if !inTurn {
+			m.releaseSlot(r)
+			r.setState(ctx, state.StateIdle, "a person is in its session")
+		}
+		return true
+	default:
 		m.opts.Logger.Warn("agents: delivering", "agent", r.id, "err", err)
 		if !inTurn {
 			m.releaseSlot(r)
 		}
 		return false
 	}
-	for _, msg := range pending {
-		if err := m.opts.State.Messages.MarkDelivered(ctx, msg.ID, path); err != nil {
-			m.opts.Logger.Warn("agents: marking delivered", "message", msg.ID, "err", err)
-		}
-	}
 	if !onlyNudges(pending) {
 		_ = m.opts.State.Agents.ResetNudges(ctx, r.id)
 	}
 	m.event(ctx, EventDelivered, r.id, r.ticket, map[string]any{"count": len(pending), "path": string(path)})
 	return true
+}
+
+// send puts msgs in front of r's model as one message, and marks them
+// delivered by path. A TUI driver that typed a pointer to the inbox but
+// couldn't submit it (ErrUnsubmitted) has delivered them too: the agent can
+// read them there, and a second pointer would only double the first.
+func (m *Manager) send(ctx context.Context, r *runner, msgs []state.Message, path state.DeliveryPath) error {
+	ids := make([]int64, len(msgs))
+	for i, msg := range msgs {
+		ids[i] = msg.ID
+	}
+	err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: render(msgs), IDs: ids})
+	if err != nil && !errors.Is(err, harness.ErrUnsubmitted) {
+		return err
+	}
+	for _, msg := range msgs {
+		if err := m.opts.State.Messages.MarkDelivered(ctx, msg.ID, path); err != nil {
+			m.opts.Logger.Warn("agents: marking delivered", "message", msg.ID, "err", err)
+		}
+	}
+	return err
+}
+
+// Pointer is what a TUI driver types in place of messages it can't put in
+// front of the model: the agent is told to read its inbox, which keeps them
+// until it does (state.DeliveryPointer). It goes into the harness's prompt
+// as if the user typed it, so it says nothing of the messages themselves,
+// whose senders carry different authority.
+func (m *Manager) Pointer(msgs []*harness.Message) string {
+	var ids []int64
+	for _, msg := range msgs {
+		ids = append(ids, msg.IDs...)
+	}
+	if err := m.opts.State.Messages.MarkPointed(context.Background(), ids); err != nil {
+		m.opts.Logger.Warn("agents: keeping pointed-at messages in the inbox", "err", err)
+	}
+	what := "new messages"
+	if len(ids) == 1 {
+		what = "a new message"
+	} else if len(ids) > 1 {
+		what = fmt.Sprintf("%d new messages", len(ids))
+	}
+	return fmt.Sprintf("[slop-bot] You have %s: run `%s inbox` to read them, then carry on.", what, m.opts.CLI)
 }
 
 // render turns messages into what the agent reads, each saying who sent it,

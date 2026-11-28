@@ -28,11 +28,10 @@ func TestAResumedConversationIsAdoptedWithItsID(t *testing.T) {
 	// The harness repeats the id it resumed, so no hook brings a new one.
 	resumed := r.launch(t, &ref)
 	require.NoError(t, resumed.Close())
-	convs, err := r.Harness.Adopt(r.ctx)
+	adopted, err := r.Harness.AdoptAgent(r.ctx, "a1")
 	require.NoError(t, err)
-	require.Len(t, convs, 1)
-	t.Cleanup(func() { _ = convs[0].Stop(context.Background(), true) })
-	assert.Equal(t, ref, convs[0].Ref())
+	t.Cleanup(func() { _ = adopted.Stop(context.Background(), true) })
+	assert.Equal(t, ref, adopted.Ref())
 }
 
 func TestStopDoesNotTypeWhileAPersonIsAttached(t *testing.T) {
