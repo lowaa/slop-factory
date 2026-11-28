@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// lines reads everything through readLine, with a reader buffer smaller
+// readAll reads everything through readLine, with a reader buffer smaller
 // than the lines so the ErrBufferFull path is taken too.
 func readAll(t *testing.T, in string, max int) (got []string, tooLong int) {
 	t.Helper()

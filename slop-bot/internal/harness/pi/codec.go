@@ -32,27 +32,47 @@ type codec struct {
 	log     *slog.Logger
 	request atomic.Int64
 
-	// prompts are the texts of prompt commands awaiting their response, by
-	// request id, so a rejected or handled one can be told apart from other
+	mu sync.Mutex
+	// prompts are the prompt commands awaiting their response, by request
+	// id, so a rejected or handled one can be told apart from other
 	// commands' and a rejected one can be sent again.
-	mu      sync.Mutex
-	prompts map[string]string
+	prompts map[string]*pending
+	// held are messages pi rejected while busy (it refuses even a steer
+	// while compacting), so a message Send accepted is never silently
+	// dropped. They go again when the compaction ends, when the run settles
+	// (keeping the turn open), or after an interrupt, ahead of the next Send.
+	held []string
 
 	// The rest is touched only by Decode, which rpcdriver calls from a single
 	// goroutine.
-	inTurn bool
-	// held are messages pi rejected mid-run (it refuses even a steer while
-	// compacting), sent again when compaction ends or the run settles, so
-	// a message Send accepted is never silently dropped.
-	held  []string
-	usage *harness.Usage
+	inTurn     bool
+	compacting bool
+	// deferred is a settled run's turn end, held back while held messages
+	// are resent at the settle: they start the next run within the same
+	// turn, so Stop keeps waiting for it. It is emitted if none was taken.
+	deferred *bridge
+	usage    *harness.Usage
 	// failure is the run's last model error, cleared when a later request
 	// succeeds (a retry), and reported if the run ends on it.
 	failure string
 }
 
 func newCodec(id string, resumed bool, log *slog.Logger) *codec {
-	return &codec{id: id, resumed: resumed, log: log, prompts: map[string]string{}}
+	return &codec{id: id, resumed: resumed, log: log, prompts: map[string]*pending{}}
+}
+
+// pending is a prompt awaiting pi's response.
+type pending struct {
+	text string
+	// bridging marks a held message resent at a settle.
+	bridging bool
+}
+
+// bridge is a deferred turn end and the resent prompts it waits on.
+type bridge struct {
+	end         []harness.Event
+	outstanding int
+	taken       bool
 }
 
 func (c *codec) nextID() string { return "slop-bot-" + strconv.FormatInt(c.request.Add(1), 10) }
@@ -144,34 +164,56 @@ func (c *codec) checkState(r *record) error {
 // whole run to finish, and a message should reach the agent at the next
 // model call.
 func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, _ bool) error {
-	return c.prompt(w, msg.Text)
+	// Messages held over an interrupt go first, in the order they were sent.
+	for _, text := range c.takeHeld() {
+		if err := c.prompt(w, text, false); err != nil {
+			return err
+		}
+	}
+	return c.prompt(w, msg.Text, false)
 }
 
-func (c *codec) prompt(w *rpcdriver.Wire, text string) error {
+func (c *codec) prompt(w *rpcdriver.Wire, text string, bridging bool) error {
 	id := c.nextID()
 	c.mu.Lock()
-	c.prompts[id] = text
+	c.prompts[id] = &pending{text: text, bridging: bridging}
 	c.mu.Unlock()
 	return write(w, command{ID: id, Type: "prompt", Message: text, StreamingBehavior: "steer"})
 }
 
-// resendHeld sends the held messages again; one pi rejects again is held
-// again, or, if pi is idle by then, ends a failed turn that reports why.
-func (c *codec) resendHeld(w *rpcdriver.Wire) error {
+func (c *codec) hold(text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.held = append(c.held, text)
+}
+
+func (c *codec) takeHeld() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	held := c.held
 	c.held = nil
-	for _, text := range held {
-		if err := c.prompt(w, text); err != nil {
-			return err
+	return held
+}
+
+// resendHeld sends the held messages again, returning how many it wrote. A
+// write fails only when pi is gone, and the exit will be reported, so it is
+// logged rather than costing the events decoded with it.
+func (c *codec) resendHeld(w *rpcdriver.Wire, bridging bool) int {
+	held := c.takeHeld()
+	for i, text := range held {
+		if err := c.prompt(w, text, bridging); err != nil {
+			c.log.Warn("pi: resending a held message", "err", err, "lost", len(held)-i)
+			return i
 		}
 	}
-	return nil
+	return len(held)
 }
 
 // Interrupt sends abort: pi kills the running tool, ends the run with
 // agent_settled {aborted:true}, and keeps the session usable. A steer still
-// queued is delivered into the transcript, not lost, though no run follows
-// it.
+// queued in pi is delivered into the transcript, not lost, though no run
+// follows it; one slop-bot is holding stays held until the next Send, so an
+// interrupt never restarts the agent.
 func (c *codec) Interrupt(_ context.Context, w *rpcdriver.Wire) error {
 	return write(w, command{ID: c.nextID(), Type: "abort"})
 }
@@ -189,7 +231,6 @@ type record struct {
 	Message json.RawMessage `json:"message"`
 	// tool_execution_*
 	ToolName string `json:"toolName"`
-	IsError  bool   `json:"isError"`
 	// agent_settled
 	Aborted bool `json:"aborted"`
 	// auto_retry_end
@@ -248,8 +289,7 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 		c.usage, c.failure = &harness.Usage{CostEstimated: true}, ""
 		return []harness.Event{{Kind: harness.TurnStarted}}, nil
 	case "agent_settled":
-		evs := c.settle(&r)
-		return evs, c.resendHeld(w)
+		return c.settle(&r, w), nil
 	case "tool_execution_start":
 		return []harness.Event{{Kind: harness.ToolStarted, Tool: r.ToolName}}, nil
 	case "tool_execution_end":
@@ -264,8 +304,17 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 		if r.FinalError != "" {
 			c.failure = r.FinalError
 		}
+	case "compaction_start":
+		c.compacting = true
 	case "compaction_end":
-		return c.compacted(&r), c.resendHeld(w)
+		c.compacting = false
+		evs := c.compacted(&r)
+		if !r.Aborted {
+			// An aborted one is part of an interrupt: the held messages wait
+			// for the next Send rather than restart the agent.
+			c.resendHeld(w, false)
+		}
+		return evs, nil
 	case "extension_ui_request":
 		return nil, c.cancelDialog(&r, w)
 	case "extension_error":
@@ -279,7 +328,7 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 // the message was meant to start.
 func (c *codec) response(r *record) []harness.Event {
 	c.mu.Lock()
-	text, isPrompt := c.prompts[r.ID]
+	p, isPrompt := c.prompts[r.ID]
 	delete(c.prompts, r.ID)
 	c.mu.Unlock()
 	if !isPrompt {
@@ -290,12 +339,15 @@ func (c *codec) response(r *record) []harness.Event {
 	}
 	var d disposition
 	_ = json.Unmarshal(r.Data, &d) // absent on failure
+	if p.bridging {
+		return c.bridged(r, &d, p.text)
+	}
 	switch {
-	case !r.Success && !c.inTurn:
-		return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: r.Error}}
+	case !r.Success && (c.inTurn || c.compacting):
+		c.log.Warn("pi: a message was rejected while pi was busy; holding it to send again", "err", r.Error)
+		c.hold(p.text)
 	case !r.Success:
-		c.log.Warn("pi: a mid-turn message was rejected; holding it to send again", "err", r.Error)
-		c.held = append(c.held, text)
+		return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: r.Error}}
 	case d.Disposition == "handled" && !c.inTurn:
 		// An extension command or input handler consumed it.
 		return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: harness.TurnCompleted}}
@@ -368,11 +420,12 @@ func (c *codec) addUsage(u *usage) {
 
 // settle ends the turn. An abort wins over the error it causes: the aborted
 // model request ends with stopReason "error", "This operation was aborted".
-func (c *codec) settle(r *record) []harness.Event {
+// With messages held, and no abort, it resends them and defers the end: the
+// run they start continues the same turn, and its settle ends it.
+func (c *codec) settle(r *record, w *rpcdriver.Wire) []harness.Event {
 	if !c.inTurn {
 		return nil
 	}
-	c.inTurn = false
 	end := harness.Event{Kind: harness.TurnEnded, Outcome: harness.TurnCompleted}
 	switch {
 	case r.Aborted:
@@ -381,8 +434,42 @@ func (c *codec) settle(r *record) []harness.Event {
 		end.Outcome, end.Text = harness.TurnFailed, c.failure
 	}
 	evs := []harness.Event{{Kind: harness.UsageReport, Usage: c.usage}, end}
+	c.deferred = nil
+	if !r.Aborted {
+		if n := c.resendHeld(w, true); n > 0 {
+			c.deferred = &bridge{end: evs, outstanding: n}
+			c.failure = "" // the next run's outcome is its own; its usage adds to this
+			return nil
+		}
+	}
+	c.inTurn = false
 	c.usage, c.failure = nil, ""
 	return evs
+}
+
+// bridged handles the response to a message resent at a settle. Once every
+// one has answered and none started a run, the deferred turn end goes out.
+// One pi rejects again stays held, for the next Send.
+func (c *codec) bridged(r *record, d *disposition, text string) []harness.Event {
+	b := c.deferred
+	if b == nil {
+		return nil // its run has already settled the turn
+	}
+	b.outstanding--
+	switch {
+	case !r.Success:
+		c.log.Warn("pi: a held message was rejected again; holding it for the next message", "err", r.Error)
+		c.hold(text)
+	case d.Disposition != "handled":
+		b.taken = true
+	}
+	if b.outstanding > 0 || b.taken {
+		return nil
+	}
+	c.deferred = nil
+	c.inTurn = false
+	c.usage, c.failure = nil, ""
+	return b.end
 }
 
 func write(w *rpcdriver.Wire, v any) error {

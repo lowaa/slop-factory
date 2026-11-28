@@ -169,7 +169,8 @@ type Event struct {
 	Err      error
 }
 
-// Usage is token usage for a turn.
+// Usage is token usage for a turn, or for work a harness does between turns,
+// such as a compaction.
 type Usage struct {
 	InputTokens      int64
 	OutputTokens     int64

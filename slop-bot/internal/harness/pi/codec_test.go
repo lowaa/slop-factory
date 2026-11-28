@@ -209,6 +209,29 @@ func sent(t *testing.T, c *codec) string {
 	return cmd.ID
 }
 
+// messages is the text of every command written to buf.
+func messages(t *testing.T, buf *bytes.Buffer) []string {
+	t.Helper()
+	var out []string
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for dec.More() {
+		var cmd command
+		require.NoError(t, dec.Decode(&cmd))
+		out = append(out, cmd.Message)
+	}
+	return out
+}
+
+func lastCommand(t *testing.T, buf *bytes.Buffer) command {
+	t.Helper()
+	var cmd command
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for dec.More() {
+		require.NoError(t, dec.Decode(&cmd))
+	}
+	return cmd
+}
+
 func response(id, body string) string {
 	return `{"id":"` + id + `","type":"response","command":"prompt",` + body + `}`
 }
@@ -249,19 +272,58 @@ func TestAPromptThatStartsNoRunStillEndsATurn(t *testing.T) {
 		decodeAll(t, c, w, settled)
 		assert.Empty(t, buf.String(), "sent once, not again at settle")
 	})
-	t.Run("rejected mid-turn with no compaction is sent at settle", func(t *testing.T) {
+	t.Run("rejected mid-turn with no compaction is sent at settle, in the same turn", func(t *testing.T) {
+		t.Parallel()
+		c := testCodec()
+		var buf bytes.Buffer
+		w := rpcdriver.NewWire(&buf)
+		evs := decodeAll(t, c, w, agentStart, response(sent(t, c), `"success":false,"error":"busy"`), settled)
+		assert.Equal(t, []harness.EventKind{harness.TurnStarted}, kinds(evs), "the turn end waits for the resent message's run, so Stop does too")
+		again := lastCommand(t, &buf)
+		assert.Equal(t, "hi", again.Message)
+
+		evs = decodeAll(t, c, w, response(again.ID, `"success":true,"data":{"disposition":"started"}`), agentStart, okEnd, settled)
+		assert.Equal(t, []harness.EventKind{harness.Text, harness.UsageReport, harness.TurnEnded}, kinds(evs))
+		assert.Equal(t, harness.TurnCompleted, evs[2].Outcome)
+	})
+	t.Run("rejected again at settle ends the turn and waits for the next Send", func(t *testing.T) {
 		t.Parallel()
 		c := testCodec()
 		var buf bytes.Buffer
 		w := rpcdriver.NewWire(&buf)
 		decodeAll(t, c, w, agentStart, response(sent(t, c), `"success":false,"error":"busy"`), settled)
-		var again command
-		require.NoError(t, json.Unmarshal(buf.Bytes(), &again))
-		assert.Equal(t, "hi", again.Message)
-		// Rejected again while idle, it ends a failed turn: reported, not held.
-		evs := decodeAll(t, c, w, response(again.ID, `"success":false,"error":"busy"`))
-		require.Equal(t, []harness.EventKind{harness.TurnStarted, harness.TurnEnded}, kinds(evs))
-		assert.Equal(t, harness.TurnFailed, evs[1].Outcome)
+		evs := decodeAll(t, c, w, response(lastCommand(t, &buf).ID, `"success":false,"error":"busy"`))
+		require.Equal(t, []harness.EventKind{harness.UsageReport, harness.TurnEnded}, kinds(evs))
+		assert.Equal(t, harness.TurnCompleted, evs[1].Outcome, "the run itself completed")
+
+		buf.Reset()
+		require.NoError(t, c.Send(context.Background(), w, &harness.Message{Text: "next"}, false))
+		assert.Equal(t, []string{"hi", "next"}, messages(t, &buf), "the held message goes first")
+	})
+	t.Run("an interrupt doesn't restart the agent with a held message", func(t *testing.T) {
+		t.Parallel()
+		c := testCodec()
+		var buf bytes.Buffer
+		w := rpcdriver.NewWire(&buf)
+		evs := decodeAll(t, c, w, agentStart, response(sent(t, c), `"success":false,"error":"busy"`),
+			`{"type":"compaction_end","reason":"threshold","aborted":true}`, `{"type":"agent_settled","aborted":true}`)
+		require.Equal(t, []harness.EventKind{harness.TurnStarted, harness.UsageReport, harness.TurnEnded}, kinds(evs))
+		assert.Equal(t, harness.TurnInterrupted, evs[2].Outcome)
+		assert.Empty(t, buf.String(), "nothing resent")
+
+		require.NoError(t, c.Send(context.Background(), w, &harness.Message{Text: "next"}, false))
+		assert.Equal(t, []string{"hi", "next"}, messages(t, &buf))
+	})
+	t.Run("rejected while compacting outside a run is held, not failed", func(t *testing.T) {
+		t.Parallel()
+		c := testCodec()
+		var buf bytes.Buffer
+		w := rpcdriver.NewWire(&buf)
+		evs := decodeAll(t, c, w, `{"type":"compaction_start","reason":"threshold"}`,
+			response(sent(t, c), `"success":false,"error":"Cannot submit a prompt while compaction is in progress"`))
+		assert.Empty(t, evs)
+		decodeAll(t, c, w, `{"type":"compaction_end","reason":"threshold","aborted":false}`)
+		assert.Equal(t, []string{"hi"}, messages(t, &buf))
 	})
 	t.Run("started and queued are left to the run's own events", func(t *testing.T) {
 		t.Parallel()
