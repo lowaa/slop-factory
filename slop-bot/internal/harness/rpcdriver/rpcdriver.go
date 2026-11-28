@@ -256,11 +256,24 @@ func (c *Conversation) Ref() harness.ConversationRef {
 }
 
 // Send implements harness.Conversation.
+//
+// A message sent while idle opens the turn here, before the harness reports
+// it: otherwise a graceful Stop landing between the write and the harness's
+// turn-start would see no turn, close stdin, and cut the turn off.
 func (c *Conversation) Send(ctx context.Context, msg *harness.Message) error {
 	c.mu.Lock()
 	mid := c.inTurn
 	c.mu.Unlock()
-	return c.opts.Codec.Send(ctx, c.wire, msg, mid)
+	if !mid {
+		c.setTurn(true)
+	}
+	if err := c.opts.Codec.Send(ctx, c.wire, msg, mid); err != nil {
+		if !mid {
+			c.setTurn(false)
+		}
+		return err
+	}
+	return nil
 }
 
 // Interrupt implements harness.Conversation.

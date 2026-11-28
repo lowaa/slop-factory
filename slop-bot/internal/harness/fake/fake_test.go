@@ -150,3 +150,37 @@ func TestConformance(t *testing.T) {
 	t.Parallel()
 	conformance.Run(t, subject)
 }
+
+// A graceful Stop right after an idle Send must wait for the turn that Send
+// started, even though the harness hasn't reported it yet.
+func TestStopRightAfterSendWaitsForThatTurn(t *testing.T) {
+	t.Parallel()
+	s := subject(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	conv, err := s.Harness.Start(ctx, s.Workspace(t), nil)
+	require.NoError(t, err)
+	defer func() { _ = conv.Stop(context.Background(), true) }()
+	p := s.Puppet.(*puppet)
+	_, _, err = p.Started(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, conv.Send(ctx, &harness.Message{Text: "work"}))
+	stopped := make(chan error, 1)
+	go func() { stopped <- conv.Stop(ctx, false) }()
+
+	// The fake hasn't started the turn yet; Stop must still be waiting.
+	sess := p.session()
+	_, err = sess.Expect(ctx, fake.RepUser)
+	require.NoError(t, err)
+	select {
+	case err := <-stopped:
+		require.Failf(t, "stop didn't wait", "returned %v before the turn ran", err)
+	default:
+	}
+	for _, c := range []fake.Command{{Cmd: fake.CmdTurnStart}, {Cmd: fake.CmdTurnEnd}} {
+		_, err := sess.Do(ctx, c)
+		require.NoError(t, err)
+	}
+	require.NoError(t, <-stopped)
+}
