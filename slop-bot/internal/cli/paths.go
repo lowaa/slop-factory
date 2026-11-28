@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lowaa/slop-factory/slop-bot/internal/doctor"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 )
 
@@ -63,12 +62,8 @@ func (a *app) pathsCmd() *cobra.Command {
 // differently from this shell: the 1.4 mismatch warning.
 func (a *app) printMismatches(out io.Writer, p *paths.Paths) error {
 	w := &errWriter{w: out}
-	warns := a.mismatchWarnings(p)
-	for _, warn := range warns {
+	for _, warn := range a.mismatchWarnings(p) {
 		w.printf("warning: %s\n", warn)
-	}
-	if len(warns) > 0 {
-		w.printf("fix: %s\n", doctor.MismatchFix)
 	}
 	return w.err
 }

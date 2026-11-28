@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agentproc"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 )
@@ -23,6 +24,16 @@ type harnessCheck struct {
 	// models is the list the sign-in check fetched, where fetching it is
 	// the sign-in check (agy), so it isn't fetched twice.
 	models []string
+}
+
+// env is the environment the harness's agents get: the API keys only with
+// the opt-in. A probe run with more could pass on a key no agent will have.
+func (h *harnessCheck) env() []string {
+	return agentproc.AgentEnv(&agentproc.EnvOptions{Base: h.d.opts.Environ(), APIKeyOptIn: h.cfg.APIKeyOptIn})
+}
+
+func (h *harnessCheck) run(ctx context.Context, args ...string) (*service.Result, error) {
+	return h.d.opts.Commands.Run(ctx, &Command{Path: h.bin, Args: args, Env: h.env()})
 }
 
 func (h *harnessCheck) add(name string, level Level, detail, fix string) {
@@ -77,6 +88,15 @@ func (d *Doctor) checkHarness(ctx context.Context, name string, cfg *config.Harn
 		return // config validation has already refused an unknown harness
 	}
 	h := &harnessCheck{d: d, name: name, group: "harness " + name, cfg: cfg}
+	if !d.implemented(name, cfg.Driver) {
+		// The default harness is what blank tickets run on, so none of them
+		// could start; another one only parks the tickets that name it.
+		level, fix := Warn, "its tickets are marked misconfigured until a build has it; drop it from harnesses"
+		if name == d.opts.Config.DefaultHarness {
+			level, fix = Fail, "set default_harness to a harness this build runs (claude-code, codex, pi)"
+		}
+		h.add("implemented", level, fmt.Sprintf("this build of slop-bot can't run %s under the %s driver yet", name, cfg.Driver), fix)
+	}
 	bin, err := d.opts.Commands.LookPath(p.binary)
 	if err != nil {
 		h.add("binary", Fail, p.binary+" isn't on PATH", d.forOS(p.install))
@@ -96,10 +116,21 @@ func (d *Doctor) checkHarness(ctx context.Context, name string, cfg *config.Harn
 // in this environment.
 func (h *harnessCheck) keyOptIn(envVar string) bool { return h.cfg.APIKeyOptIn && h.d.env(envVar) }
 
+// serviceKeyFix says how to give the service a key: the unit and plist
+// carry only paths and PATH, and a service manager never reads a shell
+// profile.
+func (h *harnessCheck) serviceKeyFix(name string) string {
+	return h.d.forOS(hint{
+		linux: "give the service the key too: `systemctl --user import-environment " + name + "` now, and a " +
+			"~/.config/environment.d/*.conf line for later logins, then re-run slop-bot install",
+		darwin: "give the service the key too: `launchctl setenv " + name + " ...`, then re-run slop-bot install",
+	})
+}
+
 // claudeSignIn reads `claude auth status`, which prints the login as JSON
 // from local state without a request to the model.
 func claudeSignIn(ctx context.Context, h *harnessCheck) {
-	res, err := h.d.run(ctx, h.bin, "auth", "status")
+	res, err := h.run(ctx, "auth", "status")
 	var st struct {
 		LoggedIn   bool   `json:"loggedIn"`
 		AuthMethod string `json:"authMethod"`
@@ -117,7 +148,8 @@ func claudeSignIn(ctx context.Context, h *harnessCheck) {
 	case st.LoggedIn:
 		h.add("signed in", Pass, "signed in ("+st.AuthMethod+")", "")
 	case key:
-		h.add("signed in", Pass, "ANTHROPIC_API_KEY (api_key_opt_in): billed at API rates", "")
+		h.add("signed in", Warn, "only ANTHROPIC_API_KEY (api_key_opt_in), billed at API rates, and it is in this "+
+			"shell: the service gets it only if its own environment has it", h.serviceKeyFix("ANTHROPIC_API_KEY"))
 	default:
 		h.add("signed in", Fail, "not signed in", "claude auth login")
 	}
@@ -144,7 +176,7 @@ func claudeModel(_ context.Context, h *harnessCheck) {
 // codexSignIn runs `codex login status`, which reads the stored login
 // ($CODEX_HOME/auth.json) and answers through its exit code.
 func codexSignIn(ctx context.Context, h *harnessCheck) {
-	res, err := h.d.run(ctx, h.bin, "login", "status")
+	res, err := h.run(ctx, "login", "status")
 	switch {
 	case err != nil:
 		h.add("signed in", Fail, "couldn't run `codex login status`: "+err.Error(), "codex login")
@@ -158,40 +190,52 @@ func codexSignIn(ctx context.Context, h *harnessCheck) {
 // codexModels asks the app-server for its model list: initialize, then
 // model/list. It is the list the harness's own sessions choose from, and it
 // costs no tokens.
-func codexModels(ctx context.Context, h *harnessCheck) (ids []string, def string, err error) {
+func codexModels(ctx context.Context, h *harnessCheck) (*modelList, error) {
 	input := `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"slop-bot-doctor","version":"0"}}}` + "\n" +
 		`{"method":"initialized"}` + "\n" +
 		`{"id":2,"method":"model/list","params":{}}` + "\n"
 	res, err := h.d.opts.Commands.Run(ctx, &Command{
-		Path: h.bin, Args: []string{"app-server"}, Input: input,
+		Path: h.bin, Args: []string{"app-server"}, Input: input, Env: h.env(),
 		Done: func(out string) bool { _, done := rpcReply(out, 2); return done },
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	reply, done := rpcReply(res.Stdout, 2)
 	if !done {
-		return nil, "", fmt.Errorf("codex app-server gave no model list: %s", firstLine(res.Stderr))
+		return nil, fmt.Errorf("codex app-server gave no model list: %s", firstLine(res.Stderr))
 	}
 	if reply.Error != nil {
-		return nil, "", fmt.Errorf("codex app-server: %s", reply.Error.Message)
+		return nil, fmt.Errorf("codex app-server: %s", reply.Error.Message)
 	}
 	var list struct {
 		Data []struct {
 			ID        string `json:"id"`
 			IsDefault bool   `json:"isDefault"`
 		} `json:"data"`
+		NextCursor *string `json:"nextCursor"`
 	}
 	if err := json.Unmarshal(reply.Result, &list); err != nil {
-		return nil, "", fmt.Errorf("codex app-server's model list: %w", err)
+		return nil, fmt.Errorf("codex app-server's model list: %w", err)
 	}
+	// Only the first page is read: a model missing from it with more pages
+	// to come is unknown, not absent.
+	out := &modelList{partial: list.NextCursor != nil && *list.NextCursor != ""}
 	for _, m := range list.Data {
-		ids = append(ids, m.ID)
+		out.ids = append(out.ids, m.ID)
 		if m.IsDefault {
-			def = m.ID
+			out.def = m.ID
 		}
 	}
-	return ids, def, nil
+	return out, nil
+}
+
+// modelList is a harness's model list: its default where it names one,
+// and whether it is only the first page.
+type modelList struct {
+	ids     []string
+	def     string
+	partial bool
 }
 
 type rpcMessage struct {
@@ -219,17 +263,17 @@ func rpcReply(out string, id int64) (*rpcMessage, bool) {
 }
 
 func codexModel(ctx context.Context, h *harnessCheck) {
-	ids, def, err := codexModels(ctx, h)
+	list, err := codexModels(ctx, h)
 	if err != nil {
 		h.add("model", Warn, "couldn't list codex's models: "+err.Error(), "check `codex app-server` starts")
 		return
 	}
-	listed(h, ids, def)
+	listed(h, list)
 }
 
 // listed checks the configured model against a harness's list.
-func listed(h *harnessCheck, ids []string, def string) {
-	m := h.cfg.Model
+func listed(h *harnessCheck, list *modelList) {
+	m, ids, def := h.cfg.Model, list.ids, list.def
 	switch {
 	case m == "" && def != "":
 		h.add("model", Pass, fmt.Sprintf("%s's default, %s (harnesses.%s.model is blank)", h.name, def, h.name), "")
@@ -237,6 +281,9 @@ func listed(h *harnessCheck, ids []string, def string) {
 		h.add("model", Pass, fmt.Sprintf("%s's own default (harnesses.%s.model is blank)", h.name, h.name), "")
 	case slices.Contains(ids, m):
 		h.add("model", Pass, m+" (in "+h.name+"'s model list)", "")
+	case list.partial:
+		h.add("model", Warn, fmt.Sprintf("%s isn't on the first page of %s's model list (%s)", m, h.name, abbreviate(ids)),
+			"check the model name; doctor reads only the first page")
 	default:
 		h.add("model", Fail, fmt.Sprintf("%s isn't in %s's model list (%s)", m, h.name, abbreviate(ids)),
 			fmt.Sprintf("set harnesses.%s.model to a listed model, or leave it blank", h.name))
@@ -266,7 +313,7 @@ func piRunModel(h *harnessCheck) string {
 // from rotating an OAuth token a running agent holds.
 func piSignIn(ctx context.Context, h *harnessCheck) {
 	m := piRunModel(h)
-	res, err := h.d.run(ctx, h.bin, "auth", "check", "--model", m, "--json", "--no-refresh")
+	res, err := h.run(ctx, "auth", "check", "--model", m, "--json", "--no-refresh")
 	var st struct {
 		Status   string `json:"status"`
 		Provider string `json:"provider"`
@@ -295,7 +342,7 @@ func piSignIn(ctx context.Context, h *harnessCheck) {
 // fallback, because the spike found pi's own configured default rejected
 // for the account.
 func piModel(ctx context.Context, h *harnessCheck) {
-	res, err := h.d.run(ctx, h.bin, "--list-models")
+	res, err := h.run(ctx, "--list-models")
 	if err != nil || res.ExitCode != 0 {
 		h.add("model", Warn, "couldn't list pi's models: "+errText(err, res), "check `pi --list-models` runs")
 		return
@@ -337,7 +384,7 @@ func parsePiModels(out string) []string {
 // account (or API key) is served: it proves the login without a model
 // request.
 func agyModels(ctx context.Context, h *harnessCheck) ([]string, error) {
-	res, err := h.d.run(ctx, h.bin, "models")
+	res, err := h.run(ctx, "models")
 	if err != nil || res.ExitCode != 0 {
 		return nil, errors.New(errText(err, res))
 	}
@@ -369,7 +416,7 @@ func agyModel(_ context.Context, h *harnessCheck) {
 		h.add("model", Skip, h.cfg.Model+": no model list without a sign-in", "")
 		return
 	}
-	listed(h, h.models, "")
+	listed(h, &modelList{ids: h.models})
 }
 
 // agyTerms is the consumer-terms caveat, given once: Google's terms don't
@@ -377,7 +424,8 @@ func agyModel(_ context.Context, h *harnessCheck) {
 // and never refuses; the choice is the user's.
 func agyTerms(h *harnessCheck) {
 	if h.keyOptIn("GEMINI_API_KEY") {
-		h.add("terms", Pass, "GEMINI_API_KEY (api_key_opt_in): billed per token, within Google's terms", "")
+		h.add("terms", Warn, "GEMINI_API_KEY (api_key_opt_in) is in this shell, billed per token within Google's terms; "+
+			"without it the service's agy falls back to your Google sign-in", h.serviceKeyFix("GEMINI_API_KEY"))
 		return
 	}
 	h.add("terms", Warn, "agy runs on your Google sign-in: Google's consumer terms don't allow driving agy "+

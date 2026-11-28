@@ -4,7 +4,7 @@ config
 
 prerequisites
   ok    git              2.55.0, with worktree support (2.36 or later)
-  skip  tmux             not needed: no harness runs under the tui driver
+  skip  tmux             not needed: no harness this build runs uses the tui driver
 
 harness claude-code
   ok    binary           /home/ada/.local/bin/claude
@@ -48,7 +48,7 @@ linger: off. systemd stops slop-bot when your last session ends; to keep it runn
 
 If these don't suit:
   - to move a location, export its XDG_* variable in your shell profile and re-run `slop-bot install`:
-    the service takes its paths from the shell that installs it
+    the service takes its paths from the shell that installs it (all but XDG_RUNTIME_DIR, which systemd sets)
   - edit the config (repos, harnesses, workspace_dir) and the briefing, then run `slop-bot doctor`;
     re-running `slop-bot install` keeps both and restarts the service
   - `slop-bot uninstall` removes the service; add --purge to delete slop-bot's data too

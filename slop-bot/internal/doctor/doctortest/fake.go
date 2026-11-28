@@ -22,6 +22,7 @@ type Commands struct {
 	paths   map[string]string
 	answers map[string]answer
 	calls   []string
+	envs    map[string][]string
 }
 
 type answer struct {
@@ -31,7 +32,7 @@ type answer struct {
 
 // NewCommands returns a fake with nothing on PATH.
 func NewCommands() *Commands {
-	return &Commands{paths: map[string]string{}, answers: map[string]answer{}}
+	return &Commands{paths: map[string]string{}, answers: map[string]answer{}, envs: map[string][]string{}}
 }
 
 // OnPath puts name on the fake PATH at path.
@@ -80,6 +81,7 @@ func (c *Commands) Run(_ context.Context, cmd *doctor.Command) (*service.Result,
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.calls = append(c.calls, cmdline)
+	c.envs[cmdline] = cmd.Env
 	a, ok := c.answers[cmdline]
 	switch {
 	case !ok:
@@ -134,6 +136,13 @@ func Healthy(bin string) *Commands {
 	c.Answer("agy --version", ok("1.5.18\n"))
 	c.Answer("agy models", ok(AgyModels))
 	return c
+}
+
+// Env is the environment the command line last ran with.
+func (c *Commands) Env(cmdline string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.envs[cmdline]
 }
 
 // Calls returns the command lines run so far, in order.

@@ -68,3 +68,23 @@ func TestExecCommandsReportsAMissingBinary(t *testing.T) {
 	_, err = doctor.ExecCommands{Timeout: probeTimeout}.Run(context.Background(), &doctor.Command{Path: "/nonexistent/x"})
 	require.Error(t, err)
 }
+
+// A probe that exits 0 but leaves a child holding its output is a success:
+// its output is complete, and the child is ended with its group.
+func TestExecCommandsTakesAnExitThatLeftAChildBehind(t *testing.T) {
+	t.Parallel()
+	res, err := doctor.ExecCommands{Timeout: probeTimeout, WaitDelay: time.Millisecond}.Run(context.Background(),
+		&doctor.Command{Path: "/bin/sh", Args: []string{"-c", "sleep 3600 & echo ok"}})
+	require.NoError(t, err)
+	assert.Equal(t, "ok\n", res.Stdout)
+	assert.Equal(t, 0, res.ExitCode)
+}
+
+func TestExecCommandsRunsWithTheGivenEnvironment(t *testing.T) {
+	t.Parallel()
+	res, err := doctor.ExecCommands{Timeout: probeTimeout}.Run(context.Background(), &doctor.Command{
+		Path: "/bin/sh", Args: []string{"-c", `echo "${ONLY:-unset} ${HOME:-nohome}"`}, Env: []string{"ONLY=this"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "this nohome\n", res.Stdout)
+}

@@ -16,3 +16,10 @@ func inOwnGroup(cmd *exec.Cmd) {
 	// the group.
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 }
+
+// endGroup ends what is left of a probe's group after it exited.
+func endGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
+}

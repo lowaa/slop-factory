@@ -232,6 +232,12 @@ func checkBinary(path string) error {
 	return nil
 }
 
+// ServicePATH is the PATH Install writes for a shell's PATH.
+func ServicePATH(shell string) string {
+	clean, _ := cleanPATH(shell)
+	return clean
+}
+
 // cleanPATH keeps absolute entries, in order, without repeats. Relative and
 // empty entries are dropped: under a service they would resolve against
 // the working directory, which is how a planted binary gets run.

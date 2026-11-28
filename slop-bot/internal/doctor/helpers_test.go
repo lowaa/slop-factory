@@ -37,7 +37,8 @@ func newFixture(t *testing.T, goos string) *fixture {
 	root := t.TempDir()
 	home := filepath.Join(root, "ada")
 	require.NoError(t, os.MkdirAll(home, 0o700))
-	f := &fixture{t: t, root: root, home: home, goos: goos, vars: map[string]string{},
+	// PATH is the one the fixture's service is installed with.
+	f := &fixture{t: t, root: root, home: home, goos: goos, vars: map[string]string{"PATH": "/usr/bin"},
 		cmds: doctortest.Healthy(filepath.Join(home, ".local", "bin")), runner: servicetest.NewRunner()}
 	if goos == "darwin" {
 		// Short and fixed: a Mac's own temp dir breaks the socket limit.
@@ -46,13 +47,21 @@ func newFixture(t *testing.T, goos string) *fixture {
 		f.vars["XDG_RUNTIME_DIR"] = "/run/user/1000"
 		f.runner.Answer("loginctl show-user 1000 -p Linger", &service.Result{Stdout: "Linger=yes\n"})
 	}
-	f.opts = &doctor.Options{GOOS: goos, Lookup: f.lookup, Commands: f.cmds}
+	f.opts = &doctor.Options{GOOS: goos, Lookup: f.lookup, Environ: f.environ, Commands: f.cmds}
 	f.resolve()
 	f.config("")
 	return f
 }
 
 func (f *fixture) lookup(k string) (string, bool) { v, ok := f.vars[k]; return v, ok }
+
+func (f *fixture) environ() []string {
+	out := make([]string, 0, len(f.vars))
+	for k, v := range f.vars {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
 
 // resolve re-resolves the CLI's paths and its service manager from vars.
 func (f *fixture) resolve() {

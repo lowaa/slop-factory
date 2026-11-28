@@ -134,6 +134,10 @@ func TestTmuxOnlyWhenATUIDriverIsConfigured(t *testing.T) {
 	assert.Equal(t, doctor.Skip, f.result(f.run(), "prerequisites", "tmux").Level)
 
 	f.config("harnesses: {claude-code: {}, agy: {}}\n")
+	assert.Equal(t, doctor.Skip, f.result(f.run(), "prerequisites", "tmux").Level,
+		"no tmux for a tui harness this build can't run")
+
+	f.opts.Implemented = func(string, string) bool { return true }
 	res := f.result(f.run(), "prerequisites", "tmux")
 	assert.Equal(t, doctor.Fail, res.Level)
 	assert.Contains(t, res.Detail, "the tui driver (agy)")
@@ -193,10 +197,10 @@ func TestClaudeSignIn(t *testing.T) {
 	}{
 		"signed in":  {nil, "", false, doctor.Pass, "signed in (claude.ai)"},
 		"signed out": {loggedOut, "", false, doctor.Fail, "not signed in"},
-		"a key in the env is ignored without the opt-in": {loggedOut, "", true, doctor.Fail, "not signed in"},
-		"an opted-in key":         {loggedOut, "harnesses: {claude-code: {api_key_opt_in: true}}\n", true, doctor.Pass, "ANTHROPIC_API_KEY"},
-		"a login and a key bills": {nil, "harnesses: {claude-code: {api_key_opt_in: true}}\n", true, doctor.Pass, "bills it at API rates"},
-		"unreadable":              {&service.Result{Stdout: "error: unknown command"}, "", false, doctor.Fail, "couldn't read"},
+		"a key in the env is ignored without the opt-in":      {loggedOut, "", true, doctor.Fail, "not signed in"},
+		"an opted-in key warns that the service needs it too": {loggedOut, "harnesses: {claude-code: {api_key_opt_in: true}}\n", true, doctor.Warn, "only ANTHROPIC_API_KEY"},
+		"a login and a key bills":                             {nil, "harnesses: {claude-code: {api_key_opt_in: true}}\n", true, doctor.Pass, "bills it at API rates"},
+		"unreadable":                                          {&service.Result{Stdout: "error: unknown command"}, "", false, doctor.Fail, "couldn't read"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -340,7 +344,9 @@ func TestAgyTermsWarnOnAGoogleSignIn(t *testing.T) {
 
 	f = agyFixture(t, "{api_key_opt_in: true}")
 	f.vars["GEMINI_API_KEY"] = "k"
-	assert.Equal(t, doctor.Pass, f.result(f.run(), "harness agy", "terms").Level)
+	res = f.result(f.run(), "harness agy", "terms")
+	assert.Equal(t, doctor.Warn, res.Level, "the key is in this shell, which the service doesn't read")
+	assert.Contains(t, res.Fix, "systemctl --user import-environment GEMINI_API_KEY")
 }
 
 func TestAgySignInAndModelShareOneListing(t *testing.T) {
@@ -513,7 +519,8 @@ func TestServiceRuntimeMismatchIsNamed(t *testing.T) {
 	assert.Equal(t, doctor.Warn, res.Level)
 	assert.Equal(t, "control socket: this shell resolves /tmp/other/slop-bot/slop-bot.sock, "+
 		"the service /run/user/1000/slop-bot/slop-bot.sock", res.Detail)
-	assert.Equal(t, doctor.MismatchFix, res.Fix)
+	assert.Equal(t, "systemd always gives the service logind's runtime dir: export XDG_RUNTIME_DIR=/run/user/1000 "+
+		"in your shell, or unset it", res.Fix, "re-installing can't move the service's runtime dir")
 
 	f.opts.Installing = true
 	for _, res := range f.run().Results {
@@ -550,4 +557,61 @@ func TestDefaultsCheckOnlyWhatTheyUse(t *testing.T) {
 		assert.NotRegexp(t, `^(codex|pi|agy|tmux) `, c)
 	}
 	assert.NotEmpty(t, f.cmds.Calls())
+}
+
+// Probes get the environment the harness's agents would: an API key they
+// don't get can't make a sign-in check pass.
+func TestProbesGetTheAgentsEnvironment(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "linux")
+	f.vars["ANTHROPIC_API_KEY"] = "sk-test"
+	f.vars["CLAUDE_CODE_ENTRYPOINT"] = "cli"
+	_ = f.run()
+	env := f.cmds.Env("claude auth status")
+	assert.Contains(t, env, "PATH=/usr/bin")
+	assert.NotContains(t, env, "ANTHROPIC_API_KEY=sk-test")
+	assert.NotContains(t, env, "CLAUDE_CODE_ENTRYPOINT=cli")
+
+	f.config("harnesses: {claude-code: {api_key_opt_in: true}}\n")
+	_ = f.run()
+	assert.Contains(t, f.cmds.Env("claude auth status"), "ANTHROPIC_API_KEY=sk-test")
+}
+
+func TestUnimplementedHarness(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "linux")
+	f.config("harnesses: {claude-code: {}, agy: {}}\n")
+	res := f.result(f.run(), "harness agy", "implemented")
+	assert.Equal(t, doctor.Warn, res.Level, "only agy's tickets are parked")
+	assert.Contains(t, res.Detail, "can't run agy under the tui driver")
+
+	f.config("default_harness: agy\nharnesses: {agy: {}}\n")
+	assert.Equal(t, doctor.Fail, f.result(f.run(), "harness agy", "implemented").Level,
+		"no ticket with a blank harness could start")
+
+	for _, res := range newFixture(t, "linux").run().Results {
+		assert.NotEqual(t, "implemented", res.Name, "a harness this build runs gets no row")
+	}
+}
+
+func TestCodexModelOnALaterPageWarns(t *testing.T) {
+	t.Parallel()
+	f := codexFixture(t, "gpt-9")
+	f.cmds.Answer("codex app-server", &service.Result{Stdout: `{"id":1,"result":{}}` + "\n" +
+		`{"id":2,"result":{"data":[{"id":"gpt-6.2-sol","isDefault":true}],"nextCursor":"p2"}}` + "\n"})
+	res := f.result(f.run(), "harness codex", "model")
+	assert.Equal(t, doctor.Warn, res.Level)
+	assert.Contains(t, res.Detail, "first page")
+}
+
+func TestServicePATHThatDiffersWarns(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "linux")
+	_, err := f.opts.Service.Install(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, doctor.Pass, f.result(f.run(), "platform", "service PATH").Level)
+	f.vars["PATH"] = "/opt/new/bin:/usr/bin"
+	res := f.result(f.run(), "platform", "service PATH")
+	assert.Equal(t, doctor.Warn, res.Level)
+	assert.Contains(t, res.Fix, "re-run slop-bot install")
 }

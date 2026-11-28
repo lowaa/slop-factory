@@ -20,6 +20,10 @@ type Command struct {
 	// Path is the executable, as LookPath found it.
 	Path string
 	Args []string
+	// Env, when set, is the probe's whole environment: the one the
+	// harness's agents would get, so an API key they don't get can't make a
+	// sign-in check pass. Nil inherits doctor's own.
+	Env []string
 	// Input is written to stdin.
 	Input string
 	// Done, when set, keeps stdin open until it reports the output holds
@@ -44,14 +48,16 @@ type ExecCommands struct {
 	// Timeout bounds each probe, so a harness that hangs (waiting on a
 	// network, or a prompt) can't hang doctor.
 	Timeout time.Duration
+	// WaitDelay is how long to wait for a probe's pipes to close after it
+	// exits or is killed: a child it left behind can hold them open. Zero
+	// means defaultWaitDelay.
+	WaitDelay time.Duration
 }
 
 // LookPath is exec.LookPath.
 func (ExecCommands) LookPath(file string) (string, error) { return exec.LookPath(file) }
 
-// waitDelay is how long Wait waits for a killed probe's pipes to close: a
-// harness's own children can hold them open after it dies.
-const waitDelay = 2 * time.Second
+const defaultWaitDelay = 2 * time.Second
 
 // Run runs c, killing it at the timeout.
 func (e ExecCommands) Run(ctx context.Context, c *Command) (*service.Result, error) {
@@ -60,13 +66,17 @@ func (e ExecCommands) Run(ctx context.Context, c *Command) (*service.Result, err
 	// #nosec G204 -- the path is a harness binary found on the user's PATH, the args are doctor's own
 	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
 	inOwnGroup(cmd)
-	cmd.WaitDelay = waitDelay
+	cmd.Env = c.Env
+	cmd.WaitDelay = e.WaitDelay
+	if cmd.WaitDelay == 0 {
+		cmd.WaitDelay = defaultWaitDelay
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if c.Done == nil {
 		cmd.Stdin = strings.NewReader(c.Input)
 		cmd.Stdout = &stdout
-		return result(ctx, c, cmd.Run(), stdout.String(), stderr.String(), false)
+		return result(ctx, cmd, c, &outcome{err: cmd.Run(), stdout: stdout.String(), stderr: stderr.String()})
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -97,12 +107,27 @@ func (e ExecCommands) Run(ctx context.Context, c *Command) (*service.Result, err
 	if done {
 		cancel()
 	}
-	return result(ctx, c, cmd.Wait(), stdout.String(), stderr.String(), done)
+	return result(ctx, cmd, c, &outcome{err: cmd.Wait(), stdout: stdout.String(), stderr: stderr.String(), answered: done})
 }
 
-func result(ctx context.Context, c *Command, err error, stdout, stderr string, answered bool) (*service.Result, error) {
-	res := &service.Result{Stdout: stdout, Stderr: stderr}
-	if answered {
+// outcome is how a probe ended: Run's or Wait's error, what it printed,
+// and whether Done saw the answer before it was ended.
+type outcome struct {
+	err            error
+	stdout, stderr string
+	answered       bool
+}
+
+func result(ctx context.Context, cmd *exec.Cmd, c *Command, o *outcome) (*service.Result, error) {
+	res := &service.Result{Stdout: o.stdout, Stderr: o.stderr}
+	err := o.err
+	if errors.Is(err, exec.ErrWaitDelay) {
+		// It exited 0 with its output complete, but left a child holding
+		// the pipes: that child is ended with its group, and the exit counts.
+		endGroup(cmd)
+		err = nil
+	}
+	if o.answered {
 		// Killed after it answered: the answer is what counts.
 		return res, nil
 	}

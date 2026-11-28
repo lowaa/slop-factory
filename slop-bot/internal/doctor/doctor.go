@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
+	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 )
@@ -132,6 +133,9 @@ type Options struct {
 	// Lookup reads the environment the CLI runs in: API keys, for the
 	// harnesses that may use one.
 	Lookup func(string) (string, bool)
+	// Environ is the environment harness probes start from (os.Environ),
+	// before the API keys their agents wouldn't get are removed.
+	Environ func() []string
 	// Paths is the CLI's resolution; nil with PathsErr when it failed.
 	Paths    *paths.Paths
 	PathsErr error
@@ -148,6 +152,17 @@ type Options struct {
 	// Installing is set by `slop-bot install`, which is about to write the
 	// default briefing and (re)install the service: neither is missing yet.
 	Installing bool
+	// Implemented reports whether this build runs a harness under a
+	// driver; nil is daemon.Implemented. Tests stand in a harness still to
+	// come (agy's tui driver).
+	Implemented func(name, driver string) bool
+}
+
+func (d *Doctor) implemented(name, driver string) bool {
+	if d.opts.Implemented != nil {
+		return d.opts.Implemented(name, driver)
+	}
+	return daemon.Implemented(name, driver)
 }
 
 // Doctor runs the checks.

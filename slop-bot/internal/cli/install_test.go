@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"flag"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -217,6 +219,7 @@ func TestPurgeAsksFirst(t *testing.T) {
 	h.stdin.Reset("no\n")
 	assert.Equal(t, 1, h.run(t, "uninstall", "--purge"))
 	assert.Contains(t, h.err.String(), "nothing was deleted")
+	assert.FileExists(t, h.unit(), "declining keeps the service too")
 	assert.Contains(t, h.out.String(), "  "+filepath.Join(h.home, ".config", "slop-bot")+"\n")
 	assert.Contains(t, h.out.String(), "leaves workspace_dir alone")
 	assert.DirExists(t, state)
@@ -271,7 +274,8 @@ func TestClientCommandsNameTheServicesSocketWhenTheyDiffer(t *testing.T) {
 
 	require.Equal(t, 0, h.run(t, "paths"), h.err.String())
 	assert.Contains(t, h.out.String(), "warning: control socket: this shell resolves "+cliSock)
-	assert.Contains(t, h.out.String(), "fix: your shell's XDG_* variables differ")
+	assert.Contains(t, h.out.String(), "fix: systemd always gives the service logind's runtime dir: "+
+		"export XDG_RUNTIME_DIR=/run/user/1000 in your shell, or unset it")
 
 	require.Equal(t, 0, h.run(t, "doctor"), h.err.String())
 	assert.Contains(t, h.out.String(), "warn  service paths    control socket")
@@ -293,4 +297,85 @@ func readFile(t *testing.T, path string) string {
 	b, err := os.ReadFile(path) // #nosec G304 -- a path under the test's temp dir
 	require.NoError(t, err)
 	return string(b)
+}
+
+// workspace_dir may hold uncommitted work, so purge never deletes a
+// directory it lies in, even through a symlink.
+func TestPurgeRefusesToTakeTheWorkspaceWithIt(t *testing.T) {
+	t.Parallel()
+	for name, ws := range map[string]string{
+		"nested":         "~/.local/share/slop-bot/workspace",
+		"relative":       "workspace",
+		"via symlink":    "~/link/workspace",
+		"the dir itself": "~/.cache/slop-bot",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newInstallHarness(t)
+			require.NoError(t, os.MkdirAll(filepath.Join(h.home, ".local", "share", "slop-bot"), 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(h.home, ".cache", "slop-bot"), 0o700))
+			require.NoError(t, os.Symlink(filepath.Join(h.home, ".local", "share", "slop-bot"), filepath.Join(h.home, "link")))
+			require.NoError(t, os.MkdirAll(filepath.Dir(h.configFile()), 0o700))
+			require.NoError(t, os.WriteFile(h.configFile(), []byte("workspace_dir: "+ws+"\n"), 0o600))
+
+			assert.Equal(t, 1, h.run(t, "uninstall", "--purge", "--yes"))
+			assert.Contains(t, h.err.String(), "which --purge would delete with any work in progress")
+			assert.FileExists(t, h.configFile())
+			assert.DirExists(t, filepath.Join(h.home, ".local", "share", "slop-bot"))
+		})
+	}
+}
+
+func TestPurgeRefusesWhenTheConfigDoesNotLoad(t *testing.T) {
+	t.Parallel()
+	h := newInstallHarness(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(h.configFile()), 0o700))
+	require.NoError(t, os.WriteFile(h.configFile(), []byte("workspace_dri: x\n"), 0o600))
+	assert.Equal(t, 1, h.run(t, "uninstall", "--purge", "--yes"))
+	assert.Contains(t, h.err.String(), "can't tell where workspace_dir is")
+	assert.FileExists(t, h.configFile())
+}
+
+// Purging from a shell whose paths differ from the service's would leave
+// the service's data and delete some other directories.
+func TestPurgeRefusesFromAShellThatDisagreesWithTheService(t *testing.T) {
+	t.Parallel()
+	h := newInstallHarness(t)
+	require.Equal(t, 0, h.run(t, "install"), h.err.String()+h.out.String())
+	h.vars["XDG_DATA_HOME"] = filepath.Join(h.home, "other")
+	require.NoError(t, os.MkdirAll(filepath.Join(h.home, "other", "slop-bot"), 0o700))
+	assert.Equal(t, 1, h.run(t, "uninstall", "--purge", "--yes"))
+	assert.Contains(t, h.err.String(), "purge from the shell that installed it")
+	assert.FileExists(t, h.unit())
+	assert.DirExists(t, filepath.Join(h.home, "other", "slop-bot"))
+}
+
+func TestConfirmationIsANoOnceCancelled(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	assert.True(t, confirmed(ctx, strings.NewReader("purge\n"), "purge"))
+	// A reader that never answers: only the cancel can end the prompt.
+	r, w := io.Pipe()
+	t.Cleanup(func() { _ = w.Close() })
+	cancel()
+	assert.False(t, confirmed(ctx, r, "purge"))
+}
+
+func TestInstallSummaryRepeatsAnExplicitConfig(t *testing.T) {
+	t.Parallel()
+	h := newInstallHarness(t)
+	cfg := filepath.Join(h.home, "sb.yaml")
+	require.Equal(t, 0, h.run(t, "--config", cfg, "install"), h.err.String()+h.out.String())
+	assert.Contains(t, h.out.String(), "re-running `slop-bot --config "+cfg+" install` keeps both")
+}
+
+// On Linux the service's socket is logind's whatever the shell says, and
+// the summary shows the one the daemon listens on.
+func TestInstallSummaryShowsTheServicesSocket(t *testing.T) {
+	t.Parallel()
+	h := newInstallHarness(t)
+	h.vars["XDG_RUNTIME_DIR"] = h.runtime
+	require.Equal(t, 0, h.run(t, "install"), h.err.String()+h.out.String())
+	assert.Regexp(t, `socket\s+/run/user/1000/slop-bot/slop-bot.sock\s+the service's; this shell resolves `+
+		filepath.Join(h.runtime, "slop-bot", "slop-bot.sock"), h.out.String())
 }

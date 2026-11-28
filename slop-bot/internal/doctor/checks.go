@@ -20,8 +20,11 @@ func (d *Doctor) checkConfig() {
 	o := d.opts
 	switch {
 	case o.ConfigErr != nil:
-		d.add(g, "config file", Fail, o.ConfigErr.Error(),
-			"fix "+o.ConfigFile+"; the harness and repo checks are skipped until it loads")
+		fix := "fix " + o.ConfigFile + "; the harness and repo checks are skipped until it loads"
+		if o.ConfigFile == "" {
+			fix = "fix the runtime dir (below); the config, harness and repo checks wait on it"
+		}
+		d.add(g, "config file", Fail, o.ConfigErr.Error(), fix)
 		return
 	case o.ConfigMissing && o.Installing:
 		d.add(g, "config file", Pass, o.ConfigFile+" (install writes it)", "")
@@ -112,12 +115,14 @@ func (d *Doctor) checkTmux(ctx context.Context, cfg *config.Config) {
 	const g, name = "prerequisites", "tmux"
 	var tui []string
 	for n, h := range cfg.Harnesses {
-		if h.Driver == "tui" {
+		// A tui harness this build can't run needs no tmux; doctor says
+		// it isn't implemented instead.
+		if h.Driver == "tui" && d.implemented(n, h.Driver) {
 			tui = append(tui, n)
 		}
 	}
 	if len(tui) == 0 {
-		d.add(g, name, Skip, "not needed: no harness runs under the tui driver", "")
+		d.add(g, name, Skip, "not needed: no harness this build runs uses the tui driver", "")
 		return
 	}
 	path, err := d.opts.Commands.LookPath(name)
@@ -305,10 +310,11 @@ func (d *Doctor) checkService(st *service.Status) {
 		running = "running"
 	}
 	d.add(g, "service", Pass, fmt.Sprintf("%s, %s (%s)", st.UnitPath, running, st.State), "")
-	// Install rewrites the unit from this shell, which fixes a mismatch.
+	// Install rewrites the unit from this shell.
 	if o.Installing || o.Paths == nil {
 		return
 	}
+	d.checkServicePATH()
 	svc, err := service.ServicePaths(o.Service)
 	if err != nil {
 		d.add(g, "service paths", Warn, err.Error(), "re-run slop-bot install")
@@ -321,13 +327,39 @@ func (d *Doctor) checkService(st *service.Status) {
 	}
 	for _, m := range mm {
 		d.add(g, "service paths", Warn, fmt.Sprintf("%s: this shell resolves %s, the service %s", m.What, m.CLI, m.Service),
-			MismatchFix)
+			MismatchFix(o.GOOS, m))
 	}
 }
 
-// MismatchFix is what to do when this shell and the service disagree.
-const MismatchFix = "your shell's XDG_* variables differ from the service's: re-run `slop-bot install` from the shell " +
-	"you use, or export the same values in your shell profile"
+// checkServicePATH warns when the service runs with another PATH than this
+// shell's: the binaries doctor found here may be missing for the daemon
+// and its agents.
+func (d *Doctor) checkServicePATH() {
+	env, err := d.opts.Service.ServiceEnv()
+	if err != nil {
+		return // reported with the service paths
+	}
+	shell, _ := d.opts.Lookup("PATH")
+	svc, _ := env.Lookup("PATH")
+	if svc == service.ServicePATH(shell) {
+		d.add("platform", "service PATH", Pass, "the same as this shell's", "")
+		return
+	}
+	d.add("platform", "service PATH", Warn, "the service runs with a different PATH from this shell's, so a tool "+
+		"found here may be missing for agents", "re-run slop-bot install from this shell to give the service its PATH")
+}
+
+// MismatchFix is what to do when this shell and the service disagree on m.
+func MismatchFix(goos string, m service.Mismatch) string {
+	if goos == "linux" && m.What == "control socket" {
+		// The unit doesn't carry XDG_RUNTIME_DIR, so re-installing can't
+		// move the service's socket: the shell has to move.
+		return "systemd always gives the service logind's runtime dir: export XDG_RUNTIME_DIR=" +
+			filepath.Dir(filepath.Dir(m.Service)) + " in your shell, or unset it"
+	}
+	return "your shell's XDG_* variables differ from the service's: re-run `slop-bot install` from the shell " +
+		"you use, or export the same values in your shell profile"
+}
 
 func source(d paths.Dir) string {
 	switch d.Source {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -82,7 +83,7 @@ func (a *app) readConfig(p *paths.Paths) *loadedConfig {
 
 func (a *app) newDoctor(cmd *cobra.Command, p *paths.Paths, perr error, lc *loadedConfig, installing bool) *doctor.Doctor {
 	opts := &doctor.Options{
-		GOOS: a.deps.Env.GOOS, Lookup: a.deps.Env.Lookup,
+		GOOS: a.deps.Env.GOOS, Lookup: a.deps.Env.Lookup, Environ: os.Environ,
 		Paths: p, PathsErr: perr,
 		ConfigFile: lc.path, Config: lc.cfg, ConfigMissing: lc.missing, ConfigErr: lc.err,
 		Commands: a.deps.Commands, Installing: installing,
@@ -116,7 +117,8 @@ func (a *app) unreachableNote(socket string) string {
 		return ""
 	}
 	return fmt.Sprintf("the installed service (%s) listens at %s, not %s; %s",
-		m.UnitPath(), svc.Socket(), socket, doctor.MismatchFix)
+		m.UnitPath(), svc.Socket(), socket, doctor.MismatchFix(a.deps.Env.GOOS,
+			service.Mismatch{What: "control socket", CLI: socket, Service: svc.Socket()}))
 }
 
 // mismatchWarnings are `slop-bot paths`'s warnings about an installed
@@ -132,8 +134,8 @@ func (a *app) mismatchWarnings(p *paths.Paths) []string {
 	}
 	var out []string
 	for _, mm := range service.Mismatches(p, svc) {
-		out = append(out, fmt.Sprintf("%s: this shell resolves %s, but the installed service (%s) uses %s",
-			mm.What, mm.CLI, m.UnitPath(), mm.Service))
+		out = append(out, fmt.Sprintf("%s: this shell resolves %s, but the installed service (%s) uses %s\nfix: %s",
+			mm.What, mm.CLI, m.UnitPath(), mm.Service, doctor.MismatchFix(a.deps.Env.GOOS, mm)))
 	}
 	return out
 }

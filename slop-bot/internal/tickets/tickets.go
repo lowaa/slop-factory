@@ -137,8 +137,9 @@ type Ticket struct {
 func (t *Ticket) AgentCreated() bool { return t.CreatedBy.Kind == ident.Agent }
 
 // AgentSpec is which harness runs a ticket, on which model, at which
-// effort. A blank field means a default: the config's default_harness, or
-// the harness's own default model or effort.
+// effort. A blank field means a default: the config's default_harness; the
+// config's harnesses.<name>.model, else the harness's own default model; the
+// harness's own default effort.
 type AgentSpec struct {
 	Harness string
 	Model   string

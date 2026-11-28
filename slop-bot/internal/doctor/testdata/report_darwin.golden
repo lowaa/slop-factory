@@ -5,7 +5,7 @@ config
 
 prerequisites
   ok    git              2.55.0, with worktree support (2.36 or later)
-  skip  tmux             not needed: no harness runs under the tui driver
+  skip  tmux             not needed: no harness this build runs uses the tui driver
 
 harness claude-code
   ok    binary           /Users/ada/.local/bin/claude

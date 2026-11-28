@@ -70,7 +70,7 @@ func (a *app) install(cmd *cobra.Command, f *installFlags) error {
 	if report.Failed() {
 		return fmt.Errorf("install stopped before writing anything: %w", errChecksFailed)
 	}
-	sum := &installSummary{p: p, cfg: lc.cfg, configFile: lc.path}
+	sum := &installSummary{p: p, cfg: lc.cfg, configFile: lc.path, configFlag: a.configPath != ""}
 	var err error
 	if newConfig != nil {
 		if sum.configWritten, err = setup.WriteNew(lc.path, newConfig); err != nil {
@@ -84,8 +84,14 @@ func (a *app) install(cmd *cobra.Command, f *installFlags) error {
 			return fmt.Errorf("writing %s: %w", lc.cfg.BriefingPath, err)
 		}
 	}
-	if sum.installed, err = a.installService(cmd, p, f.binary); err != nil {
+	m, err := a.installService(cmd, p, f.binary, sum)
+	if err != nil {
 		return err
+	}
+	// The socket the daemon really listens on: on Linux, logind's runtime
+	// dir whatever this shell says.
+	if svc, err := service.ServicePaths(m); err == nil {
+		sum.serviceSocket = svc.Socket()
 	}
 	out.printf("\n")
 	sum.write(out, a.deps.Env.GOOS)
@@ -113,7 +119,8 @@ func (a *app) defaultConfig(p *paths.Paths, f *installFlags) ([]byte, error) {
 	})
 }
 
-func (a *app) installService(cmd *cobra.Command, p *paths.Paths, binary string) (*service.Installed, error) {
+// installService installs the service, recording what it wrote in sum.
+func (a *app) installService(cmd *cobra.Command, p *paths.Paths, binary string, sum *installSummary) (service.Manager, error) {
 	if binary == "" {
 		var err error
 		if binary, err = a.deps.FindBinary(); err != nil {
@@ -128,14 +135,21 @@ func (a *app) installService(cmd *cobra.Command, p *paths.Paths, binary string) 
 	if err != nil {
 		return nil, err
 	}
-	return m.Install(cmd.Context())
+	if sum.installed, err = m.Install(cmd.Context()); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // installSummary is install's closing account of where everything is.
 type installSummary struct {
-	p               *paths.Paths
-	cfg             *config.Config
-	configFile      string
+	p          *paths.Paths
+	cfg        *config.Config
+	configFile string
+	// configFlag means install ran with --config, which a re-run must
+	// repeat or the service goes back to the default config.
+	configFlag      bool
+	serviceSocket   string
 	configWritten   bool
 	briefingWritten bool
 	installed       *service.Installed
@@ -159,7 +173,7 @@ func (s *installSummary) write(out *errWriter, goos string) {
 		{"tickets db", s.p.TicketsDB()},
 		{"state db", s.p.StateDB()},
 		{"logs", s.p.LogDir()},
-		{"socket", s.p.Socket()},
+		s.socketRow(),
 		{"workspace_dir", s.cfg.WorkspaceDir, "worktrees; set in the config"},
 		{"service", s.installed.UnitPath, "runs: " + strings.Join(append([]string{s.installed.Binary}, s.installed.Args...), " ")},
 	})
@@ -181,12 +195,19 @@ func (s *installSummary) write(out *errWriter, goos string) {
 	for _, warn := range s.installed.Warnings {
 		out.printf("warning: %s\n", warn)
 	}
-	out.printf("\nIf these don't suit:\n" +
-		"  - to move a location, export its XDG_* variable in your shell profile and re-run `slop-bot install`:\n" +
-		"    the service takes its paths from the shell that installs it\n" +
-		"  - edit the config (repos, harnesses, workspace_dir) and the briefing, then run `slop-bot doctor`;\n" +
-		"    re-running `slop-bot install` keeps both and restarts the service\n" +
-		"  - `slop-bot uninstall` removes the service; add --purge to delete slop-bot's data too\n")
+	rerun := "slop-bot install"
+	if s.configFlag {
+		rerun = "slop-bot --config " + s.configFile + " install"
+	}
+	out.printf("\nIf these don't suit:\n")
+	out.printf("  - to move a location, export its XDG_* variable in your shell profile and re-run `%s`:\n"+
+		"    the service takes its paths from the shell that installs it", rerun)
+	if goos == "linux" {
+		out.printf(" (all but XDG_RUNTIME_DIR, which systemd sets)")
+	}
+	out.printf("\n  - edit the config (repos, harnesses, workspace_dir) and the briefing, then run `slop-bot doctor`;\n"+
+		"    re-running `%s` keeps both and restarts the service\n"+
+		"  - `slop-bot uninstall` removes the service; add --purge to delete slop-bot's data too\n", rerun)
 	out.printf("\nCheck it came up: slop-bot health\n")
 }
 
@@ -215,6 +236,13 @@ func writeTable(out *errWriter, rows [][]string) {
 	}
 }
 
+func (s *installSummary) socketRow() []string {
+	if s.serviceSocket == "" || s.serviceSocket == s.p.Socket() {
+		return []string{"socket", s.p.Socket()}
+	}
+	return []string{"socket", s.serviceSocket, "the service's; this shell resolves " + s.p.Socket()}
+}
+
 func written(did bool, what, kept string) string {
 	if did {
 		return "written: " + what
@@ -231,89 +259,148 @@ func (a *app) uninstallCmd() *cobra.Command {
 			"unless --purge, which lists what it will delete and asks first. workspace_dir " +
 			"is never deleted: it may hold work in progress.",
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			out := &errWriter{w: cmd.OutOrStdout()}
-			p, err := a.paths()
-			if err != nil {
-				return err
-			}
-			m, err := a.newManager(p, "", "", cmd.ErrOrStderr())
-			if err != nil {
-				return err
-			}
-			switch err := m.Uninstall(cmd.Context()); {
-			case errors.Is(err, service.ErrNotInstalled):
-				out.printf("the slop-bot service isn't installed (no %s)\n", m.UnitPath())
-			case err != nil:
-				return err
-			default:
-				out.printf("stopped and removed the slop-bot service: %s\n", m.UnitPath())
-			}
-			if !purge {
-				out.printf("kept slop-bot's files (config, tickets, state); `slop-bot uninstall --purge` deletes them\n")
-				return out.err
-			}
-			if err := a.purge(cmd.Context(), out, p, yes); err != nil {
-				return err
-			}
-			return out.err
-		},
+		RunE: func(cmd *cobra.Command, _ []string) error { return a.uninstall(cmd, purge, yes) },
 	}
 	cmd.Flags().BoolVar(&purge, "purge", false, "also delete slop-bot's config, briefing, tickets, state and cache")
 	cmd.Flags().BoolVar(&yes, "yes", false, "with --purge, delete without asking")
 	return cmd
 }
 
-// errNotConfirmed is a purge the user didn't confirm.
-var errNotConfirmed = errors.New("not confirmed; nothing was deleted")
-
-// purge deletes slop-bot's own directories: each is <XDG base>/slop-bot,
-// so nothing else under the base is touched.
-func (a *app) purge(ctx context.Context, out *errWriter, p *paths.Paths, yes bool) error {
-	// A daemon started by hand would go on writing into what's deleted.
-	if conn, err := control.Dialer(p.Socket())(ctx, "", ""); err == nil {
-		_ = conn.Close()
-		return fmt.Errorf("a slop-bot daemon is still running at %s; stop it, then purge", p.Socket())
+func (a *app) uninstall(cmd *cobra.Command, purge, yes bool) error {
+	out := &errWriter{w: cmd.OutOrStdout()}
+	p, err := a.paths()
+	if err != nil {
+		return err
 	}
+	m, err := a.newManager(p, "", "", cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+	// Everything purge needs is settled, and confirmed, before the
+	// service goes: the unit is the record of where its data is.
 	var targets []string
-	for _, d := range []paths.Dir{p.Config, p.Data, p.State, p.Cache} {
-		if _, err := os.Stat(d.Path); err == nil {
-			targets = append(targets, d.Path)
+	if purge {
+		if targets, err = a.purgeTargets(cmd.Context(), out, m, p); err != nil {
+			return err
+		}
+		if len(targets) > 0 && !yes {
+			out.printf("type 'purge' to delete them: ")
+			if !confirmed(cmd.Context(), a.deps.Stdin, "purge") {
+				return errNotConfirmed
+			}
 		}
 	}
-	if len(targets) == 0 {
-		out.printf("nothing to purge\n")
-		return nil
+	switch err := m.Uninstall(cmd.Context()); {
+	case errors.Is(err, service.ErrNotInstalled):
+		out.printf("the slop-bot service isn't installed (no %s)\n", m.UnitPath())
+	case err != nil:
+		return err
+	default:
+		out.printf("stopped and removed the slop-bot service: %s\n", m.UnitPath())
 	}
-	out.printf("--purge deletes:\n")
-	for _, t := range targets {
-		out.printf("  %s\n", t)
-	}
-	if c, err := a.loadConfig(p); err == nil {
-		out.printf("and leaves workspace_dir alone (%s): it may hold work in progress\n", c.WorkspaceDir)
-	}
-	if !yes {
-		out.printf("type 'purge' to delete them: ")
-		if !confirmed(a.deps.Stdin, "purge") {
-			return errNotConfirmed
-		}
+	if !purge {
+		out.printf("kept slop-bot's files (config, tickets, state); `slop-bot uninstall --purge` deletes them\n")
+		return out.err
 	}
 	for _, t := range targets {
 		if err := os.RemoveAll(t); err != nil {
 			return fmt.Errorf("purging %s: %w", t, err)
 		}
 	}
-	out.printf("deleted %d directories\n", len(targets))
-	return nil
+	if len(targets) > 0 {
+		out.printf("deleted %d directories\n", len(targets))
+	}
+	return out.err
 }
 
-func confirmed(in io.Reader, word string) bool {
+// errNotConfirmed is a purge the user didn't confirm.
+var errNotConfirmed = errors.New("not confirmed; nothing was deleted and the service is still installed")
+
+// purgeTargets are slop-bot's own directories, each <XDG base>/slop-bot,
+// that exist: nothing else under a base is touched. It refuses when the
+// directories might not be the right ones, or would take workspace_dir
+// (with work in progress) with them.
+func (a *app) purgeTargets(ctx context.Context, out *errWriter, m service.Manager, p *paths.Paths) ([]string, error) {
+	// A daemon started by hand would go on writing into what's deleted.
+	if conn, err := control.Dialer(p.Socket())(ctx, "", ""); err == nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("a slop-bot daemon is still running at %s; stop it, then purge", p.Socket())
+	}
+	// This shell's directories may not be the service's: purge from the
+	// shell that installed it, or the real data stays and another
+	// instance's goes.
+	if svc, err := service.ServicePaths(m); err == nil {
+		if mm := service.Mismatches(p, svc); len(mm) > 0 {
+			return nil, fmt.Errorf("this shell's %s is %s but the installed service's is %s; purge from the shell "+
+				"that installed it", mm[0].What, mm[0].CLI, mm[0].Service)
+		}
+	}
+	c, err := a.loadConfig(p)
+	if err != nil {
+		return nil, fmt.Errorf("can't tell where workspace_dir is, so nothing is purged: %w", err)
+	}
+	var targets []string
+	for _, d := range []paths.Dir{p.Config, p.Data, p.State, p.Cache} {
+		if _, err := os.Stat(d.Path); err != nil {
+			continue
+		}
+		if within(c.WorkspaceDir, d.Path) {
+			return nil, fmt.Errorf("workspace_dir %s is inside %s, which --purge would delete with any work "+
+				"in progress; move workspace_dir out first, or delete by hand", c.WorkspaceDir, d.Path)
+		}
+		targets = append(targets, d.Path)
+	}
+	if len(targets) == 0 {
+		out.printf("nothing to purge\n")
+		return nil, nil
+	}
+	out.printf("--purge deletes:\n")
+	for _, t := range targets {
+		out.printf("  %s\n", t)
+	}
+	out.printf("and leaves workspace_dir alone (%s): it may hold work in progress\n", c.WorkspaceDir)
+	return targets, nil
+}
+
+// within reports whether path is dir or under it, after symlinks, so a
+// link can't hide a workspace inside a purged directory.
+func within(path, dir string) bool {
+	path, dir = realPath(path), realPath(dir)
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && (rel == "." || filepath.IsLocal(rel))
+}
+
+// realPath resolves symlinks in the longest prefix of path that exists.
+func realPath(path string) string {
+	rest := ""
+	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		if parent := filepath.Dir(p); parent == p {
+			return path
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+	}
+}
+
+// confirmed reads the answer to a prompt. Ctrl-C cancels ctx, and is a no:
+// main's signal handling consumes the interrupt, so a read that ignored ctx
+// would wait on for Enter, then go ahead.
+func confirmed(ctx context.Context, in io.Reader, word string) bool {
 	if in == nil {
 		return false
 	}
-	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && line == "" {
+	answer := make(chan string, 1)
+	go func() {
+		// Left blocked on a cancelled prompt; the process is about to exit.
+		line, _ := bufio.NewReader(in).ReadString('\n')
+		answer <- line
+	}()
+	select {
+	case <-ctx.Done():
 		return false
+	case line := <-answer:
+		return ctx.Err() == nil && strings.TrimSpace(line) == word
 	}
-	return strings.TrimSpace(line) == word
 }
