@@ -13,9 +13,11 @@ web UI to drive it all. Start at [slop-haus/README.md](slop-haus/README.md).
 | `slop-haus/` | the server (Go), the web UI (React), the supervisor that runs agents on worker machines (Python), and their tests |
 | `go-auth/`, `go-db/`, `go-web/`, `go-settings/`, `go-privacy/`, `go-llm-usage/`, `go-clock/`, `artifact-store/` | Go libraries slop-haus is built on, resolved through the root `go.work` |
 | `slop-review/` | LLM code review of a change: what agents run on their own work before calling it done |
+| `slop-bot/` | a per-user daemon (Go) that runs a coding agent on each ticket for its whole life, with its CLI and TUI in one binary; scaffolding so far |
 | `js-components/` | shared frontend packages (`@slop-factory/*`), npm workspaces of the root `package.json` |
 | `deployment_example/` | example deployments of the published images: Docker Compose, a Helm chart, an Argo CD Application |
 | `bats/`, `dev-tools/` | the bats test runner and the test helpers the suites use |
+| `dev-tools/quality/` | each project's `quality.sh`: coverage, complexity and test time, ratcheted against committed baselines |
 
 ## Getting started
 
