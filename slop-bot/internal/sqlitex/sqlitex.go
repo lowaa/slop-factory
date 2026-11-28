@@ -29,8 +29,9 @@ import (
 var ErrNewerSchema = errors.New("sqlitex: database schema is newer than this binary")
 
 // busyTimeoutMillis is how long a connection waits on another's write lock
-// before failing with SQLITE_BUSY. The daemon is the only writer, so waits
-// are short; this only covers overlapping transactions inside it.
+// before failing with SQLITE_BUSY. The daemon is the only writer, and its
+// write transactions queue in RunInTx, so this only covers its writes
+// outside a transaction, and another process's.
 const busyTimeoutMillis = 5000
 
 // maxOpenConns bounds the pool. WAL lets readers run beside the one writer;
@@ -55,6 +56,46 @@ type Options struct {
 type DB struct {
 	*bun.DB
 	sql *sql.DB
+	// writer admits one write transaction at a time (see RunInTx).
+	writer chan struct{}
+	// waiting, when set, is called by a write transaction about to queue
+	// behind another: the test's proof that it queued here.
+	waiting func()
+}
+
+// RunInTx is bun's RunInTx, with write transactions queued here, one at a
+// time. SQLite admits one writer at a time whatever this does; left to
+// busy_timeout, concurrent writers poll for its lock, unfairly, and under
+// load one can wait out the timeout and fail with SQLITE_BUSY however
+// briefly each holds the lock. Queued here, they take turns in order, for
+// as long as their ctx allows. A write outside a transaction, or from
+// another process, still meets busy_timeout. fn must not start another
+// write transaction on d: it would wait for itself.
+func (d *DB) RunInTx(ctx context.Context, opts *sql.TxOptions, fn func(ctx context.Context, tx bun.Tx) error) error {
+	if opts == nil || !opts.ReadOnly {
+		if err := d.takeWriter(ctx); err != nil {
+			return err
+		}
+		defer func() { <-d.writer }()
+	}
+	return d.DB.RunInTx(ctx, opts, fn)
+}
+
+func (d *DB) takeWriter(ctx context.Context) error {
+	select {
+	case d.writer <- struct{}{}:
+		return nil
+	default:
+	}
+	if d.waiting != nil {
+		d.waiting()
+	}
+	select {
+	case d.writer <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("sqlitex: waiting to write: %w", ctx.Err())
+	}
 }
 
 // Open opens (creating if needed) the database at opts.Path, applies any
@@ -72,7 +113,7 @@ func Open(ctx context.Context, opts *Options) (*DB, error) {
 		return nil, fmt.Errorf("sqlitex: opening %s: %w", opts.Path, err)
 	}
 	sqldb.SetMaxOpenConns(maxOpenConns)
-	db := &DB{DB: bun.NewDB(sqldb, sqlitedialect.New()), sql: sqldb}
+	db := &DB{DB: bun.NewDB(sqldb, sqlitedialect.New()), sql: sqldb, writer: make(chan struct{}, 1)}
 	if err := migrate(ctx, sqldb, opts); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -85,8 +126,9 @@ func (d *DB) Close() error { return d.DB.Close() }
 
 // dsn sets the pragmas on every connection the pool opens, not just the
 // first: foreign keys and busy_timeout are per connection in SQLite.
-// _txlock=immediate takes the write lock at BEGIN, so two write transactions
-// queue on busy_timeout instead of one failing at its first write.
+// _txlock=immediate takes the write lock at BEGIN, so a write transaction
+// waits on busy_timeout (when RunInTx hasn't queued it: another process's)
+// instead of failing at its first write.
 func dsn(path string, durable bool) string {
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")

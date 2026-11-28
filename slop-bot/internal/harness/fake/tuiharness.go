@@ -30,10 +30,12 @@ type TUIHarness struct {
 	Pointer func(msgs []*harness.Message) string
 	Logger  *slog.Logger
 	Clock   clock.Clock
-	// PollInterval and ConfirmTimeout are tuidriver.Options'; zero is the
-	// kit's default.
+	// PollInterval, HookTrust, ConfirmTimeout and RenderTimeout are
+	// tuidriver.Options'; zero is the kit's default.
 	PollInterval   time.Duration
+	HookTrust      time.Duration
 	ConfirmTimeout time.Duration
+	RenderTimeout  time.Duration
 }
 
 // Name implements harness.AIHarness.
@@ -80,7 +82,7 @@ func (h *TUIHarness) options(session string) *tuidriver.Options {
 	return &tuidriver.Options{
 		Profile: h.Profile(), Host: h.Host, Hub: h.Hub, Session: session,
 		Pointer: h.Pointer, Logger: h.Logger, Clock: h.Clock,
-		PollInterval: h.PollInterval, ConfirmTimeout: h.ConfirmTimeout,
+		PollInterval: h.PollInterval, HookTrust: h.HookTrust, ConfirmTimeout: h.ConfirmTimeout, RenderTimeout: h.RenderTimeout,
 	}
 }
 

@@ -54,9 +54,13 @@ type Options struct {
 	Logger  *slog.Logger
 	Clock   clock.Clock
 	// PollInterval is how often the screen markers are read: the fallback
-	// for what hooks don't say. A marker overrides the hooks' turn state
-	// only after a PollInterval with no hook.
+	// for what hooks don't say. It also paces the retry of held messages
+	// and the exit watcher's back-off.
 	PollInterval time.Duration
+	// HookTrust is how long after a hook a screen marker can't override
+	// the hooks' turn state: the screen may not show the hook's news yet.
+	// Zero is PollInterval.
+	HookTrust time.Duration
 	// ConfirmTimeout is how long a submit, cancel or quit waits for the
 	// harness to act before it is retried or given up on.
 	ConfirmTimeout time.Duration
@@ -79,6 +83,9 @@ func (o *Options) normalised() (*Options, error) {
 	n.Clock = clock.Or(n.Clock)
 	if n.PollInterval <= 0 {
 		n.PollInterval = defaultPollInterval
+	}
+	if n.HookTrust <= 0 {
+		n.HookTrust = n.PollInterval
 	}
 	if n.ConfirmTimeout <= 0 {
 		n.ConfirmTimeout = defaultConfirmTimeout
@@ -497,7 +504,7 @@ func (c *Conversation) readScreen(ctx context.Context) {
 	c.apply(func() []harness.Event {
 		// A hook during the read, or just before it, may not have reached
 		// the screen yet: the hook is the better witness.
-		if st == screenUnknown || c.hookGen != gen || c.opts.Clock.Now().Sub(c.lastHook) < c.opts.PollInterval {
+		if st == screenUnknown || c.hookGen != gen || c.opts.Clock.Now().Sub(c.lastHook) < c.opts.HookTrust {
 			return nil
 		}
 		return c.screenEvents(st, cancelled)

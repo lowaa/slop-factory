@@ -144,12 +144,22 @@ func (m *Manager) TellAll(ctx context.Context, from ident.Principal, text string
 	return n, nil
 }
 
+// resolveAgent finds the live agent to names, by its id or its ticket's. A
+// failed read is that failure, not an unknown target.
 func (m *Manager) resolveAgent(ctx context.Context, to string) (*state.Agent, error) {
-	if a, err := m.opts.State.Agents.Get(ctx, ident.AgentID(to)); err == nil && a.EndedAt == nil {
+	a, err := m.opts.State.Agents.Get(ctx, ident.AgentID(to))
+	switch {
+	case err == nil && a.EndedAt == nil:
 		return a, nil
+	case err != nil && !errors.Is(err, state.ErrNotFound):
+		return nil, err
 	}
-	if a, err := m.opts.State.Agents.LiveForTicket(ctx, ident.TicketID(to)); err == nil {
+	a, err = m.opts.State.Agents.LiveForTicket(ctx, ident.TicketID(to))
+	switch {
+	case err == nil:
 		return a, nil
+	case !errors.Is(err, state.ErrNotFound):
+		return nil, err
 	}
 	return nil, fmt.Errorf("%w: %q", ErrUnknownTarget, to)
 }
