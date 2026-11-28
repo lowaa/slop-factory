@@ -65,6 +65,7 @@ type State struct {
 	Cursors     *Cursors
 	Transcripts *Transcripts
 	Settings    *Settings
+	MergeGrants *MergeGrants
 	Pruner      *Pruner
 
 	// db is set only when State opened it, and so owns it.
@@ -97,6 +98,7 @@ func New(db *sqlitex.DB, clk clock.Clock) *State {
 		Cursors:     &Cursors{db: db, clock: clk},
 		Transcripts: &Transcripts{db: db, clock: clk},
 		Settings:    &Settings{db: db, clock: clk},
+		MergeGrants: &MergeGrants{db: db, clock: clk},
 		Pruner:      &Pruner{db: db},
 	}
 }

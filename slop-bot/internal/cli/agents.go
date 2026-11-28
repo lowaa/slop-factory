@@ -31,22 +31,30 @@ func (a *app) printOK(cmd *cobra.Command, format string, args ...any) error {
 }
 
 func (a *app) tellCmd() *cobra.Command {
-	var all, interrupt bool
+	var all, interrupt, merge bool
 	c := &cobra.Command{
 		Use:   "tell <agent|ticket|user> <text>",
 		Short: "Message an agent, every agent (--all), or the user",
 		Long: "Message an agent (by id, or by its ticket's id), every working agent with --all, " +
-			"or the user. A user's message to an agent waiting on an ask is its answer.",
+			"or the user. A user's message to an agent waiting on an ask is its answer. " +
+			"The user's --merge (or a message of just \"merge\") authorises the agent to merge " +
+			"its ticket's work, which a ticket without AutoMerge needs.",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if all {
+			switch {
+			case all:
 				return cobra.ExactArgs(1)(cmd, args)
+			case merge:
+				return cobra.RangeArgs(1, 2)(cmd, args)
 			}
 			return cobra.ExactArgs(2)(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			in := api.Tell{All: all, Interrupt: interrupt, Text: args[len(args)-1]}
+			in := api.Tell{All: all, Interrupt: interrupt, Merge: merge}
 			if !all {
 				in.To = args[0]
+			}
+			if len(args) > 1 || all {
+				in.Text = args[len(args)-1]
 			}
 			var out api.Told
 			if err := a.do(cmd, http.MethodPost, api.PathTell, &in, &out); err != nil {
@@ -57,6 +65,7 @@ func (a *app) tellCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&all, "all", false, "every working agent")
 	c.Flags().BoolVar(&interrupt, "interrupt", false, "stop the agent's current turn first (user only)")
+	c.Flags().BoolVar(&merge, "merge", false, "authorise the agent to merge its ticket's work; the text is optional (user only)")
 	return agentCmd(c)
 }
 

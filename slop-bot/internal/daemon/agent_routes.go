@@ -22,6 +22,7 @@ var agentErrors = append([]control.ErrorMapping{
 	{Err: agents.ErrUserOnly, Status: http.StatusForbidden},
 	{Err: agents.ErrNotYourTicket, Status: http.StatusForbidden},
 	{Err: agents.ErrHasAutoMerge, Status: http.StatusConflict},
+	{Err: agents.ErrTicketEnded, Status: http.StatusConflict},
 	{Err: agents.ErrNotInDiscusson, Status: http.StatusConflict},
 	{Err: agents.ErrCantFinish, Status: http.StatusConflict},
 }, ticketErrors...)
@@ -38,6 +39,7 @@ func (ar *agentRoutes) register(s *control.Server) {
 	s.HandleFunc("GET "+api.PathDiscussions, ar.discussions)
 	s.HandleFunc("POST "+api.PathResolve, ar.resolve)
 	s.HandleFunc("POST "+api.PathReadyToMerge, ar.readyToMerge)
+	s.HandleFunc("POST "+api.PathPreTool, ar.preTool)
 	s.HandleFunc("POST "+api.PathDone, ar.done)
 	s.HandleFunc("POST "+api.PathNote, ar.note)
 	s.HandleFunc("GET "+api.PathStatus, ar.status)
@@ -61,6 +63,14 @@ func (ar *agentRoutes) tell(w http.ResponseWriter, r *http.Request) {
 	if in.All && in.Interrupt {
 		fail(w, errors.Join(errBadRequest, errors.New("--interrupt can't be combined with --all: a broadcast never interrupts")))
 		return
+	}
+	if in.Merge || (by.IsUser() && !in.All && agents.SaysMerge(in.Text)) {
+		text, err := ar.authoriseMerge(r, &in)
+		if err != nil {
+			agentFail(w, err)
+			return
+		}
+		in.Text = text
 	}
 	if in.All {
 		n, err := ar.d.agents.TellAll(r.Context(), by, in.Text)

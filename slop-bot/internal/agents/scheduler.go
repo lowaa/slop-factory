@@ -53,6 +53,7 @@ const CursorKey = "tickets"
 func (m *Manager) sync(ctx context.Context, ticket ident.TicketID) {
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
+	m.revokeMergeIfEnded(ctx, ticket)
 	a, err := m.opts.State.Agents.LiveForTicket(ctx, ticket)
 	if err != nil {
 		return

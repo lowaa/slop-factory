@@ -58,6 +58,9 @@ type Tell struct {
 	Text      string `json:"text"`
 	All       bool   `json:"all,omitempty"`
 	Interrupt bool   `json:"interrupt,omitempty"`
+	// Merge authorises the agent to merge its ticket's work (user only);
+	// a Text of just "merge" does too.
+	Merge bool `json:"merge,omitempty"`
 }
 
 // Told answers POST /v1/tell.
