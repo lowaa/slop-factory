@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "a hand-written miniature of Codex's bundle, one case per mapping rule",
+  "definitions": {
+    "InitializeParams": {
+      "properties": {"clientInfo": {"$ref": "#/definitions/ClientInfo"}},
+      "required": ["clientInfo"],
+      "type": "object"
+    },
+    "ClientInfo": {
+      "properties": {"name": {"type": "string"}},
+      "required": ["name"],
+      "type": "object"
+    },
+    "ClientRequest": {
+      "oneOf": [
+        {"properties": {"method": {"enum": ["initialize"], "type": "string"}, "params": {"$ref": "#/definitions/InitializeParams"}}},
+        {"properties": {"method": {"enum": ["turn/start"], "type": "string"}, "params": {"$ref": "#/definitions/v2/TurnStartParams"}}},
+        {"properties": {"method": {"enum": ["not/generated"], "type": "string"}, "params": {"$ref": "#/definitions/v2/Unused"}}}
+      ]
+    },
+    "ClientNotification": {
+      "oneOf": [{"properties": {"method": {"enum": ["initialized"], "type": "string"}}}]
+    },
+    "ServerNotification": {"oneOf": []},
+    "ServerRequest": {
+      "oneOf": [
+        {"properties": {"method": {"enum": ["item/commandExecution/requestApproval"], "type": "string"}, "params": {"$ref": "#/definitions/v2/Unused"}}}
+      ]
+    },
+    "v2": {
+      "TurnStartParams": {
+        "description": "Starts a turn.\n\nMore detail that stays out of the Go doc.",
+        "properties": {
+          "threadId": {"type": "string"},
+          "input": {"items": {"$ref": "#/definitions/v2/UserInput"}, "type": "array"},
+          "effort": {"anyOf": [{"$ref": "#/definitions/v2/ReasoningEffort"}, {"type": "null"}]},
+          "approvalPolicy": {"anyOf": [{"$ref": "#/definitions/v2/AskForApproval"}, {"type": "null"}]},
+          "sandbox": {"anyOf": [{"$ref": "#/definitions/v2/SandboxMode"}, {"type": "null"}]},
+          "error": {"anyOf": [{"$ref": "#/definitions/v2/TurnError"}, {"type": "null"}]},
+          "origin": {"$ref": "#/definitions/v2/TurnError"},
+          "config": {"additionalProperties": true, "type": ["object", "null"]},
+          "counts": {"additionalProperties": {"format": "int64", "type": "integer"}, "type": "object"},
+          "anything": true,
+          "output": {"$ref": "#/definitions/v2/OutputBody"},
+          "receiverThreadIds": {"items": {"type": "string"}, "type": "array"},
+          "window": {"properties": {"usedPercent": {"type": "integer"}}, "type": "object"}
+        },
+        "required": ["threadId", "input", "origin", "counts"],
+        "type": "object"
+      },
+      "OutputBody": {"anyOf": [{"type": "string"}, {"items": {"$ref": "#/definitions/v2/TurnError"}, "type": "array"}]},
+      "ReasoningEffort": {"minLength": 1, "type": "string"},
+      "OtherEnum": {"enum": ["a", "b"], "type": "string"},
+      "SandboxMode": {"enum": ["read-only", "danger-full-access"], "type": "string"},
+      "AskForApproval": {
+        "oneOf": [
+          {"enum": ["on-request", "never"], "type": "string"},
+          {"properties": {"granular": {"type": "boolean"}}, "required": ["granular"], "type": "object"}
+        ]
+      },
+      "TurnError": {
+        "properties": {"message": {"type": "string"}},
+        "required": ["message"],
+        "type": "object"
+      },
+      "UserInput": {
+        "oneOf": [
+          {
+            "properties": {"type": {"enum": ["text"], "type": "string"}, "text": {"type": "string"}, "status": {"$ref": "#/definitions/v2/SandboxMode"}, "phase": {"$ref": "#/definitions/v2/SandboxMode"}, "mode": {"$ref": "#/definitions/v2/SandboxMode"}},
+            "required": ["type", "text"],
+            "type": "object"
+          },
+          {
+            "anyOf": [
+              {"properties": {"url": {"type": "string"}}, "required": ["url"], "type": "object"},
+              {"properties": {"fileId": {"type": "string"}}, "required": ["fileId"], "type": "object"}
+            ],
+            "properties": {"type": {"enum": ["image"], "type": "string"}, "text": {"type": "string"}, "status": {"type": "string"}, "phase": {"$ref": "#/definitions/v2/OtherEnum"}, "mode": {"$ref": "#/definitions/v2/OtherEnum"}},
+            "required": ["type"],
+            "type": "object"
+          },
+          {
+            "properties": {"type": {"enum": ["skill"], "type": "string"}, "status": {"type": "integer"}, "phase": {"$ref": "#/definitions/v2/ReasoningEffort"}},
+            "required": ["type"],
+            "type": "object"
+          }
+        ]
+      },
+      "Unused": {"properties": {"x": {"type": "string"}}, "type": "object"}
+    }
+  }
+}

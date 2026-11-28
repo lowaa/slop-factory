@@ -1,0 +1,11 @@
+# Recorded from codex-cli 0.172.0 `codex app-server` and scrubbed by script
+# (README.md says how); re-record on a Codex version bump.
+interrupt_refused.jsonl linguist-generated=true
+resume.jsonl linguist-generated=true
+resume_missing.jsonl linguist-generated=true
+rollout.jsonl linguist-generated=true
+start.jsonl linguist-generated=true
+steer_refused.jsonl linguist-generated=true
+turn_completed.jsonl linguist-generated=true
+turn_interrupted.jsonl linguist-generated=true
+turn_steered.jsonl linguist-generated=true

@@ -1,0 +1,102 @@
+package daemon
+
+import (
+	"log/slog"
+	"strings"
+
+	"github.com/lowaa/slop-factory/go-clock"
+	"github.com/lowaa/slop-factory/slop-bot/internal/config"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agy"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/claudecode"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
+	"github.com/lowaa/slop-factory/slop-bot/internal/version"
+)
+
+// Harnesses maps a configured harness name to its implementation.
+type Harnesses map[string]harness.AIHarness
+
+// Harness implements agents.Harnesses.
+func (h Harnesses) Harness(name string) (harness.AIHarness, bool) {
+	a, ok := h[name]
+	return a, ok
+}
+
+// buildOptions is what every harness implementation is built with.
+type buildOptions struct {
+	logger *slog.Logger
+	clock  clock.Clock
+	// preToolHook is `slop-bot hook pre-tool`, the merge guard, for the
+	// harnesses whose drivers have a pre-tool hook to run it from.
+	preToolHook []string
+	// tui is the TUI drivers' kit: nil without tmux, and a TUI harness is
+	// then left out.
+	tui *tuidriver.Sessions
+	// guard is the merge guard itself, for Codex, which asks it in-process
+	// through its approvals: its hooks don't run under app-server.
+	guard codex.Guard
+}
+
+// builders are the harness implementations this build has, by harness and
+// driver.
+var builders = map[[2]string]func(o *buildOptions) harness.AIHarness{
+	{config.ClaudeCode, claudecode.Driver}: func(o *buildOptions) harness.AIHarness {
+		return &claudecode.Harness{Logger: o.logger, Clock: o.clock, PreToolHook: o.preToolHook}
+	},
+	{config.Codex, codex.Driver}: func(o *buildOptions) harness.AIHarness {
+		return &codex.Harness{Logger: o.logger, Clock: o.clock, Version: version.String(), Guard: o.guard}
+	},
+	{config.Pi, pi.Driver}: func(o *buildOptions) harness.AIHarness {
+		return &pi.Harness{Logger: o.logger, Clock: o.clock, PreToolHook: o.preToolHook}
+	},
+	{config.Agy, tuidriver.Driver}: func(o *buildOptions) harness.AIHarness {
+		if o.tui == nil {
+			return nil
+		}
+		return &agy.Harness{Sessions: *o.tui}
+	},
+}
+
+// TUIProfile is the profile of the TUI harness a session is named for, so
+// `slop-bot hook tui` can answer a hook itself when the daemon can't
+// (tuidriver.Profile.Offline).
+func TUIProfile(session string) (*tuidriver.Profile, bool) {
+	if strings.HasPrefix(session, agy.SessionPrefix) {
+		return (&agy.Harness{}).Profile(), true
+	}
+	return nil, false
+}
+
+// needsTUI says whether any configured harness runs under the tui driver.
+func needsTUI(cfg *config.Config) bool {
+	for name, hc := range cfg.Harnesses {
+		if hc.Driver == tuidriver.Driver && Implemented(name, hc.Driver) {
+			return true
+		}
+	}
+	return false
+}
+
+// Implemented reports whether this build can run the harness under the
+// driver: the config accepts drivers still to come, and doctor says so.
+func Implemented(name, driver string) bool {
+	_, ok := builders[[2]string{name, driver}]
+	return ok
+}
+
+// configuredHarnesses builds the implementation for each harness in the
+// config, under its configured driver. A harness whose driver this build
+// doesn't have yet is left out: tickets that ask for it are misconfigured.
+func configuredHarnesses(cfg *config.Config, o *buildOptions) Harnesses {
+	out := Harnesses{}
+	for name, hc := range cfg.Harnesses {
+		if build, ok := builders[[2]string{name, hc.Driver}]; ok {
+			if h := build(o); h != nil {
+				out[name] = h
+			}
+		}
+	}
+	return out
+}

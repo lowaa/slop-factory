@@ -1,0 +1,31 @@
+# Written by `slop-bot service install`. Re-run it rather than editing this
+# file: it resolves the paths and PATH below from your shell, so the daemon
+# agrees with the CLI.
+[Unit]
+Description=slop-bot: coding agents on tickets
+
+[Service]
+Type=exec
+ExecStart={{execPath .Binary}}{{range .Args}} {{execArg .}}{{end}}
+WorkingDirectory={{specifiers .WorkingDir}}
+{{- range .Env}}
+Environment={{envAssign .}}
+{{- end}}
+# systemd sets XDG_RUNTIME_DIR and creates the socket directory. It's kept
+# when the service stops: it also holds the instance lock, and removing it
+# under a daemon started by hand would let a second one start.
+RuntimeDirectory=slop-bot
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+Restart=on-failure
+RestartSec=5s
+# SIGTERM goes to the daemon alone, so it can stop its agents in order; only
+# what is still running after the timeout is SIGKILLed. The tmux server the
+# TUI agents run in isn't in this unit: the daemon starts it in a scope of
+# its own (slop-bot-tmux-slop-bot.scope), so their sessions outlive a
+# restart and are taken back by the next daemon.
+KillMode=mixed
+TimeoutStopSec={{.StopSeconds}}s
+
+[Install]
+WantedBy=default.target

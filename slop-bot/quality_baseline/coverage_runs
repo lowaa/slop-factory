@@ -1,0 +1,6 @@
+# --prune and --rebaseline run the suite this many times and count only the
+# blocks every run covers (dev-tools/quality/README.md, "Coverage that timing
+# moves"). The e2e tests (tmux, the daemon, the fake harness) reach a tail of
+# error branches only when a teardown's cancellation lands mid-call, a
+# different few each run; a single lucky run would write them into the bar.
+5

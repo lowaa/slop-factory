@@ -1,0 +1,6 @@
+# Recorded from pi 1.4.0 (openai/gpt-6.2-sol, thinking low), then scrubbed by
+# a script (home paths, tool call ids, text signatures, the system prompt's
+# sections): the codec's from `pi --mode rpc` by a probe driver when it was
+# written, and session.jsonl, a `pi -p` session's own file, for the
+# transcript reader. Re-record on a pi version bump.
+*.jsonl linguist-generated=true

@@ -1,0 +1,56 @@
+config
+  ok    config file      /home/ada/.config/slop-bot/slop-bot-config.yaml (install writes it)
+  ok    briefing         /home/ada/.config/slop-bot/briefing.md (install writes a stub)
+
+prerequisites
+  ok    git              2.55.0, with worktree support (2.36 or later)
+  skip  tmux             not needed: no harness this build runs uses the tui driver
+
+harness claude-code
+  ok    binary           /home/ada/.local/bin/claude
+  ok    version          claude 2.1.332 (tested 2.1.332 up to 2.2)
+  ok    signed in        signed in (claude.ai)
+  ok    model            Claude Code's own default (harnesses.claude-code.model is blank)
+
+repos
+  ok    app              /home/ada/src/app
+  ok    workspace_dir    /home/ada/slop-bot/workspace (created on first use)
+
+platform
+  ok    runtime dir      /run/user/65533/slop-bot ($XDG_RUNTIME_DIR)
+  ok    socket           /run/user/65533/slop-bot/slop-bot.sock (38 of 103 bytes)
+  ok    service manager  the systemd user manager answers
+  warn  linger           off: systemd stops slop-bot when your last session ends
+                         fix: to keep it running with nobody logged in (a headless box): loginctl enable-linger $USER
+  ok    service          not installed yet (install writes /home/ada/.config/systemd/user/slop-bot.service)
+
+no failures, 1 warning
+
+slop-bot is installed. Where things are:
+  config         /home/ada/.config/slop-bot/slop-bot-config.yaml  written: a commented default
+  briefing       /home/ada/.config/slop-bot/briefing.md           written: a stub to fill in
+  tickets db     /home/ada/.local/share/slop-bot/tickets.db
+  state db       /home/ada/.local/state/slop-bot/state.db
+  logs           journalctl --user -u slop-bot.service
+  socket         /run/user/65533/slop-bot/slop-bot.sock
+  workspace_dir  /home/ada/slop-bot/workspace                     worktrees; set in the config
+  service        /home/ada/.config/systemd/user/slop-bot.service  runs: /home/ada/bin/slop-bot daemon
+
+XDG variables (from this shell; written into the service):
+  XDG_CONFIG_HOME  defaulted  /home/ada/.config
+  XDG_DATA_HOME    defaulted  /home/ada/.local/share
+  XDG_STATE_HOME   defaulted  /home/ada/.local/state
+  XDG_CACHE_HOME   defaulted  /home/ada/.cache
+  XDG_RUNTIME_DIR  set        /run/user/65533
+  (systemd gives the service its own XDG_RUNTIME_DIR, /run/user/<uid>)
+
+linger: off. systemd stops slop-bot when your last session ends; to keep it running with nobody logged in (a headless box), run: loginctl enable-linger
+
+If these don't suit:
+  - to move a location, export its XDG_* variable in your shell profile and re-run `slop-bot install`:
+    the service takes its paths from the shell that installs it (all but XDG_RUNTIME_DIR, which systemd sets)
+  - edit the config (repos, harnesses, workspace_dir) and the briefing, then run `slop-bot doctor`;
+    re-running `slop-bot install` keeps both and restarts the service
+  - `slop-bot uninstall` removes the service; add --purge to delete slop-bot's data too
+
+Check it came up: slop-bot health

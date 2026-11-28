@@ -5,6 +5,7 @@
 # halves: that every Go module and Python file is here, and that each line's
 # test.sh calls its runner).
 go artifact-store
+go dev-tools/mutation
 go dev-tools/quality
 go go-auth
 go go-clock

@@ -1,0 +1,54 @@
+config
+  ok    config file      /home/ada/.config/slop-bot/slop-bot-config.yaml
+  ok    briefing         /home/ada/.config/slop-bot/briefing.md
+
+prerequisites
+  ok    git              2.55.0, with worktree support (2.36 or later)
+  ok    tmux             tmux 3.4 (tested 3.4 or later)
+  FAIL  gh               not on PATH (doctor.require lists it)
+                         fix: install gh, e.g. sudo apt install gh, or drop it from doctor.require
+
+harness agy
+  ok    binary           /home/ada/.local/bin/agy
+  ok    version          agy 1.5.18 (tested 1.5.18 up to 1.6)
+  ok    signed in        agy lists 2 models for this login
+  ok    model            agy's own default (harnesses.agy.model is blank)
+  warn  terms            agy runs on your Google sign-in: Google's consumer terms don't allow driving agy from another program, and accounts have been suspended for it
+                         fix: use a GEMINI_API_KEY from a billed Cloud project, with harnesses.agy.api_key_opt_in: true; slop-bot runs agy either way, the choice is yours
+
+harness claude-code
+  ok    binary           /home/ada/.local/bin/claude
+  ok    version          claude 2.1.332 (tested 2.1.332 up to 2.2)
+  ok    signed in        signed in (claude.ai)
+  ok    model            opus (an alias or a full name: Claude Code has no model list to check without a request)
+
+harness codex
+  ok    binary           /home/ada/.local/bin/codex
+  ok    version          codex 0.172.0 (tested 0.172.0 up to 0.173)
+  ok    signed in        Logged in using ChatGPT
+  ok    model            gpt-6.2-astra (in codex's model list)
+
+harness pi
+  ok    binary           /home/ada/.local/bin/pi
+  ok    version          pi 1.4.0 (tested 1.4.0 up to 1.5)
+  ok    signed in        ready for openai/gpt-6.2-sol (openai, oauth)
+  warn  model            harnesses.pi.model is blank: agents run on slop-bot's fallback, openai/gpt-6.2-sol (in pi's model list)
+                         fix: set harnesses.pi.model to a provider/model your login serves (pi --list-models); pi's own default was rejected for a ChatGPT login in testing
+
+repos
+  ok    slop-factory     /home/ada/src/slop-factory
+  FAIL  gone             /home/ada/src/gone: no such file or directory
+                         fix: correct repos.gone.path, or clone it there
+  ok    workspace_dir    /home/ada/slop-bot/workspace (created on first use)
+
+platform
+  ok    runtime dir      /run/user/1000/slop-bot ($XDG_RUNTIME_DIR)
+  ok    socket           /run/user/1000/slop-bot/slop-bot.sock (37 of 103 bytes)
+  ok    service manager  the systemd user manager answers
+  ok    linger           on: slop-bot keeps running with nobody logged in
+  ok    service          /home/ada/.config/systemd/user/slop-bot.service, running (active)
+  ok    service PATH     the same as this shell's
+  warn  service paths    data dir: this shell resolves /home/ada/data/slop-bot, the service /home/ada/.local/share/slop-bot
+                         fix: your shell's XDG_* variables differ from the service's: re-run `slop-bot install` from the shell you use, or export the same values in your shell profile
+
+2 failures, 3 warnings: slop-bot can't run until the failures are fixed

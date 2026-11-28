@@ -50,6 +50,11 @@ type Metric struct {
 	Module    *gosrc.Module
 	Profiles  []string
 	CoverDirs []string
+	// Reruns are profiles of one suite run several times. A block counts as
+	// covered only if every one of them covers it: what timing decides (a
+	// retry, an error path an e2e teardown happens to hit) is left out, so a
+	// baseline written from them doesn't hold the next run to a lucky one.
+	Reruns    []string
 	Converter Converter
 	// TempDir holds the profiles converted from CoverDirs.
 	TempDir string
@@ -76,20 +81,39 @@ func (m *Metric) Measure() (*Snapshot, error) {
 		}
 		profiles = append(profiles, out)
 	}
-	if len(profiles) == 0 {
+	if len(profiles) == 0 && len(m.Reruns) == 0 {
 		return nil, fmt.Errorf("no cover profile or GOCOVERDIR given")
 	}
 	blocks := newBlockSet()
-	for _, p := range profiles {
-		parsed, err := cover.ParseProfiles(p)
+	if err := blocks.addFiles(profiles); err != nil {
+		return nil, err
+	}
+	if len(m.Reruns) > 0 {
+		stable, err := stableBlocks(m.Reruns)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", p, err)
+			return nil, err
 		}
-		for _, prof := range parsed {
-			blocks.add(prof)
-		}
+		blocks.merge(stable)
 	}
 	return m.snapshot(blocks)
+}
+
+// stableBlocks is the blocks every rerun covers, each rerun's profile
+// merged by covered-or-not first (a block is listed once per test binary).
+func stableBlocks(reruns []string) (*blockSet, error) {
+	var stable *blockSet
+	for _, p := range reruns {
+		run := newBlockSet()
+		if err := run.addFiles([]string{p}); err != nil {
+			return nil, err
+		}
+		if stable == nil {
+			stable = run
+			continue
+		}
+		stable.intersect(run)
+	}
+	return stable, nil
 }
 
 type counts struct{ covered, total int }
@@ -195,19 +219,63 @@ type blockSet struct {
 
 func newBlockSet() *blockSet { return &blockSet{files: map[string]map[blockKey]*block{}} }
 
+func (s *blockSet) addFiles(paths []string) error {
+	for _, p := range paths {
+		parsed, err := cover.ParseProfiles(p)
+		if err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+		for _, prof := range parsed {
+			s.add(prof)
+		}
+	}
+	return nil
+}
+
 func (s *blockSet) add(p *cover.Profile) {
-	fb := s.files[p.FileName]
+	for _, b := range p.Blocks {
+		s.put(p.FileName, blockKey{b.StartLine, b.StartCol, b.EndLine, b.EndCol}, &block{stmts: b.NumStmt, covered: b.Count > 0})
+	}
+}
+
+// put merges b in as covered-or-not.
+func (s *blockSet) put(file string, k blockKey, b *block) {
+	fb := s.files[file]
 	if fb == nil {
 		fb = map[blockKey]*block{}
-		s.files[p.FileName] = fb
+		s.files[file] = fb
 	}
-	for _, b := range p.Blocks {
-		k := blockKey{b.StartLine, b.StartCol, b.EndLine, b.EndCol}
-		if got := fb[k]; got != nil {
-			got.covered = got.covered || b.Count > 0
-			continue
+	if got := fb[k]; got != nil {
+		got.covered = got.covered || b.covered
+		return
+	}
+	fb[k] = &block{stmts: b.stmts, covered: b.covered}
+}
+
+// merge adds other's blocks, as covered-or-not.
+func (s *blockSet) merge(other *blockSet) {
+	for file, fb := range other.files {
+		for k, b := range fb {
+			s.put(file, k, b)
 		}
-		fb[k] = &block{stmts: b.NumStmt, covered: b.Count > 0}
+	}
+}
+
+// intersect keeps a block covered only if other covers it too; a block
+// other doesn't list is one it didn't cover.
+func (s *blockSet) intersect(other *blockSet) {
+	for file, fb := range s.files {
+		for k, b := range fb {
+			o := other.files[file][k]
+			b.covered = b.covered && o != nil && o.covered
+		}
+	}
+	for file, fb := range other.files {
+		for k, b := range fb {
+			if s.files[file][k] == nil {
+				s.put(file, k, &block{stmts: b.stmts})
+			}
+		}
 	}
 }
 

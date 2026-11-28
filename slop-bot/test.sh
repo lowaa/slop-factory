@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs slop-bot's lint and Go tests: what CI runs. Extra arguments go to
-# `go test`, e.g. `./test.sh -run TestScheduler ./internal/scheduler`.
+# `go test`, e.g. `./test.sh -run TestScheduler ./internal/agents`.
 # It builds in the repo's go.work, as the repo's other apps do: sibling
 # modules resolve there, not through tagged releases.
 set -euo pipefail
@@ -17,6 +17,9 @@ if [[ -n ${unformatted} ]]; then
   exit 1
 fi
 go vet ./...
+# The race detector sleeps a second at every process exit by default; the
+# suite re-runs its own test binary as fake agents and hooks, so each pays it.
+export GORACE="${GORACE:-atexit_sleep_ms=0}"
 if (($#)); then
   go test -race "$@"
 else

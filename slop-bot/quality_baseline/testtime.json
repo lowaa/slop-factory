@@ -1,10 +1,55 @@
 {
-  "wall_seconds": 1.34,
+  "wall_seconds": 18.74,
   "slowest": [
     {
-      "package": "./internal/version",
-      "test": "TestStringDefaultsToDev",
-      "seconds": 0
+      "package": "./internal/agents",
+      "test": "TestAFailedTurnDoesNotEndTheRunOfCrashes",
+      "seconds": 6.01
+    },
+    {
+      "package": "./internal/cli",
+      "test": "TestKeptWorktreesAreListedAndCleanedThroughTheCLI",
+      "seconds": 5.52
+    },
+    {
+      "package": "./internal/agents",
+      "test": "TestAnAnsweredAgentWaitsForASlotAheadOfNewWork",
+      "seconds": 5.45
+    },
+    {
+      "package": "./internal/agents",
+      "test": "TestTheLoopGuardCountsASenderOnlyWithinItsSendWindow",
+      "seconds": 5.44
+    },
+    {
+      "package": "./internal/cli",
+      "test": "TestARestartedDaemonAdoptsTheSessionMidTurn",
+      "seconds": 5.41
+    },
+    {
+      "package": "./internal/cli",
+      "test": "TestAForcedCleanWarnsOfAWorktreeItCouldntCheck",
+      "seconds": 5.35
+    },
+    {
+      "package": "./internal/cli",
+      "test": "TestTranscriptAndWatchFollowAnAgentToItsEnd",
+      "seconds": 5.31
+    },
+    {
+      "package": "./internal/agents",
+      "test": "TestARefiningAgentWaitsForItsBlockersAndIsToldWhenTheyAreDone",
+      "seconds": 5.26
+    },
+    {
+      "package": "./internal/cli",
+      "test": "TestDetachingMidTurnGivesTheSlotBackAtTheTurnsEnd",
+      "seconds": 5.26
+    },
+    {
+      "package": "./internal/agents",
+      "test": "TestARestartLeavesAParkedAgentParked",
+      "seconds": 5.15
     }
   ]
 }

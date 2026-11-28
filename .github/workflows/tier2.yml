@@ -1,0 +1,87 @@
+name: slop-bot tier 2
+
+# slop-bot's harness adapters, and its daemon driving them, against the real
+# harness CLIs at their pinned versions, with the scripted model answering
+# for the model (slop-bot/tier2.sh). It needs no secret: the harnesses get
+# dummy keys and the container has no network. Its own workflow, not a
+# ci.yml job: it runs when an adapter, the scripted model, the code that
+# drives the harnesses or a pin changes, and weekly.
+on:
+  pull_request:
+    # The adapters and the scripted model, and what the harness packages
+    # build from (`go list -deps -test`) or the image installs. The daemon
+    # scenarios build on all of the CLI and daemon; only the parts that drive
+    # a harness are listed, and the weekly run catches the rest.
+    paths:
+      - slop-bot/internal/harness/**
+      - slop-bot/internal/scriptedmodel/**
+      - slop-bot/internal/ident/**
+      - slop-bot/internal/version/**
+      # The transcript.Reader contract the adapters implement, and what it
+      # is built on.
+      - slop-bot/internal/transcript/**
+      - slop-bot/internal/state/**
+      - slop-bot/internal/sqlitex/**
+      # The merge guard's tests run the real hook, through the CLI; these
+      # are the parts of it the guard is made of (the CLI's other
+      # dependencies are covered by the unit and e2e suites).
+      - slop-bot/internal/mergeguard/**
+      - slop-bot/internal/cli/hook.go
+      - slop-bot/internal/api/guard.go
+      # The daemon scenarios (internal/cli's TestTier2Scenarios): the agent
+      # manager and daemon that drive the harnesses, the worktrees they run
+      # in, and the attach that runs their TUIs.
+      - slop-bot/internal/agents/**
+      - slop-bot/internal/daemon/**
+      - slop-bot/internal/worktree/**
+      - slop-bot/internal/cli/attach.go
+      - slop-bot/internal/cli/tier2*_test.go
+      # The tier-1 fixtures the scenarios are built on.
+      - slop-bot/internal/cli/cli_test.go
+      - slop-bot/internal/cli/e2e_test.go
+      - slop-bot/internal/cli/attach_test.go
+      - slop-bot/internal/cli/agents_e2e_test.go
+      - slop-bot/internal/cli/ticket_test.go
+      # Codex's guard is built in-process from the real classifier.
+      - slop-bot/internal/tickets/**
+      - slop-bot/internal/gitx/**
+      - slop-bot/go.mod
+      - slop-bot/go.sum
+      - go-clock/**
+      - slop-bot/tier2/**
+      - slop-bot/tier2.sh
+      - .github/workflows/tier2.yml
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tier2-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tier2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: slop-bot/tier2.sh
+
+  # Each harness at its latest release instead of its pin: what the next bump
+  # will break, found before making it. A signal to look, not a broken main.
+  tier2-latest:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: slop-bot/tier2.sh
+        env:
+          HARNESS_LATEST: "1"

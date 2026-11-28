@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by `slop-bot service install`. Re-run it rather than editing this
+     file: it resolves the paths and PATH below from your shell, so the daemon
+     agrees with the CLI. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.slop-bot.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/ada/go/bin/slop-bot</string>
+		<string>daemon</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>XDG_CONFIG_HOME</key>
+		<string>/Users/ada/.config</string>
+		<key>XDG_DATA_HOME</key>
+		<string>/Users/ada/.local/share</string>
+		<key>XDG_STATE_HOME</key>
+		<string>/Users/ada/.local/state</string>
+		<key>XDG_CACHE_HOME</key>
+		<string>/Users/ada/.cache</string>
+		<key>XDG_RUNTIME_DIR</key>
+		<string>/tmp/sbt</string>
+		<key>PATH</key>
+		<string>/Users/ada/.local/bin:/Users/ada/go/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/ada</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ExitTimeOut</key>
+	<integer>65</integer>
+	<key>StandardOutPath</key>
+	<string>/Users/ada/.local/state/slop-bot/logs/daemon.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/ada/.local/state/slop-bot/logs/daemon.log</string>
+</dict>
+</plist>
