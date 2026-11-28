@@ -77,14 +77,28 @@ func (m *Manager) tell(ctx context.Context, req *tellReq) (*state.Message, error
 	if r, ok := m.runner(a.ID); ok {
 		// An attached agent's conversation is the person's TUI: its messages
 		// wait for the hand-back.
-		if req.interrupt && r.state() != state.StateAttached {
-			if err := r.conv.Interrupt(ctx); err != nil {
-				m.opts.Logger.Warn("agents: interrupting", "agent", a.ID, "err", err)
-			}
+		if req.interrupt && r.state() != state.StateAttached && m.interrupt(ctx, r) {
+			// The message goes as the next turn, once this one has ended
+			// (turnEnded delivers it): a steer into a turn being interrupted
+			// can be lost with it.
+			return msg, nil
 		}
 		m.deliverNow(ctx, r)
 	}
 	return msg, nil
+}
+
+// interrupt interrupts r's running turn, and reports whether there was one
+// to interrupt.
+func (m *Manager) interrupt(ctx context.Context, r *runner) bool {
+	r.mu.Lock()
+	inTurn := r.inTurn
+	r.mu.Unlock()
+	if err := r.conv.Interrupt(ctx); err != nil {
+		m.opts.Logger.Warn("agents: interrupting", "agent", r.id, "err", err)
+		return false
+	}
+	return inTurn
 }
 
 // enqueueTell queues the tell for agent: as the answer to its open asks

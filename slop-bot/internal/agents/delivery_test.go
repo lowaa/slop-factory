@@ -278,6 +278,28 @@ func TestARepoAddedToALiveTicketGetsAWorktree(t *testing.T) {
 	assert.True(t, wts[0].Primary, "it had none, so it is the agent's main worktree")
 }
 
+// A steer sent into a turn being interrupted can be lost with it (pi, and
+// codex without its own queue), so `tell --interrupt` waits for the turn to
+// end and sends the message as the next one.
+func TestAnInterruptingTellIsTheNextTurnNotASteer(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	s, _, agent := f.startedAgent("t", nil)
+	f.do(s, fake.Command{Cmd: fake.CmdTurnStart})
+	f.await(agents.EventState, toState(state.StateRefining))
+	// The interrupt is seen but the turn ends only when the test says, so
+	// nothing can be delivered in between by luck.
+	f.do(s, fake.Command{Cmd: fake.CmdIgnoreInterrupts, On: true})
+	_, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), string(agent.Agent), "stop and use v2", true)
+	require.NoError(t, err)
+	_, err = s.Expect(f.ctx(), fake.RepInterrupt)
+	require.NoError(t, err)
+	f.do(s, fake.Command{Cmd: fake.CmdTurnEnd, Outcome: string(harness.TurnInterrupted)})
+	got := f.user(s)
+	assert.Contains(t, got.Text, "stop and use v2")
+	assert.False(t, got.MidTurn, "sent once the interrupted turn ended")
+}
+
 // Claude Code and pi find a session by its cwd, so an agent that gained its
 // first worktree mid-conversation is resumed where it started, with the
 // worktree as another directory: started there, it would lose its session.
