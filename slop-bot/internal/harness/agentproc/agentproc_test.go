@@ -3,6 +3,7 @@ package agentproc
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -190,7 +191,10 @@ func TestAChildHoldingStdoutDoesntHideTheEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testWait)
 	defer cancel()
 	select {
-	case <-ended:
+	case err := <-ended:
+		// Closing the read end past the drain bound is how the reader is
+		// released, so that's an expected way to end.
+		assert.True(t, err == nil || errors.Is(err, os.ErrClosed), "reading stdout: %v", err)
 	case <-ctx.Done():
 		t.Fatal("the reader never reached the end of stdout")
 	}
