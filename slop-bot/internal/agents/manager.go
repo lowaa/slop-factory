@@ -165,6 +165,9 @@ func (m *Manager) event(ctx context.Context, typ string, agent ident.AgentID, ti
 	}
 }
 
+// TellUser puts a system message from slop-bot in the user's inbox.
+func (m *Manager) TellUser(ctx context.Context, body string) { m.tellUser(ctx, "", body) }
+
 // tellUser puts a system message in the user's inbox.
 func (m *Manager) tellUser(ctx context.Context, from ident.AgentID, body string) {
 	sender := state.UserParty

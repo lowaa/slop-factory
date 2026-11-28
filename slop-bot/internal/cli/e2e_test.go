@@ -70,7 +70,16 @@ type e2e struct {
 
 func newE2E(t *testing.T) *e2e {
 	t.Helper()
+	return newE2EWithConfig(t, "")
+}
+
+// newE2EWithConfig is newE2E with the config file replaced, when given.
+func newE2EWithConfig(t *testing.T, cfg string) *e2e {
+	t.Helper()
 	h := newHarness(t)
+	if cfg != "" {
+		require.NoError(t, os.WriteFile(h.config, []byte(cfg), 0o600))
+	}
 	ctl, err := fake.NewController()
 	require.NoError(t, err)
 	self, err := os.Executable()
@@ -211,4 +220,63 @@ func TestTheBriefingListsTheAgentCommands(t *testing.T) {
 	for _, userOnly := range []string{"slop-bot daemon", "slop-bot autonomy", "slop-bot asks", "slop-bot discussions", "slop-bot service"} {
 		assert.NotContains(t, ref, "`"+userOnly, "agents don't run %s", userOnly)
 	}
+}
+
+// fileAsAgent has the agent working s file a ticket, returning the result.
+func (e *e2e) fileAsAgent(s *fake.Session, title string) *fake.Report {
+	e.t.Helper()
+	argv := []string{"/usr/bin/env", fakeReexec + "=", cliReexec + "=1", e.self, "ticket", "create", "--title", title, "--json"}
+	r, err := s.Do(e.ctx(), fake.Command{Cmd: fake.CmdRun, Argv: argv})
+	require.NoError(e.t, err)
+	return r
+}
+
+func TestAutonomyDecidesWhetherAgentFiledTicketsAreWorked(t *testing.T) {
+	t.Parallel()
+	e := newE2E(t)
+	e.h.ticket(t, "ticket", "create", "--title", "parent", "--assign")
+	s, err := e.ctl.Next(e.ctx())
+	require.NoError(t, err)
+	_, err = s.Expect(e.ctx(), fake.RepUser)
+	require.NoError(t, err)
+	e.do(s, fake.CmdTurnStart)
+
+	// Off (the default): the follow-up waits, unassigned, for the user.
+	r := e.fileAsAgent(s, "follow-up while off")
+	require.Equal(t, 0, r.Code, r.Stderr)
+	var off api.Ticket
+	require.NoError(t, json.Unmarshal([]byte(r.Stdout), &off))
+	assert.Empty(t, off.Assignee)
+	assert.Equal(t, "agent", off.CreatedBy.Kind)
+
+	// On: it's assigned, so an agent picks it up.
+	e.h.ok(t, "autonomy", "on")
+	r = e.fileAsAgent(s, "follow-up while on")
+	require.Equal(t, 0, r.Code, r.Stderr)
+	var on api.Ticket
+	require.NoError(t, json.Unmarshal([]byte(r.Stdout), &on))
+	assert.Equal(t, "ada", on.Assignee)
+	e.await("agent.spawned", func(ev *api.Event) bool { return ev.Ticket == on.ID })
+}
+
+func TestTheAutonomyBudgetScalesWithTheSlots(t *testing.T) {
+	t.Parallel()
+	e := newE2EWithConfig(t, "user: ada\nconcurrency: {max_active: 1, max_live: 4, urgent: {max_active: 1}}\nautonomy: {tickets_per_agent: 1}\n")
+	e.h.ticket(t, "ticket", "create", "--title", "parent", "--assign")
+	s, err := e.ctl.Next(e.ctx())
+	require.NoError(t, err)
+	_, err = s.Expect(e.ctx(), fake.RepUser)
+	require.NoError(t, err)
+	e.do(s, fake.CmdTurnStart)
+	// 1 per slot × (1 + 1) slots = 2 outstanding agent-filed tickets.
+	for _, title := range []string{"one", "two"} {
+		r := e.fileAsAgent(s, title)
+		require.Equal(t, 0, r.Code, r.Stderr)
+	}
+	r := e.fileAsAgent(s, "three")
+	assert.Equal(t, 1, r.Code)
+	assert.Contains(t, r.Stderr, "budget")
+	e.await("user.told", func(ev *api.Event) bool { return strings.Contains(string(ev.Payload), "budget") })
+	// The user's own tickets never count.
+	e.h.ticket(t, "ticket", "create", "--title", "mine")
 }

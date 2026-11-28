@@ -74,7 +74,10 @@ func New(opts *Options) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{opts: opts, server: control.NewServer(opts.Logger), ready: make(chan struct{})}
-	d.ticketRoutes = &ticketRoutes{cfg: opts.Config, user: user}
+	d.ticketRoutes = &ticketRoutes{cfg: opts.Config, user: user,
+		autonomy: func(ctx context.Context) bool { return d.autonomy(ctx) },
+		tellUser: func(ctx context.Context, body string) { d.agents.TellUser(ctx, body) },
+	}
 	d.agentRoutes = &agentRoutes{d: d}
 	d.routes()
 	cliPath := opts.CLIPath

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -233,7 +234,7 @@ func (ar *agentRoutes) status(w http.ResponseWriter, r *http.Request) {
 		agentFail(w, err)
 		return
 	}
-	out := api.Status{Agents: []api.AgentStatus{}, Autonomy: ar.d.autonomy(r), Budget: ar.d.opts.Config.AutonomyBudget()}
+	out := api.Status{Agents: []api.AgentStatus{}, Autonomy: ar.d.autonomy(r.Context()), Budget: ar.d.opts.Config.AutonomyBudget()}
 	if out.Outstanding, err = ar.d.tickets.CountOutstandingAgentCreated(r.Context()); err != nil {
 		agentFail(w, err)
 		return
@@ -292,8 +293,10 @@ func (ar *agentRoutes) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (d *Daemon) autonomy(r *http.Request) bool {
-	on, set, err := d.state.Settings.Autonomy(r.Context())
+// autonomy is whether agent-filed tickets are worked without a person: the
+// runtime switch, or the config's default until it's been flipped.
+func (d *Daemon) autonomy(ctx context.Context) bool {
+	on, set, err := d.state.Settings.Autonomy(ctx)
 	if err != nil || !set {
 		return d.opts.Config.Autonomy.Enabled
 	}
@@ -301,7 +304,7 @@ func (d *Daemon) autonomy(r *http.Request) bool {
 }
 
 func (ar *agentRoutes) getAutonomy(w http.ResponseWriter, r *http.Request) {
-	control.WriteJSON(w, http.StatusOK, api.Autonomy{Enabled: ar.d.autonomy(r)})
+	control.WriteJSON(w, http.StatusOK, api.Autonomy{Enabled: ar.d.autonomy(r.Context())})
 }
 
 func (ar *agentRoutes) setAutonomy(w http.ResponseWriter, r *http.Request) {

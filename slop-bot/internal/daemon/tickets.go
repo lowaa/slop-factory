@@ -3,8 +3,10 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/agentspec"
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
@@ -23,6 +25,7 @@ var ticketErrors = []control.ErrorMapping{
 	{Err: tickets.ErrInvalid, Status: http.StatusBadRequest},
 	{Err: agentspec.ErrInvalid, Status: http.StatusBadRequest},
 	{Err: errBadRequest, Status: http.StatusBadRequest},
+	{Err: errBudget, Status: http.StatusTooManyRequests},
 }
 
 var errBadRequest = errors.New("bad request")
@@ -34,7 +37,19 @@ type ticketRoutes struct {
 	sys  tickets.TicketingSystem
 	cfg  *config.Config
 	user tickets.UserID
+	// autonomy reports whether agent-filed tickets are worked without a
+	// person (`slop-bot autonomy`).
+	autonomy func(context.Context) bool
+	// overBudget tells the user, once per filling-up, that agents hit the
+	// budget.
+	budgetMu   sync.Mutex
+	budgetFull bool
+	tellUser   func(context.Context, string)
 }
+
+// errBudget refuses an agent's ticket past the autonomy budget.
+var errBudget = errors.New("the budget of outstanding agent-filed tickets is used up: " +
+	"file again once some are done, or ask the user")
 
 func (tr *ticketRoutes) register(s *control.Server) {
 	s.HandleFunc("POST "+api.PathTickets, tr.create)
@@ -90,8 +105,13 @@ func (tr *ticketRoutes) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	by := control.PrincipalFrom(r.Context())
-	if in.Assign {
-		nt.Assignee = tr.user
+	if by.IsUser() {
+		if in.Assign {
+			nt.Assignee = tr.user
+		}
+	} else if err := tr.agentFiling(r.Context(), nt); err != nil {
+		fail(w, err)
+		return
 	}
 	t, err := tr.sys.Create(r.Context(), by, nt)
 	if err != nil {
@@ -99,6 +119,35 @@ func (tr *ticketRoutes) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	control.WriteJSON(w, http.StatusCreated, tr.view(t))
+}
+
+// agentFiling applies the autonomous loop's rules to a ticket an agent
+// files: it counts against a budget that scales with the agent slots, and
+// it is assigned (and so worked) only when autonomy is on; otherwise it
+// waits, unassigned, in the review stream for the user.
+func (tr *ticketRoutes) agentFiling(ctx context.Context, nt *tickets.NewTicket) error {
+	n, err := tr.sys.CountOutstandingAgentCreated(ctx)
+	if err != nil {
+		return err
+	}
+	budget := tr.cfg.AutonomyBudget()
+	tr.budgetMu.Lock()
+	full := n >= budget
+	tellNow := full && !tr.budgetFull
+	tr.budgetFull = full
+	tr.budgetMu.Unlock()
+	if tellNow && tr.tellUser != nil {
+		tr.tellUser(ctx, fmt.Sprintf("agents have filed %d outstanding tickets, the budget (%d per agent slot): further filings are refused until some finish",
+			n, tr.cfg.Autonomy.TicketsPerAgent))
+	}
+	if full {
+		return errBudget
+	}
+	nt.Assignee = ""
+	if tr.autonomy != nil && tr.autonomy(ctx) {
+		nt.Assignee = tr.user
+	}
+	return nil
 }
 
 func (tr *ticketRoutes) list(w http.ResponseWriter, r *http.Request) {
