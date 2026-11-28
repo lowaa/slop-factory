@@ -77,3 +77,25 @@ func TestAPeriodicPassCatchesALostTicketEvent(t *testing.T) {
 	ended := f.await(agents.EventFinished, of(a.ID))
 	assert.Equal(t, a.Ticket, ended.Ticket)
 }
+
+// A failed sync waits for its retry, with its backoff: other tickets'
+// events, synced as they come, don't retry it early.
+func TestOtherTicketsEventsDontRetryAFailedSyncEarly(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	_, a := f.waitingAgent("t", nil)
+	_, b := f.waitingAgent("other", nil)
+	f.mgr.WaitStarts() // the spawns' own reads of the tickets are done
+	f.racing.failGet(a.Ticket, errBackendAway)
+	_, err := f.tickets.Comment(context.Background(), ident.UserPrincipal(), a.Ticket, "a's event")
+	require.NoError(t, err)
+	f.await(agents.EventSyncFailed, func(e *state.Event) bool { return e.Ticket == a.Ticket })
+	for _, body := range []string{"one", "two", "three"} {
+		_, err := f.tickets.Comment(context.Background(), ident.UserPrincipal(), b.Ticket, body)
+		require.NoError(t, err)
+	}
+	f.setStatus(b.Ticket, tickets.StatusCancelled)
+	f.awaitExcept(agents.EventFinished, of(b.Agent), func(e *state.Event) bool {
+		return string(e.Type) == agents.EventSyncFailed && e.Ticket == a.Ticket
+	})
+}

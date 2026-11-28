@@ -22,7 +22,7 @@ func (m *Manager) schedule() {
 	feed := m.opts.Tickets.Events()
 	reconcile := m.opts.Clock.NewTicker(ReconcileEvery)
 	defer reconcile.Stop()
-	syncs := &syncState{pending: map[ident.TicketID]bool{}}
+	syncs := &syncState{pending: map[ident.TicketID]bool{}, failed: map[ident.TicketID]bool{}}
 	for {
 		select {
 		case <-m.stop:
@@ -32,6 +32,7 @@ func (m *Manager) schedule() {
 			m.wake = nil
 		case <-syncs.retry:
 			syncs.retry = nil
+			syncs.due()
 			m.syncPending(ctx, syncs)
 		case <-reconcile.C():
 			m.reconcile(ctx, syncs)
@@ -68,31 +69,46 @@ const (
 const EventSyncFailed = "ticket.sync_failed"
 
 // syncState is the scheduler goroutine's own record of the feed: tickets
-// still to sync, and the newest cursor not yet saved. The cursor is saved
-// only once nothing is pending, so a restart replays every event whose
-// sync hadn't got through: the feed is at-least-once only if a failure
-// doesn't move it on.
+// still to sync, those whose sync failed and wait for their retry, and the
+// newest cursor not yet saved. The cursor is saved only once neither has
+// any, so a restart replays every event whose sync hadn't got through: the
+// feed is at-least-once only if a failure doesn't move it on.
 type syncState struct {
 	pending map[ident.TicketID]bool
+	// failed wait for the retry timer, with its backoff: other tickets'
+	// events don't retry them early. An event for one does, or a
+	// reconcile.
+	failed  map[ident.TicketID]bool
 	cursor  tickets.Cursor
 	unsaved bool
 	backoff time.Duration
 	retry   <-chan time.Time
 }
 
-// syncPending syncs every pending ticket, then saves the cursor if they all
-// went through, or arms a retry with backoff if any didn't. The failures
-// are recorded last, so whoever sees one sees the pass's outcome.
+// due makes the failed syncs pending again, for their retry.
+func (s *syncState) due() {
+	for id := range s.failed {
+		s.pending[id] = true
+		delete(s.failed, id)
+	}
+}
+
+// syncPending syncs every pending ticket, then saves the cursor if nothing
+// is left pending or failed, or arms a retry with backoff for the ones that
+// failed. The failures are recorded last, so whoever sees one sees the
+// pass's outcome.
 func (m *Manager) syncPending(ctx context.Context, s *syncState) {
 	failed := map[ident.TicketID]error{}
 	for id := range s.pending {
+		delete(s.pending, id)
 		if err := m.sync(ctx, id); err != nil {
 			failed[id] = err
+			s.failed[id] = true
 			continue
 		}
-		delete(s.pending, id)
+		delete(s.failed, id)
 	}
-	if len(s.pending) == 0 {
+	if len(s.failed) == 0 {
 		s.backoff, s.retry = 0, nil
 		if s.unsaved {
 			if err := m.opts.State.Cursors.Set(ctx, CursorKey, string(s.cursor)); err != nil {
@@ -103,11 +119,13 @@ func (m *Manager) syncPending(ctx context.Context, s *syncState) {
 		}
 		return
 	}
-	if ctx.Err() != nil {
-		return // stopping: the cursor stays where it was, for the next start
+	if ctx.Err() != nil || len(failed) == 0 {
+		// Stopping (the cursor stays where it was, for the next start), or
+		// nothing new failed: the retry already armed stands.
+		return
 	}
-	s.backoff = min(max(2*s.backoff, syncRetryFirst), SyncRetryMax)
 	if s.retry == nil {
+		s.backoff = min(max(2*s.backoff, syncRetryFirst), SyncRetryMax)
 		s.retry = m.opts.Clock.After(s.backoff)
 	}
 	for id, err := range failed {
