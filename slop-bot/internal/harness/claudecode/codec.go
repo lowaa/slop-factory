@@ -140,6 +140,18 @@ func (c *codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) 
 	return evs, nil
 }
 
+// Oversized implements rpcdriver.Oversizer: a record too long to read
+// whole is decoded from its fields before the cut. A result's text, which
+// repeats the turn's last message, comes after its outcome, so a turn whose
+// result is too long still ends, and how.
+func (c *codec) Oversized(prefix []byte, w *rpcdriver.Wire) ([]harness.Event, error) {
+	b := rpcdriver.PrefixObject(prefix)
+	if b == nil {
+		return nil, nil
+	}
+	return c.Decode(b, w)
+}
+
 func assistantEvents(r *record) []harness.Event {
 	var evs []harness.Event
 	for _, b := range r.Message.Content {

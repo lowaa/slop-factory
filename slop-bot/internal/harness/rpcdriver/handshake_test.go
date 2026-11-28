@@ -54,7 +54,7 @@ func TestStartAFailedHandshakeDrainsTheLinesStillComing(t *testing.T) {
 
 func TestNextLineGivesUpWhenTheContextIsDone(t *testing.T) {
 	t.Parallel()
-	c := &Conversation{lines: make(chan []byte)}
+	c := &Conversation{lines: make(chan stdoutLine)}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	line, err := c.nextLine(ctx)

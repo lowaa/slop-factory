@@ -7,7 +7,9 @@ package rpcdriver
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +27,11 @@ import (
 // maxLine bounds one protocol message. Harnesses put whole tool outputs in a
 // line, so the default 64KiB scanner buffer is far too small.
 const maxLine = 32 << 20
+
+// oversizedPrefix is how much of an oversized line is kept for the codec
+// (Oversizer): enough for a record's type and the small fields JSON
+// encoders put before a long one.
+const oversizedPrefix = 64 << 10
 
 // maxQueued bounds the lines waiting for the harness to read its stdin. A
 // harness that leaves this many unread has stopped reading: a write past it
@@ -154,6 +161,49 @@ type Codec interface {
 	Decode(line []byte, w *Wire) ([]harness.Event, error)
 }
 
+// Oversizer is a codec that can make something of a line too long to read
+// whole: it is given the line's first bytes, which PrefixObject reads, so
+// that a turn end carrying a huge result still ends the turn.
+type Oversizer interface {
+	Oversized(prefix []byte, w *Wire) ([]harness.Event, error)
+}
+
+// PrefixObject is the JSON object of the top-level fields that are whole in
+// prefix, the start of a longer line (those before the one it cuts), or nil
+// when there are none.
+func PrefixObject(prefix []byte) []byte {
+	fields := prefixFields(prefix)
+	if len(fields) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func prefixFields(prefix []byte) map[string]json.RawMessage {
+	dec := json.NewDecoder(bytes.NewReader(prefix))
+	fields := map[string]json.RawMessage{}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return fields
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		key, ok := tok.(string)
+		if err != nil || !ok {
+			break
+		}
+		var v json.RawMessage
+		if dec.Decode(&v) != nil {
+			break
+		}
+		fields[key] = v
+	}
+	return fields
+}
+
 // DefaultKillGrace is Options.KillGrace's default.
 const DefaultKillGrace = 5 * time.Second
 
@@ -169,6 +219,8 @@ type Options struct {
 	KillGrace time.Duration
 	// Attach is the hand-over plan's TUI command, given the conversation id.
 	Attach func(id string) *harness.LaunchSpec
+	// MaxLine bounds one stdout line; zero is 32MiB.
+	MaxLine int
 }
 
 // Conversation is a programmatic session.
@@ -187,7 +239,7 @@ type Conversation struct {
 	settled chan struct{}
 	// lines carries every stdout line, in order. Open reads the handshake
 	// from it; dispatch reads the rest, so no line can fall between them.
-	lines  chan []byte
+	lines  chan stdoutLine
 	exited chan struct{}
 }
 
@@ -203,7 +255,7 @@ func Start(ctx context.Context, opts *Options) (*Conversation, error) {
 		wire:    newQueuedWire(proc.Stdin),
 		events:  driverkit.NewEvents(opts.Logger),
 		settled: make(chan struct{}),
-		lines:   make(chan []byte, 64),
+		lines:   make(chan stdoutLine, 64),
 		exited:  make(chan struct{}),
 	}
 	close(c.settled) // not in a turn yet
@@ -225,34 +277,49 @@ func Start(ctx context.Context, opts *Options) (*Conversation, error) {
 	return c, nil
 }
 
+// stdoutLine is one line of stdout, or, oversized, the start of one.
+type stdoutLine struct {
+	b         []byte
+	oversized bool
+}
+
 func (c *Conversation) nextLine(ctx context.Context) ([]byte, error) {
-	select {
-	case line, ok := <-c.lines:
-		if !ok {
-			return nil, errors.New("the harness exited during the handshake")
+	for {
+		select {
+		case line, ok := <-c.lines:
+			if !ok {
+				return nil, errors.New("the harness exited during the handshake")
+			}
+			if line.oversized {
+				c.opts.Logger.Warn("rpcdriver: dropped an oversized line in the handshake", "harness", c.opts.Harness)
+				continue
+			}
+			return line.b, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-		return line, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	}
 }
 
-// read owns stdout, passing each line on, until EOF. A line over maxLine is
-// dropped and reading goes on: stopping would leave the harness running
-// with nobody reading its turn end or its exit, and the oversized lines seen
-// in practice are summaries (pi's agent_end repeats the whole run) that no
-// codec needs.
+// read owns stdout, passing each line on, until EOF. A line over MaxLine is
+// passed on as its first bytes, for the codec to make what it can of
+// (Oversizer), and reading goes on: stopping would leave the harness
+// running with nobody reading its turn end or its exit.
 func (c *Conversation) read() {
 	defer func() { _ = c.proc.Stdout.Close() }()
 	r := bufio.NewReaderSize(c.proc.Stdout, 64<<10)
+	limit := c.opts.MaxLine
+	if limit <= 0 {
+		limit = maxLine
+	}
 	for {
-		line, err := readLine(r, maxLine)
+		line, err := readLine(r, limit, min(oversizedPrefix, limit))
 		if errors.Is(err, errLineTooLong) {
-			c.opts.Logger.Warn("rpcdriver: dropped an oversized line", "harness", c.opts.Harness, "max", maxLine)
+			c.lines <- stdoutLine{b: line, oversized: true}
 			continue
 		}
 		if len(line) > 0 {
-			c.lines <- line
+			c.lines <- stdoutLine{b: line}
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
@@ -268,19 +335,18 @@ var errLineTooLong = errors.New("rpcdriver: line too long")
 
 // readLine returns the next line without its LF, split on LF only (a JSON
 // string may hold U+2028, which some line readers split on). A line longer
-// than max is consumed and errLineTooLong returned, so the next call starts
-// at the following line. At the end it returns any last unterminated line
-// with io.EOF.
-func readLine(r *bufio.Reader, max int) ([]byte, error) {
+// than max is consumed, its first keep bytes returned with errLineTooLong,
+// so the next call starts at the following line. At the end it returns any
+// last unterminated line with io.EOF.
+func readLine(r *bufio.Reader, max, keep int) ([]byte, error) {
 	var line []byte
 	tooLong := false
 	for {
 		chunk, err := r.ReadSlice('\n')
 		if !tooLong {
-			if len(line)+len(chunk) > max+1 { // +1: the LF isn't part of the line
-				tooLong, line = true, nil
-			} else {
-				line = append(line, chunk...)
+			line = append(line, chunk...)
+			if len(line) > max+1 { // +1: the LF isn't part of the line
+				tooLong, line = true, line[:min(keep, len(line))]
 			}
 		}
 		switch {
@@ -288,11 +354,11 @@ func readLine(r *bufio.Reader, max int) ([]byte, error) {
 			continue
 		case err != nil:
 			if tooLong {
-				return nil, errLineTooLong
+				return line, errLineTooLong
 			}
 			return line, err
 		case tooLong:
-			return nil, errLineTooLong
+			return line, errLineTooLong
 		default:
 			return line[:len(line)-1], nil
 		}
@@ -303,7 +369,13 @@ func readLine(r *bufio.Reader, max int) ([]byte, error) {
 // closes Events.
 func (c *Conversation) dispatch() {
 	for line := range c.lines {
-		evs, err := c.opts.Codec.Decode(line, c.wire)
+		if line.oversized {
+			for _, ev := range c.oversized(line.b) {
+				c.emit(ev)
+			}
+			continue
+		}
+		evs, err := c.opts.Codec.Decode(line.b, c.wire)
 		if err != nil {
 			c.opts.Logger.Warn("rpcdriver: undecodable line", "harness", c.opts.Harness, "err", err)
 			continue
@@ -350,6 +422,22 @@ func (c *Conversation) setTurn(on bool) {
 		close(c.settled)
 	}
 	c.inTurn = on
+}
+
+// oversized hands the start of a line too long to read whole to a codec
+// that can use it.
+func (c *Conversation) oversized(prefix []byte) []harness.Event {
+	o, ok := c.opts.Codec.(Oversizer)
+	if !ok {
+		c.opts.Logger.Warn("rpcdriver: dropped an oversized line", "harness", c.opts.Harness)
+		return nil
+	}
+	evs, err := o.Oversized(prefix, c.wire)
+	if err != nil {
+		c.opts.Logger.Warn("rpcdriver: an oversized line", "harness", c.opts.Harness, "err", err)
+		return nil
+	}
+	return evs
 }
 
 // Ref implements harness.Conversation.

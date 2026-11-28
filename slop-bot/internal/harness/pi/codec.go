@@ -337,7 +337,22 @@ func (c *codec) noRun(outcome harness.TurnOutcome, text string) []harness.Event 
 	return []harness.Event{{Kind: harness.TurnStarted}, {Kind: harness.TurnEnded, Outcome: outcome, Text: text}}
 }
 
+// Oversized implements rpcdriver.Oversizer: a record too long to read
+// whole (agent_end repeats the run; a tool's end, its whole output) is
+// decoded from its fields before the cut, so a tool's end still says
+// which tool.
+func (c *codec) Oversized(prefix []byte, w *rpcdriver.Wire) ([]harness.Event, error) {
+	b := rpcdriver.PrefixObject(prefix)
+	if b == nil {
+		return nil, nil
+	}
+	return c.Decode(b, w)
+}
+
 func (c *codec) decodeMessageEnd(r *record) ([]harness.Event, error) {
+	if len(r.Message) == 0 {
+		return nil, nil // cut off (Oversized)
+	}
 	var m message
 	if err := json.Unmarshal(r.Message, &m); err != nil {
 		return nil, err

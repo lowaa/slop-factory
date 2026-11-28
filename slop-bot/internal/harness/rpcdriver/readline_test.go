@@ -15,11 +15,18 @@ import (
 // than the lines so the ErrBufferFull path is taken too.
 func readAll(t *testing.T, in string, max int) (got []string, tooLong int) {
 	t.Helper()
+	got, prefixes := readAllPrefixes(t, in, max)
+	return got, len(prefixes)
+}
+
+// readAllPrefixes is readAll, with the first 8 bytes of each oversized line.
+func readAllPrefixes(t *testing.T, in string, max int) (got, prefixes []string) {
+	t.Helper()
 	r := bufio.NewReaderSize(strings.NewReader(in), 16)
 	for {
-		line, err := readLine(r, max)
+		line, err := readLine(r, max, 8)
 		if errors.Is(err, errLineTooLong) {
-			tooLong++
+			prefixes = append(prefixes, string(line))
 			continue
 		}
 		if len(line) > 0 {
@@ -27,7 +34,7 @@ func readAll(t *testing.T, in string, max int) (got []string, tooLong int) {
 		}
 		if err != nil {
 			require.ErrorIs(t, err, io.EOF)
-			return got, tooLong
+			return got, prefixes
 		}
 	}
 }
@@ -38,6 +45,13 @@ func TestReadLineDropsAnOversizedLineAndCarriesOn(t *testing.T) {
 	got, tooLong := readAll(t, "a\n"+long+"\n"+strings.Repeat("y", 40)+"\nlast", 40)
 	assert.Equal(t, []string{"a", strings.Repeat("y", 40), "last"}, got, "a line of exactly max fits; the one after the long line still arrives")
 	assert.Equal(t, 1, tooLong)
+}
+
+func TestAnOversizedLinesStartIsKept(t *testing.T) {
+	t.Parallel()
+	got, prefixes := readAllPrefixes(t, "a\n"+"0123456789"+strings.Repeat("x", 100)+"\nb", 40)
+	assert.Equal(t, []string{"a", "b"}, got)
+	assert.Equal(t, []string{"01234567"}, prefixes)
 }
 
 func TestReadLineSplitsOnLFOnly(t *testing.T) {
