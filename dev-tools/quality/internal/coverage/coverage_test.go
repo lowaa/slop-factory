@@ -132,6 +132,52 @@ func TestMeasureFailsOnASourceTreeItCannotWalk(t *testing.T) {
 	assert.ErrorContains(t, err, "permission denied")
 }
 
+// Reruns of one suite count a block only if every run covers it; within a
+// run a block listed by several test binaries is covered if any covers it.
+// Other profiles still merge in by covered-or-not.
+func TestMeasureCountsOnlyWhatEveryRerunCovers(t *testing.T) {
+	t.Parallel()
+	first := profile(t, "atomic",
+		"a/a.go:1.1,2.2 3 1",
+		"a/a.go:3.1,4.2 1 1", // only this run: timing reached it
+		"b/b.go:1.1,2.2 1 0",
+		"b/b.go:1.1,2.2 1 5", // a second binary of the same run
+		"b/b.go:3.1,4.2 3 0",
+	)
+	second := profile(t, "atomic",
+		"a/a.go:1.1,2.2 3 2",
+		"a/a.go:3.1,4.2 1 0",
+		"b/b.go:1.1,2.2 1 1",
+		"b/b.go:3.1,4.2 3 0",
+		// Listed only by this run, as a block of a file the other run's
+		// binaries didn't reach: it isn't stable either.
+		"b/b.go:5.1,6.2 2 1",
+	)
+	e2e := profile(t, "set", "b/b.go:3.1,4.2 3 1")
+	m := &coverage.Metric{Module: scratchModule(t), Reruns: []string{first, second}, Profiles: []string{e2e}}
+
+	s, err := m.Measure()
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{"./a": 75, "./b": 66.7}, s.Packages)
+	assert.InDelta(t, 70, s.Total, 1e-9) // 7 of 10
+}
+
+func TestMeasureOfOneRerunIsThatRun(t *testing.T) {
+	t.Parallel()
+	only := profile(t, "atomic", "a/a.go:1.1,2.2 3 1", "a/a.go:3.1,4.2 1 0")
+	s, err := (&coverage.Metric{Module: scratchModule(t), Reruns: []string{only}}).Measure()
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{"./a": 75}, s.Packages)
+}
+
+func TestMeasureFailsOnARerunItCannotRead(t *testing.T) {
+	t.Parallel()
+	ok := profile(t, "atomic", "a/a.go:1.1,2.2 3 1")
+	_, err := (&coverage.Metric{Module: scratchModule(t), Reruns: []string{ok, filepath.Join(t.TempDir(), "gone.out")}}).Measure()
+	assert.ErrorContains(t, err, "gone.out")
+}
+
 func TestMeasureWithoutInputFails(t *testing.T) {
 	t.Parallel()
 	_, err := (&coverage.Metric{Module: scratchModule(t)}).Measure()

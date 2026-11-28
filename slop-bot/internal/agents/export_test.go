@@ -6,6 +6,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
+	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
@@ -37,3 +38,50 @@ func EventPayload(ev *harness.Event) map[string]any { return eventPayload(ev) }
 // hand-back's resume) finds its ticket's start place taken. Set it before
 // starting what it watches.
 func (m *Manager) OnStartBusy(f func(ident.TicketID)) { m.startBusy = f }
+
+// RevokeMerge is revokeMerge, so a test can make its write fail without a
+// ticket's whole life around it.
+func (m *Manager) RevokeMerge(ctx context.Context, ticket ident.TicketID) { m.revokeMerge(ctx, ticket) }
+
+// EnqueueNotice queues a notice for the running agent id, reporting whether
+// it was queued.
+func (m *Manager) EnqueueNotice(ctx context.Context, id ident.AgentID, text string) bool {
+	r, ok := m.runner(id)
+	if !ok {
+		return false
+	}
+	return m.enqueueNotice(ctx, r, text)
+}
+
+// Recover is recover: the harness of agent id died.
+func (m *Manager) Recover(ctx context.Context, id ident.AgentID) { m.recover(ctx, id) }
+
+// CancelBase is what Stop does first to the starts in flight, without
+// draining anything.
+func (m *Manager) CancelBase() { m.cancelBase() }
+
+// AdvanceTo is advanceTo.
+func (m *Manager) AdvanceTo(ctx context.Context, by ident.Principal, id ident.TicketID, target tickets.Status) error {
+	return m.advanceTo(ctx, by, id, target)
+}
+
+// SpawnAgent is spawnAgent.
+func (m *Manager) SpawnAgent(ctx context.Context, t *tickets.Ticket, pool state.Pool, spec tickets.AgentSpec) error {
+	return m.spawnAgent(ctx, t, pool, spec)
+}
+
+// Sync is sync: it keeps the ticket's agent in step with it, now.
+func (m *Manager) Sync(ctx context.Context, ticket ident.TicketID) { m.sync(ctx, ticket) }
+
+// RecoverWhenStartSettles holds ticket's start place until hold is closed,
+// and asks for agent id, whose harness just died, to be recovered meanwhile:
+// the recovery has to wait for that start (recoverAfter) and runs when it
+// settles. It reports whether the place was free to hold.
+func (m *Manager) RecoverWhenStartSettles(id ident.AgentID, ticket ident.TicketID, hold <-chan struct{}) bool {
+	held := m.goStart(ticket, state.PoolNormal, false, func(context.Context) { <-hold })
+	m.goRecover(&runner{id: id, ticket: ticket, pool: state.PoolNormal})
+	return held
+}
+
+// WaitStarts waits for every start in flight, and any a settling one began.
+func (m *Manager) WaitStarts() { m.starts.Wait() }

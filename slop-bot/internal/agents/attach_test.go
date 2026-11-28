@@ -259,7 +259,7 @@ func TestAnAttachSurvivesARestartAndItsCLIReconnects(t *testing.T) {
 	require.NoError(t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
 	require.NoError(t, m.Start(context.Background()))
-	t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	stopInCleanup(t, func() *agents.Manager { return m })
 	t.Cleanup(func() { _ = f.ctl.Close() })
 
 	// Not resumed: the person still has it. Its verbs still work.

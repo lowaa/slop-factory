@@ -112,6 +112,9 @@ type attachRun struct {
 	// the stream then, and that is the attach ending, not a restart to
 	// reconnect through; a hand-back retries through a restart itself.
 	ending atomic.Bool
+	// retryBase overrides retryEvery as the first wait between reconnect
+	// attempts, so tests need not sit through the production back-off.
+	retryBase time.Duration
 }
 
 // launched tells the daemon the TUI's pid, so that if this CLI dies the
@@ -342,6 +345,9 @@ func (at *attachRun) relay(ctx context.Context, body *scannedBody, out chan<- ap
 // An answer refusing it is returned as the *control.APIError it is.
 func (at *attachRun) reconnect(ctx context.Context) (*scannedBody, error) {
 	wait := retryEvery
+	if at.retryBase > 0 {
+		wait = at.retryBase
+	}
 	for {
 		select {
 		case <-ctx.Done():

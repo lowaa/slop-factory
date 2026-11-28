@@ -458,13 +458,18 @@ func (m *Manager) nudge(ctx context.Context, r *runner) {
 		m.opts.Logger.Warn("agents: counting a nudge", "agent", r.id, "err", err)
 		return
 	}
+	// A person who joined the session meanwhile is driving it: no prod.
 	if n > m.opts.Config.Agents.Nudges {
-		r.setState(ctx, state.StateStalled, fmt.Sprintf("stopped %d times without saying why", n))
+		if !r.setStateIf(ctx, notAttached, state.StateStalled, fmt.Sprintf("stopped %d times without saying why", n)) {
+			return
+		}
 		m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) keeps stopping without saying why: it's stalled. "+
 			"`slop-bot tell %s ...` to steer it.", r.id, r.ticket, r.id))
 		return
 	}
-	r.setState(ctx, state.StateIdle, "nudged")
+	if !r.setStateIf(ctx, notAttached, state.StateIdle, "nudged") {
+		return
+	}
 	m.event(ctx, EventNudged, r.id, r.ticket, map[string]int{"nudge": n})
 	// Through the inbox like any message, so a nudge waits its turn for a
 	// slot rather than jumping an agent with an answer to act on.

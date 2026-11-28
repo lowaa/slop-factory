@@ -1,12 +1,15 @@
 package agents_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -22,6 +25,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/sqlitex"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets/local"
@@ -229,6 +233,39 @@ type racingTickets struct {
 	mu     sync.Mutex
 	before func()
 	result chan error
+	// getErr and updateErr, when set, fail the reads and status updates of
+	// the tickets they name, with the error they return.
+	getErr, updateErr map[ident.TicketID]error
+}
+
+// failGet makes reading ticket id fail with err, from now on.
+func (r *racingTickets) failGet(id ident.TicketID, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.getErr == nil {
+		r.getErr = map[ident.TicketID]error{}
+	}
+	r.getErr[id] = err
+}
+
+// failUpdate makes a status update of ticket id fail with err, from now on.
+func (r *racingTickets) failUpdate(id ident.TicketID, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.updateErr == nil {
+		r.updateErr = map[ident.TicketID]error{}
+	}
+	r.updateErr[id] = err
+}
+
+func (r *racingTickets) Get(ctx context.Context, id ident.TicketID) (*tickets.Ticket, error) {
+	r.mu.Lock()
+	err := r.getErr[id]
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return r.TicketingSystem.Get(ctx, id)
 }
 
 // arm makes the next status update run before first, and report on result.
@@ -247,7 +284,11 @@ func (r *racingTickets) Update(ctx context.Context, by ident.Principal, id ident
 	} else {
 		before, result = nil, nil
 	}
+	fail := r.updateErr[id]
 	r.mu.Unlock()
+	if fail != nil && change.Status != nil {
+		return nil, fail
+	}
 	if before != nil {
 		before()
 	}
@@ -259,9 +300,13 @@ func (r *racingTickets) Update(ctx context.Context, by ident.Principal, id ident
 }
 
 type fixture struct {
-	t       *testing.T
-	ctl     *fake.Controller
-	state   *state.State
+	t     *testing.T
+	ctl   *fake.Controller
+	state *state.State
+	// stateDB is state's database, for a test to make a write fail (failOn).
+	stateDB *sqlitex.DB
+	// logs is what the manager logged.
+	logs    *logBuffer
 	tickets *local.System
 	// racing is the ticketing system the manager sees: tickets, with a hook
 	// that can land a write between the manager's read and its update.
@@ -305,8 +350,10 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	})
 	require.NoError(t, err)
 	clk := clock.NewFake(t0)
-	st, err := state.Open(ctx, &state.Options{Path: filepath.Join(dir, "state.db"), Logger: quiet, Clock: clk})
+	stateDB, err := sqlitex.Open(ctx, &sqlitex.Options{Path: filepath.Join(dir, "state.db"), Migrations: state.Migrations(), Logger: quiet})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = stateDB.Close() })
+	st := state.New(stateDB, clk)
 	t.Cleanup(func() { _ = st.Close() })
 	ts, err := local.Open(ctx, &local.Options{Path: filepath.Join(dir, "tickets.db"), Config: tickets.Config{AgentsMaySetUrgent: true}, Logger: quiet, Clock: clk})
 	require.NoError(t, err)
@@ -318,7 +365,7 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 		Dir: p.TranscriptsDir(), Index: st.Transcripts, Retain: cfg.Retention.Transcripts.D(), Clock: clk,
 	})
 	require.NoError(t, err)
-	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, racing: &racingTickets{TicketingSystem: ts}, clock: clk, cfg: cfg, paths: p,
+	f := &fixture{t: t, ctl: ctl, state: st, stateDB: stateDB, logs: &logBuffer{}, tickets: ts, racing: &racingTickets{TicketingSystem: ts}, clock: clk, cfg: cfg, paths: p,
 		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}, hooks: &harnessHooks{}, archive: archive, transcripts: filepath.Join(dir, "fake-transcripts")}
 	require.NoError(t, os.MkdirAll(f.transcripts, 0o700))
 	t.Cleanup(func() {
@@ -331,7 +378,7 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	})
 	f.mgr = f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: f.transcripts, Logger: quiet, Clock: clock.Real{}}, names: names, hooks: f.hooks})
 	require.NoError(t, f.mgr.Start(ctx))
-	t.Cleanup(func() { _ = f.mgr.Stop(context.Background()) })
+	stopInCleanup(t, func() *agents.Manager { return f.mgr })
 	// Cleanups run last-first: closing the controller first makes every
 	// fake exit, so the managers' drains don't wait on turns the test left
 	// open.
@@ -352,7 +399,7 @@ func (f *fixture) restartWith(between func()) *agents.Manager {
 	require.NoError(f.t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
 	require.NoError(f.t, m.Start(context.Background()))
-	f.t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	stopInCleanup(f.t, func() *agents.Manager { return m })
 	f.t.Cleanup(func() { _ = f.ctl.Close() })
 	f.mgr = m
 	return m
@@ -361,7 +408,7 @@ func (f *fixture) restartWith(between func()) *agents.Manager {
 func (f *fixture) newManager(h agents.Harnesses) *agents.Manager {
 	m, err := agents.New(&agents.Options{
 		Config: f.cfg, Paths: f.paths, State: f.state, Tickets: f.racing, Harnesses: h,
-		Worktrees: f.wts, User: "ada", Logger: slog.New(slog.NewTextHandler(testWriter{f.t}, nil)), Clock: f.clock, CLI: "/usr/bin/slop-bot",
+		Worktrees: f.wts, User: "ada", Logger: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{f.t}, f.logs), nil)), Clock: f.clock, CLI: "/usr/bin/slop-bot",
 		Transcripts: transcript.NewLibrary(h, f.archive),
 	})
 	require.NoError(f.t, err)
@@ -733,7 +780,7 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 	require.NoError(t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
 	require.NoError(t, m.Start(context.Background()))
-	t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	stopInCleanup(t, func() *agents.Manager { return m })
 	t.Cleanup(func() { _ = f.ctl.Close() })
 	resumed := f.session()
 	assert.True(t, resumed.Resumed)
@@ -741,6 +788,59 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 	note := f.user(resumed)
 	assert.Contains(t, note.Text, "slop-bot restarted")
 	_ = tk
+}
+
+// stopBound is how long a test's closing Stop may drain: far past any
+// drain the tests make, so reaching it is a hang.
+const stopBound = 2 * time.Minute
+
+// stopInCleanup stops the manager get returns (read when the test ends, so
+// a restart's is the one stopped) once the test is done. A drain that never
+// ends fails the test there, with every goroutine's stack, rather than the
+// package running into go test's timeout with no word of which test hung.
+func stopInCleanup(t *testing.T, get func() *agents.Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		m := get()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = m.Stop(context.Background())
+		}()
+		select {
+		case <-done:
+		case <-time.After(stopBound): // a safety net, never a synchronisation
+			buf := make([]byte, 8<<20)
+			t.Errorf("the manager's Stop didn't return within %s; goroutines:\n%s", stopBound, buf[:runtime.Stack(buf, true)])
+		}
+	})
+}
+
+// logBuffer is the manager's log, for a test to read what it warned of.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *logBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// failOn makes the writes a SQLite trigger clause names ("BEFORE UPDATE OF
+// state ON agents", with an optional WHEN) fail in state.db from now on, as
+// a database that can't write would.
+func (f *fixture) failOn(trigger string) {
+	f.t.Helper()
+	_, err := f.stateDB.ExecContext(context.Background(), "CREATE TRIGGER inject_failure "+trigger+" BEGIN SELECT RAISE(ABORT, 'injected failure'); END")
+	require.NoError(f.t, err)
 }
 
 // testWriter sends the Manager's logs to the test's, shown on failure.

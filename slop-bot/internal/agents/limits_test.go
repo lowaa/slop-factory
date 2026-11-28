@@ -194,7 +194,7 @@ func TestARestartedDaemonStillHoldsAHarnessAtItsLimit(t *testing.T) {
 		&state.HarnessLimit{Harness: config.ClaudeCode, UsedPercent: 100, ResetsAt: t0.Add(time.Hour), ReportedAt: t0}))
 	f.mgr = f.newManager(&fakeHarness{h: &fake.Harness{}})
 	require.NoError(t, f.mgr.Start(context.Background()))
-	t.Cleanup(func() { _ = f.mgr.Stop(context.Background()) })
+	stopInCleanup(t, func() *agents.Manager { return f.mgr })
 	held := f.file("waits", nil)
 	f.await(agents.EventHeld, heldFor(held.ID))
 }

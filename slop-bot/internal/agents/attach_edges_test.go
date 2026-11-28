@@ -25,7 +25,7 @@ func (f *fixture) restarted() *agents.Manager {
 	require.NoError(f.t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
 	require.NoError(f.t, m.Start(context.Background()))
-	f.t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	stopInCleanup(f.t, func() *agents.Manager { return m })
 	f.t.Cleanup(func() { _ = f.ctl.Close() })
 	return m
 }
@@ -146,7 +146,7 @@ func TestAHandBackCutShortByARestartResumesTheAgent(t *testing.T) {
 	require.NoError(t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
 	require.NoError(t, m.Start(context.Background()))
-	t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	stopInCleanup(t, func() *agents.Manager { return m })
 	t.Cleanup(func() { _ = f.ctl.Close() })
 	resumed := f.session()
 	assert.Equal(t, s.ID, resumed.ID)

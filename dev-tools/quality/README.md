@@ -25,6 +25,7 @@ slop-bot/quality.sh --report           # the full reports, to quality-reports/sl
 | `--rebaseline` | rewrite the baselines from the current values. Deliberate: its commit says why |
 | `--report` | write the full reports to `${QUALITY_REPORT_DIR:-<repo>/quality-reports}/<project-slug>/`, and print the comparison; never fails |
 | `--only=MEASURE[,MEASURE]` | of `coverage`, `complexity`, `testtime` (default all three) |
+| `--runs=N` | run the suite N times; coverage counts only what every run covers (see [Coverage that timing moves](#coverage-that-timing-moves)). Default: `quality_baseline/coverage_runs` for `--prune` and `--rebaseline`, else 1 |
 | `--coverprofile=FILE` | reuse a cover profile rather than running the tests; repeatable, merged. Test time is then skipped |
 | `--coverdir=DIR` | merge a `GOCOVERDIR` (an e2e run's, from a `-cover` binary) into the coverage; repeatable |
 | `--mutation[=changed\|all]` | not run here: mutation testing is `dev-tools/mutation/mutation.sh <project-dir>` (`dev-tools/mutation/README.md`); exits 2 |
@@ -87,6 +88,42 @@ only `--rebaseline` moves it.
 **Missing baselines.** A check or prune of coverage or complexity without a
 baseline is an error (2): create it with `--rebaseline`. Test time without
 one is a note.
+
+### Coverage that timing moves
+
+`-coverpkg` credits a package with whatever any test reaches, and an e2e
+test with real processes reaches some branches only by timing: a retry, a
+back-off, an error path its teardown happens to hit when a context is
+cancelled mid-call. Such a block is covered in some runs and not others, and
+in a small package one statement is more than the tolerance.
+
+The cure is a test that covers the branch on every run: the gate then
+doesn't depend on the timing. What is left is a tail of blocks e2e tests
+reach only now and then, rarely the same ones twice (which error branch a
+teardown hits). Such a block can't fail a check against a baseline that
+never counted it; it fails one only once a lucky run has written it into
+the baseline. So a project whose coverage timing moves writes
+`quality_baseline/coverage_runs`, a number of runs (after any `#` comment
+lines saying why), and its `--prune` and `--rebaseline` run the suite that
+many times, each with `-count=1` (a cached result would replay the first
+run), and count a block as covered only if every run covers it. A check
+stays one run, with the same tolerance: a run that misses only what timing
+gives still meets a baseline that never counted it, and one that loses what
+every run covered fails as before. The baseline drops only by what the runs
+show is noise.
+
+A check's single run usually beats such a baseline a little, so it prints
+an improvement; a prune from the reruns then moves only what all of them
+cover. `--runs=N` does the same for one invocation, in any mode
+(`--report --runs=5` shows the stable coverage). Without the file, every
+mode runs the suite once, as before. Runs only matter to coverage, so
+without it (`--only=testtime`) the suite runs once. A `--coverprofile`
+stands in for the suite's runs: it is measured as given, so `coverage_runs`
+doesn't apply to it, and `--runs` with it is refused.
+
+To find the blocks that flip, run the measure a few times with
+`-coverprofile` and compare which blocks each run covers; cover the ones
+most runs reach with tests first, since they are the ones a check misses.
 
 ## A new project
 

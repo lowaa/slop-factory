@@ -63,6 +63,31 @@ Describe 'quality_lib.sh'
       The result of function coverdirs should eq "${PWD}/cov"
     End
 
+    It 'takes --runs'
+      When call quality_parse_args --runs=3
+      The status should be success
+      The variable QUALITY_RUNS should eq 3
+    End
+
+    It 'refuses --runs with a cover profile, which stands in for the runs'
+      When call quality_parse_args --runs=2 --coverprofile=c.out
+      The status should eq 2
+      The stderr should include 'give one'
+    End
+
+    Describe 'a bad --runs'
+    Parameters
+      --runs=0
+      --runs=two
+      --runs=-1
+    End
+    It "refuses $1"
+      When call quality_parse_args "$1"
+      The status should eq 2
+      The stderr should include 'positive number'
+    End
+    End
+
     Describe 'a mutation flag'
     Parameters
       --mutation changed
@@ -237,6 +262,80 @@ Describe 'quality_lib.sh'
       The status should eq 2
       The stderr should eq 'quality.sh: --mutation=all: mutation testing is dev-tools/mutation/mutation.sh <project-dir> (dev-tools/mutation/README.md)'
       The result of function all_calls should eq ''
+    End
+
+    Describe 'several runs'
+      runs_file() { mkdir -p "$(project)/quality_baseline" && printf '%s\n' "$@" > "$(project)/quality_baseline/coverage_runs"; }
+      go_test_count() { calls 'go test' | wc -l | tr -d ' '; }
+
+      It 'runs the suite --runs times and hands the CLI each run, timing the first'
+        When call quality_go "$(project)" --runs=2
+        The status should be success
+        The stderr should include '(run 2)'
+        The result of function go_test_count should eq 2
+        The result of function go_test_calls should include '/cover-2.out'
+        The result of function quality_calls should match pattern \
+          'quality measure --module . --mode check --only coverage,complexity,testtime --prune-cmd proj/quality.sh --prune --rerun-profile */cover-1.out --rerun-profile */cover-2.out --test-json */test-1.json'
+      End
+
+      # The last row's flag leaves the mode a check.
+      Parameters
+        --prune 3
+        --rebaseline 3
+        --report 1
+        --only=coverage,complexity,testtime 1
+      End
+      It "takes coverage_runs for '$1' as $2 runs"
+        runs_file '# Timing moves e2e coverage: see the README.' 3
+        When call quality_go "$(project)" "$1"
+        The status should be success
+        The stderr should include 'go test'
+        The result of function go_test_count should eq "$2"
+      End
+    End
+
+    It 'runs each of several runs afresh, even with nothing timed'
+      fresh_runs() { calls 'go test -race -count=1 ' | wc -l | tr -d ' '; }
+      When call quality_go "$(project)" --runs=2 --only=coverage
+      The status should be success
+      The stderr should include '(run 2)'
+      The result of function fresh_runs should eq 2
+    End
+
+    It 'runs the suite once for test time alone, whatever coverage_runs says'
+      mkdir -p "$(project)/quality_baseline" && echo 3 > "$(project)/quality_baseline/coverage_runs"
+      When call quality_go "$(project)" --rebaseline --only=testtime
+      The status should be success
+      The stderr should include 'go test'
+      The result of function quality_calls should include '--coverprofile'
+      The result of function quality_calls should not include '--rerun-profile'
+    End
+
+    It 'lets --runs override coverage_runs'
+      mkdir -p "$(project)/quality_baseline" && echo 3 > "$(project)/quality_baseline/coverage_runs"
+      When call quality_go "$(project)" --prune --runs=1
+      The status should be success
+      The stderr should include 'go test'
+      The result of function quality_calls should include '--coverprofile'
+    End
+
+    It 'refuses a coverage_runs that is not a number, before running the suite'
+      mkdir -p "$(project)/quality_baseline" && echo many > "$(project)/quality_baseline/coverage_runs"
+      When call quality_go "$(project)" --prune
+      The status should eq 2
+      The stderr should include "coverage_runs: want a positive number of runs, not 'many'"
+      The result of function go_test_calls should eq ''
+      The result of function quality_calls should eq ''
+    End
+
+    It 'stops at the first failing run'
+      STUB_GO_TEST_EXIT=1
+      When call quality_go "$(project)" --runs=3
+      The status should eq 1
+      The stderr should include 'go test failed (exit 1)'
+      The result of function go_test_calls should include 'cover-1.out'
+      The result of function go_test_calls should not include 'cover-2.out'
+      The result of function quality_calls should match pattern 'quality failures */test-1.json'
     End
 
     It 'refuses a bad argument before running anything'

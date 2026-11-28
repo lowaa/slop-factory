@@ -46,10 +46,14 @@ func start(t *testing.T) *rig {
 
 // newRig is start without the launch, for a test that changes the rig
 // first.
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T) *rig { return newRigTrusting(t, 0) }
+
+// newRigTrusting is newRig with a hook trusted over the screen for trust
+// (0 is the driver's default, one poll).
+func newRigTrusting(t *testing.T, trust time.Duration) *rig {
 	t.Helper()
 	clk := clock.NewFake(t0)
-	r := &rig{TUI: faketest.NewTUI(t, &faketest.TUIOptions{Clock: clk, PollInterval: poll, ConfirmTimeout: confirm}), clk: clk}
+	r := &rig{TUI: faketest.NewTUI(t, &faketest.TUIOptions{Clock: clk, PollInterval: poll, HookTrust: trust, ConfirmTimeout: confirm}), clk: clk}
 	ctx, cancel := context.WithTimeout(context.Background(), faketest.Timeout)
 	t.Cleanup(cancel)
 	r.ctx = ctx

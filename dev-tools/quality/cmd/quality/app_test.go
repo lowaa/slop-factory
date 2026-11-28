@@ -87,6 +87,28 @@ func TestPruneHintAndPrune(t *testing.T) {
 	assert.Contains(t, string(data), "./a 100.0\n")
 }
 
+// A prune from reruns of the suite moves the baseline only as far as every
+// run reached: one lucky run of the two doesn't raise the bar.
+func TestPruneFromRerunsTakesWhatEveryRunCovers(t *testing.T) {
+	t.Parallel()
+	p := newProject(t)
+	require.Equal(t, exitOK, p.measure("rebaseline", p.worse).code)
+
+	r := runApp("measure", "--module", p.dir, "--mode", "prune", "--only", "coverage",
+		"--rerun-profile", p.good, "--rerun-profile", p.worse)
+	require.Equal(t, exitOK, r.code, r.err)
+	data, err := os.ReadFile(filepath.Join(p.dir, "quality_baseline", "coverage.txt"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "./a 50.0\n")
+
+	r = runApp("measure", "--module", p.dir, "--mode", "prune", "--only", "coverage",
+		"--rerun-profile", p.good, "--rerun-profile", p.good)
+	require.Equal(t, exitOK, r.code, r.err)
+	data, err = os.ReadFile(filepath.Join(p.dir, "quality_baseline", "coverage.txt"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "./a 100.0\n")
+}
+
 func TestOnlyRunsTheNamedMeasures(t *testing.T) {
 	t.Parallel()
 	p := newProject(t)
