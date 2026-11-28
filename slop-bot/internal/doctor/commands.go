@@ -59,6 +59,7 @@ func (e ExecCommands) Run(ctx context.Context, c *Command) (*service.Result, err
 	defer cancel()
 	// #nosec G204 -- the path is a harness binary found on the user's PATH, the args are doctor's own
 	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
+	inOwnGroup(cmd)
 	cmd.WaitDelay = waitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stderr = &stderr
