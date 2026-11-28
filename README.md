@@ -33,7 +33,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for running the tests.
 
 ## Published images
 
-CI publishes two linux/amd64 images to ghcr.io
+slop-haus is defunct, replaced by slop-bot: CI no longer publishes these on
+each push to main, only when a `v*` tag is pushed. When it did, it published
+two linux/amd64 images to ghcr.io
 ([`publish_images.yml`](.github/workflows/publish_images.yml)):
 
 | Image | What it is |

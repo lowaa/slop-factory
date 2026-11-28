@@ -2,7 +2,7 @@ name: setup
 description: Toolchains the test.sh entrypoints expect on the host. Docker is already on the Linux runners (the macOS ones have none).
 inputs:
   go:
-    description: Install Go (the version slop-haus/server/go.mod names)
+    description: Install Go (the version the root go.work names)
     default: "false"
   node:
     description: Install Node.js 22
@@ -22,7 +22,7 @@ runs:
     - if: inputs.go == 'true'
       uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
-        go-version-file: slop-haus/server/go.mod
+        go-version-file: go.work
         cache-dependency-path: "**/go.sum"
     - if: inputs.node == 'true' || inputs.npm-ci != 'none'
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

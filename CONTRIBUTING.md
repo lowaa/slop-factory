@@ -6,6 +6,11 @@ green local run (the touched suites' `test.sh` and `quality.sh`, and
 `dev-tools/lint/lint.sh --changed`) is a green CI run.
 Most need Docker.
 
+slop-haus is defunct, replaced by slop-bot: CI no longer runs its suites
+(server, frontend, api-client, supervisor, token, e2e, harness-e2e,
+deployment examples) or publishes its images on each push to main. Their
+`test.sh` entrypoints still run locally.
+
 | Suite | Command |
 | --- | --- |
 | Go libraries | `go-auth/test.sh` (and the same for each `go-*/` and `artifact-store/`) |
