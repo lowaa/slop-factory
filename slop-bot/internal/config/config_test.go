@@ -83,6 +83,8 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"unknown ticketing":    {"ticketing: {system: jira}\n", `ticketing.system: "jira"`},
 		"duplicate repo":       {"repos: [{name: a, path: /a}, {name: a, path: /b}]\n", `repos[1].name: "a" is listed twice`},
 		"unnamed repo":         {"repos: [{path: /a}]\n", "repos[0].name: is empty"},
+		"repo name with slash": {"repos: [{name: owner/repo, path: /a}]\n", `repos[0].name: "owner/repo": want a letter or digit first`},
+		"repo name dot first":  {"repos: [{name: .github, path: /a}]\n", `repos[0].name: ".github": want a letter or digit first`},
 		"repo without path":    {"repos: [{name: a}]\n", "repos[0].path: is empty"},
 		"max_live too small":   {"concurrency: {max_active: 4, max_live: 2}\n", "concurrency.max_live: 2 is below"},
 		"bad duration":         {"agents: {stall_after: soon}\n", `"soon" isn't a duration`},
@@ -109,4 +111,23 @@ func TestLoadReadsTheFile(t *testing.T) {
 
 	_, err = Load(filepath.Join(dir, "missing.yaml"), "/home/u")
 	assert.ErrorContains(t, err, "missing.yaml")
+}
+
+// `--config ./cfg.yaml` must still give absolute paths: worktree paths are
+// compared with git's, which are absolute.
+func TestARelativeConfigPathGivesAbsolutePaths(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "slop-bot-config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("workspace_dir: ws\nrepos: [{name: a, path: repos/a}]\n"), 0o600))
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	rel, err := filepath.Rel(cwd, path)
+	require.NoError(t, err)
+	require.False(t, filepath.IsAbs(rel))
+
+	c, err := Load(rel, "/home/u")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "ws"), c.WorkspaceDir)
+	assert.Equal(t, filepath.Join(dir, "repos", "a"), c.Repos[0].Path)
 }

@@ -200,7 +200,7 @@ func TestCleanupLeavesOtherTicketsAlone(t *testing.T) {
 	assert.True(t, onDisk(t, t42.Path))
 }
 
-// A worktree deleted by hand: its registration is pruned, and its branch is
+// A worktree deleted by hand: its registration is dropped, and its branch is
 // removed if safe or kept if it holds work.
 func TestCleanupOfAWorktreeAlreadyGone(t *testing.T) {
 	t.Parallel()

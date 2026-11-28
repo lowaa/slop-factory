@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -140,7 +141,13 @@ func Load(path, home string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}
-	return Parse(raw, filepath.Dir(path), home)
+	// Absolute, so a relative --config still resolves relative entries to
+	// absolute paths: worktree paths are compared with git's, which are.
+	dir, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	return Parse(raw, dir, home)
 }
 
 // Parse is Load on bytes. dir resolves relative paths: the config file's
@@ -280,6 +287,8 @@ func (c *Config) validate() error {
 	for i, r := range c.Repos {
 		if r.Name == "" {
 			add("repos[%d].name: is empty", i)
+		} else if err := CheckRepoName(r.Name); err != nil {
+			add("repos[%d].name: %v", i, err)
 		}
 		if seen[r.Name] {
 			add("repos[%d].name: %q is listed twice", i, r.Name)
@@ -308,6 +317,22 @@ func (c *Config) Slots() int { return c.Concurrency.MaxActive + c.Concurrency.Ur
 
 // AutonomyBudget is the most outstanding agent-created tickets allowed.
 func (c *Config) AutonomyBudget() int { return c.Autonomy.TicketsPerAgent * c.Slots() }
+
+const maxRepoName = 100
+
+var repoNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// CheckRepoName is the rule for a repo's name. The name becomes part of a
+// directory name (a ticket's worktree is t<ticket>-<repo>), so it must be
+// safe there; checking it at load shows a bad one at startup, not when a
+// ticket first needs the repo.
+func CheckRepoName(name string) error {
+	if len(name) > maxRepoName || !repoNameRe.MatchString(name) || strings.Contains(name, "..") {
+		return fmt.Errorf("%q: want a letter or digit first, then letters, digits, '.', '_' or '-', "+
+			"no \"..\", at most %d characters", name, maxRepoName)
+	}
+	return nil
+}
 
 // Repo looks a repo up by name.
 func (c *Config) Repo(name string) (*Repo, bool) {
