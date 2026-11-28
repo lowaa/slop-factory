@@ -1,0 +1,4 @@
+# Recorded from claude 2.1.332 (`claude -p --output-format stream-json`),
+# trimmed and scrubbed by hand when the codec was written; re-record on a
+# harness version bump.
+turn_with_tool.jsonl linguist-generated=true

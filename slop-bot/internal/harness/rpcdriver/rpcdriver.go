@@ -31,6 +31,9 @@ type Wire struct {
 	w  io.Writer
 }
 
+// NewWire wraps w. Codec tests use it to capture what a codec writes.
+func NewWire(w io.Writer) *Wire { return &Wire{w: w} }
+
 // WriteLine writes b and a newline as one message.
 func (w *Wire) WriteLine(b []byte) error {
 	w.mu.Lock()
