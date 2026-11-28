@@ -1,0 +1,17 @@
+# Developer setup for slop-bot
+
+What a machine needs to build and test slop-bot, and how each tool was
+installed while slop-bot was being built. The install docs grow from this.
+
+## Tools installed during development
+
+| Tool | Version | License | Why | How it was installed |
+| --- | --- | --- | --- | --- |
+| shellcheck | 0.11.0 | GPL-3.0 (dev-only tool, never shipped; already approved in `dev-tools/lint/README.md`) | the repo-wide lint (`dev-tools/lint/shell.sh`) | release tarball from github.com/koalaman/shellcheck, binary copied to `~/.local/bin/shellcheck` |
+| shellspec | 0.28.1 | MIT | shell script tests (the repo's convention for new shell tests) | `shellspec-dist.tar.gz` from github.com/shellspec/shellspec releases, unpacked to `~/.local/lib/shellspec`, symlinked as `~/.local/bin/shellspec` |
+| tmux | 3.4 | ISC | the TUI driver (agy) and its tests | the user installed it with the OS package manager |
+
+## Already present on the dev host
+
+Go 1.27.4, docker, gh, bats, shfmt, govulncheck, osv-scanner, gitleaks,
+trivy, and the four harness CLIs (`claude`, `codex`, `pi`, `agy`).
