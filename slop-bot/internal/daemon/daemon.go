@@ -188,15 +188,7 @@ func New(opts *Options) (*Daemon, error) {
 			StartFunc: func(ctx context.Context) error { return d.agents.Start(ctx) },
 			StopFunc:  func(ctx context.Context) error { return d.agents.Stop(ctx) },
 		},
-		&lifecycle.Func{
-			N: "orphaned tui sessions",
-			StartFunc: func(ctx context.Context) error {
-				if d.host != nil {
-					d.endOrphans(ctx)
-				}
-				return nil
-			},
-		},
+		d.orphanedSessions(),
 	)
 	return d, nil
 }

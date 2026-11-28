@@ -234,6 +234,9 @@ func TestPurgeAsksFirst(t *testing.T) {
 func TestPurgeWithYesDoesNotAsk(t *testing.T) {
 	t.Parallel()
 	h := newInstallHarness(t)
+	// The test's own: purge looks for a daemon there, and the default would
+	// find the machine's real one, if it runs.
+	h.vars["XDG_RUNTIME_DIR"] = h.runtime
 	require.NoError(t, os.MkdirAll(filepath.Join(h.home, ".cache", "slop-bot"), 0o700))
 	require.Equal(t, 0, h.run(t, "uninstall", "--purge", "--yes"), h.err.String())
 	assert.NoDirExists(t, filepath.Join(h.home, ".cache", "slop-bot"))

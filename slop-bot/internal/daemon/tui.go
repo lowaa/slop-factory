@@ -164,6 +164,20 @@ func (d *Daemon) tuiSessions() lifecycle.Component {
 	}
 }
 
+// orphanedSessions ends, once the agents have started and taken back their
+// sessions, the sessions none of them owns (endOrphans).
+func (d *Daemon) orphanedSessions() lifecycle.Component {
+	return &lifecycle.Func{
+		N: "orphaned tui sessions",
+		StartFunc: func(ctx context.Context) error {
+			if d.host != nil {
+				d.endOrphans(ctx)
+			}
+			return nil
+		},
+	}
+}
+
 // endOrphans kills the sessions on slop-bot's server that no live agent
 // owns (their ticket ended while the daemon was away, say): left running,
 // they would work on with nobody to hear them. It runs once the agents
