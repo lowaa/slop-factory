@@ -26,24 +26,116 @@ import (
 // line, so the default 64KiB scanner buffer is far too small.
 const maxLine = 32 << 20
 
+// maxQueued bounds the lines waiting for the harness to read its stdin. A
+// harness that leaves this many unread has stopped reading: a write past it
+// fails rather than grow without end.
+const maxQueued = 1024
+
+var (
+	errWireClosed = errors.New("rpcdriver: the harness's input is closed")
+	errWireFull   = errors.New("rpcdriver: the harness isn't reading its input")
+)
+
 // Wire is the codec's handle on the process: writes are serialised, so a
-// steer and a protocol reply can't interleave mid-line.
+// steer and a protocol reply can't interleave mid-line. A conversation's
+// Wire queues each line for a writer goroutine of its own, so a write never
+// waits on the harness reading: codecs write under their own locks, which
+// Decode also takes, and a write blocked on a full stdin there would stop
+// stdout being read, and a harness blocked writing stdout never reads
+// stdin again.
 type Wire struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu   sync.Mutex
+	cond *sync.Cond
+	w    io.Writer
+	// c is closed once the queue is written, for a queued Wire; nil for
+	// NewWire's, which writes in WriteLine.
+	c      io.Closer
+	queue  [][]byte
+	closed bool
+	err    error
 }
 
-// NewWire wraps w. Codec tests use it to capture what a codec writes.
+// NewWire wraps w, writing in WriteLine itself. Codec tests use it to
+// capture what a codec writes.
 func NewWire(w io.Writer) *Wire { return &Wire{w: w} }
 
-// WriteLine writes b and a newline as one message.
+// newQueuedWire writes to wc from a goroutine of its own, until close or
+// abort.
+func newQueuedWire(wc io.WriteCloser) *Wire {
+	w := &Wire{w: wc, c: wc}
+	w.cond = sync.NewCond(&w.mu)
+	go w.write()
+	return w
+}
+
+// WriteLine queues b and a newline as one message, or for NewWire's,
+// writes it.
 func (w *Wire) WriteLine(b []byte) error {
+	line := append(append(make([]byte, 0, len(b)+1), b...), '\n')
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if _, err := w.w.Write(append(b, '\n')); err != nil {
-		return fmt.Errorf("rpcdriver: writing to the harness: %w", err)
+	switch {
+	case w.c == nil:
+		if _, err := w.w.Write(line); err != nil {
+			return fmt.Errorf("rpcdriver: writing to the harness: %w", err)
+		}
+		return nil
+	case w.err != nil:
+		return w.err
+	case w.closed:
+		return errWireClosed
+	case len(w.queue) >= maxQueued:
+		return errWireFull
 	}
+	w.queue = append(w.queue, line)
+	w.cond.Signal()
 	return nil
+}
+
+func (w *Wire) write() {
+	for {
+		w.mu.Lock()
+		for len(w.queue) == 0 && !w.closed {
+			w.cond.Wait()
+		}
+		if len(w.queue) == 0 {
+			w.mu.Unlock()
+			_ = w.c.Close()
+			return
+		}
+		line := w.queue[0]
+		w.queue = w.queue[1:]
+		w.mu.Unlock()
+		if _, err := w.w.Write(line); err != nil {
+			w.mu.Lock()
+			w.err = fmt.Errorf("rpcdriver: writing to the harness: %w", err)
+			w.queue, w.closed = nil, true
+			w.cond.Broadcast()
+			w.mu.Unlock()
+			_ = w.c.Close()
+			return
+		}
+	}
+}
+
+// close closes stdin once what is queued has been written: how a graceful
+// Stop ends the session.
+func (w *Wire) close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.closed = true
+	w.cond.Signal()
+}
+
+// abort drops what is queued and closes stdin now, ending a write blocked
+// on it: once the harness has exited nothing will read it, and a child it
+// left holding the pipe might never.
+func (w *Wire) abort() {
+	w.mu.Lock()
+	w.queue, w.closed = nil, true
+	w.cond.Signal()
+	w.mu.Unlock()
+	_ = w.c.Close()
 }
 
 // Codec is one harness's protocol.
@@ -108,7 +200,7 @@ func Start(ctx context.Context, opts *Options) (*Conversation, error) {
 	c := &Conversation{
 		opts:    opts,
 		proc:    proc,
-		wire:    &Wire{w: proc.Stdin},
+		wire:    newQueuedWire(proc.Stdin),
 		events:  driverkit.NewEvents(opts.Logger),
 		settled: make(chan struct{}),
 		lines:   make(chan []byte, 64),
@@ -121,6 +213,7 @@ func Start(ctx context.Context, opts *Options) (*Conversation, error) {
 		proc.Kill()
 		for range c.lines { // let read finish
 		}
+		c.wire.abort()
 		c.events.Close()
 		return nil, fmt.Errorf("rpcdriver: %s handshake: %w (stderr: %s)", opts.Harness, err, lastLine(proc.Stderr()))
 	}
@@ -219,6 +312,7 @@ func (c *Conversation) dispatch() {
 			c.emit(ev)
 		}
 	}
+	c.wire.abort()
 	code := c.proc.ExitCode()
 	var exitErr error
 	if code != 0 {
@@ -309,7 +403,7 @@ func (c *Conversation) Stop(ctx context.Context, force bool) error {
 		case <-ctx.Done():
 			return c.kill(ctx)
 		}
-		_ = c.proc.Stdin.Close()
+		c.wire.close()
 		select {
 		case <-c.exited:
 			return nil
