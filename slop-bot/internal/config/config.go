@@ -52,6 +52,14 @@ type Config struct {
 	Harnesses          map[string]*HarnessConfig `yaml:"harnesses"`
 	Agents             Agents                    `yaml:"agents"`
 	Retention          Retention                 `yaml:"retention"`
+	Doctor             Doctor                    `yaml:"doctor"`
+}
+
+// Doctor is what `slop-bot doctor` checks beyond slop-bot's own needs.
+type Doctor struct {
+	// Require are binaries the user's workflow needs on PATH (gh, linters):
+	// slop-bot doesn't use them, but its agents will.
+	Require []string `yaml:"require"`
 }
 
 // Ticketing picks the TicketingSystem. It's edited by hand for now.
@@ -100,6 +108,9 @@ type HarnessConfig struct {
 	// Permissive runs the harness without permission prompts. Default true:
 	// nobody is watching a headless agent's dialogs.
 	Permissive *bool `yaml:"permissive"`
+	// Model is what agents run on when their ticket names none. Blank
+	// leaves it to the harness (pi's adapter then picks a known-good one).
+	Model string `yaml:"model"`
 }
 
 // Agents holds the lifecycle timings.
@@ -298,6 +309,11 @@ func (c *Config) validate() error {
 	}
 	if c.Agents.Nudges < 1 {
 		add("agents.nudges: must be at least 1")
+	}
+	for i, bin := range c.Doctor.Require {
+		if strings.TrimSpace(bin) == "" {
+			add("doctor.require[%d]: is empty", i)
+		}
 	}
 	return errors.Join(errs...)
 }

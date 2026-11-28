@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/doctor"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 )
 
@@ -49,9 +51,26 @@ func (a *app) pathsCmd() *cobra.Command {
 					return err
 				}
 			}
-			return w.Flush()
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			return a.printMismatches(cmd.OutOrStdout(), p)
 		},
 	}
+}
+
+// printMismatches warns when the installed service resolves a location
+// differently from this shell: the 1.4 mismatch warning.
+func (a *app) printMismatches(out io.Writer, p *paths.Paths) error {
+	w := &errWriter{w: out}
+	warns := a.mismatchWarnings(p)
+	for _, warn := range warns {
+		w.printf("warning: %s\n", warn)
+	}
+	if len(warns) > 0 {
+		w.printf("fix: %s\n", doctor.MismatchFix)
+	}
+	return w.err
 }
 
 func origin(d paths.Dir) string {

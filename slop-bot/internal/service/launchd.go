@@ -67,6 +67,21 @@ func (l *launchd) Install(ctx context.Context) (*Installed, error) {
 	return res, nil
 }
 
+// Preflight checks the user's GUI domain exists: launchd has one only while
+// the user is logged in at the Mac, so a login over ssh alone can't
+// bootstrap an agent.
+func (l *launchd) Preflight(ctx context.Context) error {
+	res, err := l.cmd.run(ctx, "launchctl", "print", l.domain())
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrNoServiceManager, err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("%w: launchctl print %s exited %d (launchd agents need you logged in at the Mac, "+
+			"not only over ssh): %s", ErrNoServiceManager, l.domain(), res.ExitCode, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
 func (l *launchd) Uninstall(ctx context.Context) error {
 	if err := requireFile(l.UnitPath()); err != nil {
 		return err
