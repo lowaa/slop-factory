@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -58,9 +59,11 @@ func (m *Manager) checkRepo(ctx context.Context, p string) error {
 }
 
 // checkWorktree checks path is a real directory (not a symlink) that git sees
-// as a worktree's top level, so a command run there can't act on the repo
-// enclosing the workspace, or on wherever a symlink points.
-func (m *Manager) checkWorktree(ctx context.Context, path string) error {
+// as a worktree's top level, and a worktree of repoPath's repo. Otherwise a
+// command run there could act on the repo enclosing the workspace, on
+// wherever a symlink points, or on a different repo cloned over a deleted
+// worktree.
+func (m *Manager) checkWorktree(ctx context.Context, repoPath, path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -68,19 +71,42 @@ func (m *Manager) checkWorktree(ctx context.Context, path string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("%w: %s isn't a directory", ErrCollision, path)
 	}
-	top, err := m.git.Run(ctx, path, "rev-parse", "--show-toplevel")
-	if err != nil {
+	out, err := m.git.Run(ctx, path, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir")
+	if errors.Is(err, gitx.ErrNotARepo) {
 		return fmt.Errorf("%w: %s: %w", ErrBroken, path, err)
 	}
-	if got := canon(strings.TrimSpace(top)); got != canon(path) {
+	if err != nil {
+		// A timeout or a failed fork says nothing about the worktree; the
+		// caller mustn't take it for a broken one (ForceCleanup deletes those).
+		return err
+	}
+	top, common, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	if got := canon(top); got != canon(path) {
 		return fmt.Errorf("%w: %s (git found the repo at %s)", ErrBroken, path, got)
+	}
+	want, err := m.commonDir(ctx, repoPath)
+	if err != nil {
+		return err
+	}
+	if got := resolve(common); got != want {
+		return fmt.Errorf("%w: %s is a checkout of the repo at %s, not of %s", ErrCollision, path, got, repoPath)
 	}
 	return nil
 }
 
+// commonDir is repoPath's git dir as all its worktrees share it, with
+// symlinks resolved.
+func (m *Manager) commonDir(ctx context.Context, repoPath string) (string, error) {
+	out, err := m.git.Run(ctx, repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	return resolve(strings.TrimSpace(out)), nil
+}
+
 // inWorktree runs git in the worktree at path, once checkWorktree passes.
-func (m *Manager) inWorktree(ctx context.Context, path string, args ...string) (string, error) {
-	if err := m.checkWorktree(ctx, path); err != nil {
+func (m *Manager) inWorktree(ctx context.Context, repoPath, path string, args ...string) (string, error) {
+	if err := m.checkWorktree(ctx, repoPath, path); err != nil {
 		return "", err
 	}
 	return m.git.Run(ctx, path, args...)
@@ -148,6 +174,11 @@ func (m *Manager) defaultRefs(ctx context.Context, repoPath string) ([]string, e
 		if strings.HasPrefix(head, "refs/heads/"+BranchPrefix) {
 			return nil, nil
 		}
+		// An unborn branch (`switch --orphan`) has no commits to be merged
+		// into.
+		if ok, err := m.refExists(ctx, repoPath, head); err != nil || !ok {
+			return nil, err
+		}
 		return []string{head}, nil
 	}
 	refs := []string{ref}
@@ -199,9 +230,14 @@ func (m *Manager) rescue(ctx context.Context, repoPath string, ticket ident.Tick
 	if err != nil || n == 0 {
 		return err
 	}
-	branch := BranchName(ticket, "detached-"+head[:min(12, len(head))])
-	if ok, err := m.branchExists(ctx, repoPath, branch); err != nil || ok {
+	// The full id: no branch holds head (unsaved said so), so a branch of
+	// this name that exists has been moved, and must not be taken as saving it.
+	branch := BranchName(ticket, "detached-"+head)
+	if ok, err := m.branchExists(ctx, repoPath, branch); err != nil {
 		return err
+	} else if ok {
+		return fmt.Errorf("worktree: %w: %s exists but no longer holds %s; detached commits there are unsaved",
+			ErrUnsavedWork, branch, head)
 	}
 	m.logger.Warn("saving a detached HEAD's commits to a branch", "repo", repoPath, "branch", branch, "head", head)
 	_, err = m.git.Run(ctx, repoPath, "branch", "--", branch, head)
@@ -272,6 +308,29 @@ func (m *Manager) unregister(ctx context.Context, repoPath, path string) error {
 	m.logger.Info("dropping stale worktree registration", "repo", repoPath, "path", path)
 	_, err := m.git.Run(ctx, repoPath, "worktree", "remove", "--force", "--force", path)
 	return err
+}
+
+// resolve is p with every symlink resolved, or p cleaned if it can't be.
+func resolve(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
+// lockRepo serialises Manager's worktree operations on one repo. git reads
+// and writes every worktree's admin dir when it lists, adds or removes one,
+// so two tickets on the same repo race inside git otherwise. Keyed on the
+// common git dir, which all of a repo's checkouts share. git run by anyone
+// else (the user, an agent) can still race; a failure from that is returned.
+func (m *Manager) lockRepo(ctx context.Context, repoPath string) (func(), error) {
+	dir, err := m.commonDir(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	mu, _ := m.locks.LoadOrStore(dir, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	return mu.(*sync.Mutex).Unlock, nil
 }
 
 // canon resolves symlinks in p's parent, as git does when it records a

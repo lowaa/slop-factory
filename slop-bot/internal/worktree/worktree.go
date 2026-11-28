@@ -3,7 +3,7 @@
 // the ticket's whole life and removed at its end without throwing work away.
 //
 // Callers serialise calls for one ticket. Calls for different tickets may run
-// at once: each touches only its own paths, refs and worktree registrations.
+// at once: Manager serialises its own git worktree operations per repo.
 package worktree
 
 import (
@@ -14,6 +14,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
@@ -43,6 +45,9 @@ var (
 	ErrNoDefaultBranch = errors.New("default branch not found")
 	// ErrUnsavedWork is an operation that would leave commits on no branch.
 	ErrUnsavedWork = errors.New("commits would be left on no branch")
+	// ErrLeftover is a removal git half-finished: the worktree is
+	// unregistered but files it couldn't delete remain.
+	ErrLeftover = errors.New("worktree directory left behind")
 )
 
 // Repos is the repo lookup; *config.Config satisfies it.
@@ -77,6 +82,8 @@ type Manager struct {
 	repos     Repos
 	git       *gitx.Git
 	logger    *slog.Logger
+	// locks holds a *sync.Mutex per repo, keyed on its common git dir.
+	locks sync.Map
 }
 
 // NewManager makes the workspace dir if need be.
@@ -116,7 +123,8 @@ type repoRef struct {
 // several PRs from the same worktree. One whose directory was deleted is
 // re-added on the branch it was on (a detached HEAD's commits are first
 // saved to a ticket branch). On error, the worktrees made so far are returned
-// with it, so the caller can record them.
+// with it, so the caller can record them, including the one that failed if
+// git got as far as making it (a post-checkout hook can fail after that).
 func (m *Manager) Create(ctx context.Context, ticket ident.TicketID, repos []string, primary string) ([]*Worktree, error) {
 	refs, err := m.resolve(ctx, ticket, repos, primary)
 	if err != nil {
@@ -124,8 +132,12 @@ func (m *Manager) Create(ctx context.Context, ticket ident.TicketID, repos []str
 	}
 	out := make([]*Worktree, 0, len(refs))
 	for _, r := range refs {
-		wt, err := m.ensure(ctx, ticket, r)
+		wt, err := m.ensureLocked(ctx, ticket, r)
 		if err != nil {
+			if made := m.madeAnyway(ctx, ticket, r); made != nil {
+				made.Primary = r.name == primary
+				out = append(out, made)
+			}
 			return out, fmt.Errorf("worktree: ticket %s, repo %s: %w", ticket, r.name, err)
 		}
 		wt.Primary = r.name == primary
@@ -180,6 +192,25 @@ func (m *Manager) path(ticket ident.TicketID, repo string) string {
 	return filepath.Join(m.workspace, dirName(ticket, repo))
 }
 
+// madeAnyway is the worktree a failed ensure left registered, if any.
+func (m *Manager) madeAnyway(ctx context.Context, ticket ident.TicketID, r repoRef) *Worktree {
+	path := m.path(ticket, r.name)
+	reg, err := m.registration(ctx, r.path, path)
+	if err != nil || reg == nil {
+		return nil
+	}
+	return &Worktree{Ticket: ticket, Repo: r.name, RepoPath: r.path, Path: path, Branch: reg.branch}
+}
+
+func (m *Manager) ensureLocked(ctx context.Context, ticket ident.TicketID, r repoRef) (*Worktree, error) {
+	unlock, err := m.lockRepo(ctx, r.path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	return m.ensure(ctx, ticket, r)
+}
+
 func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) (*Worktree, error) {
 	wt := &Worktree{Ticket: ticket, Repo: r.name, RepoPath: r.path, Path: m.path(ticket, r.name)}
 	reg, err := m.registration(ctx, r.path, wt.Path)
@@ -195,7 +226,7 @@ func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) 
 		return nil, fmt.Errorf("%w: %s: an earlier `git worktree add` was interrupted; clean it up with --force",
 			ErrBroken, wt.Path)
 	case reg != nil && present:
-		if err := m.checkWorktree(ctx, wt.Path); err != nil {
+		if err := m.checkWorktree(ctx, r.path, wt.Path); err != nil {
 			return nil, err
 		}
 		wt.Branch = reg.branch
@@ -275,11 +306,18 @@ func (m *Manager) add(ctx context.Context, wt *Worktree, branch string) (*Worktr
 // worktree for the ticket's next PR. Like Create, it starts from the repo's
 // default branch, not from the previous PR's branch, which stays as it is.
 // Local changes carry over unless they conflict, in which case git refuses.
-// It refuses to leave a detached HEAD's commits on no branch.
+// It refuses to leave a detached HEAD's commits on no branch. If git switched
+// but then failed (a post-checkout hook), the new Worktree comes back with
+// the error, since the branch now exists.
 func (m *Manager) NewBranch(ctx context.Context, wt *Worktree, name string) (*Worktree, error) {
 	if err := m.owns(ctx, wt.Ticket, wt); err != nil {
 		return nil, err
 	}
+	unlock, err := m.lockRepo(ctx, wt.RepoPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if err := validLeaf(name); err != nil {
 		return nil, fmt.Errorf("worktree: %w", err)
 	}
@@ -288,7 +326,7 @@ func (m *Manager) NewBranch(ctx context.Context, wt *Worktree, name string) (*Wo
 		return nil, fmt.Errorf("worktree: %w: branch name %q: %w", ErrInvalidName, branch, err)
 	}
 	path := m.path(wt.Ticket, wt.Repo)
-	if err := m.checkWorktree(ctx, path); err != nil {
+	if err := m.checkWorktree(ctx, wt.RepoPath, path); err != nil {
 		return nil, fmt.Errorf("worktree: %w", err)
 	}
 	if err := m.refuseDetachedWork(ctx, path); err != nil {
@@ -298,12 +336,16 @@ func (m *Manager) NewBranch(ctx context.Context, wt *Worktree, name string) (*Wo
 	if err != nil {
 		return nil, fmt.Errorf("worktree: %w", err)
 	}
-	if _, err := m.git.Run(ctx, path, "switch", "--quiet", "--no-track", "-c", branch, base); err != nil {
-		return nil, fmt.Errorf("worktree: new branch in %s: %w", path, err)
-	}
-	m.logger.Info("new branch", "ticket", wt.Ticket, "repo", wt.Repo, "branch", branch)
 	next := *wt
 	next.Branch = branch
+	if _, err := m.git.Run(ctx, path, "switch", "--quiet", "--no-track", "-c", branch, base); err != nil {
+		err = fmt.Errorf("worktree: new branch in %s: %w", path, err)
+		if cur, curErr := m.git.Run(ctx, path, "branch", "--show-current"); curErr == nil && strings.TrimSpace(cur) == branch {
+			return &next, err
+		}
+		return nil, err
+	}
+	m.logger.Info("new branch", "ticket", wt.Ticket, "repo", wt.Repo, "branch", branch)
 	return &next, nil
 }
 

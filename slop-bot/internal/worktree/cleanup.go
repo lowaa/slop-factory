@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
@@ -63,11 +66,16 @@ type CleanupResult struct {
 //
 // A kept worktree keeps its registration and all its ticket's branches in that
 // repo. A worktree whose directory was deleted has its detached HEAD, if any,
-// saved to a ticket branch first, so the check above covers it.
+// saved to a ticket branch first, so the check above covers it; changes it
+// had staged but not committed went with the directory and aren't recovered.
 //
 // Between the checks and the removal, git refuses to remove a worktree that
 // became dirty, and each branch is deleted only if it still points where it
-// did when checked, so work that lands in between isn't lost either.
+// did when checked. A commit made on a detached HEAD in that window isn't
+// covered; nothing should be working in a finished ticket's worktree.
+//
+// A worktree with initialised submodules can't be removed by git, so Cleanup
+// reports git's error for it every time; ForceCleanup removes it.
 func (m *Manager) Cleanup(ctx context.Context, ticket ident.TicketID, worktrees []*Worktree) []*CleanupResult {
 	out := make([]*CleanupResult, 0, len(worktrees))
 	for _, wt := range worktrees {
@@ -87,6 +95,14 @@ func (m *Manager) Cleanup(ctx context.Context, ticket ident.TicketID, worktrees 
 }
 
 func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Worktree) (bool, []Reason, error) {
+	if err := m.owns(ctx, ticket, wt); err != nil {
+		return false, nil, err
+	}
+	unlock, err := m.lockRepo(ctx, wt.RepoPath)
+	if err != nil {
+		return false, nil, err
+	}
+	defer unlock()
 	st, err := m.inspect(ctx, ticket, wt)
 	if err != nil {
 		return false, nil, err
@@ -97,8 +113,8 @@ func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Wor
 	}
 	switch {
 	case st.reg != nil && st.present:
-		if _, err := m.git.Run(ctx, wt.RepoPath, "worktree", "remove", st.path); err != nil {
-			return false, nil, fmt.Errorf("worktree: removing %s: %w", st.path, err)
+		if err := m.removeWorktree(ctx, wt.RepoPath, st.path, false); err != nil {
+			return false, nil, m.afterFailedRemove(ctx, wt.RepoPath, st, err)
 		}
 	case st.reg != nil:
 		if err := m.unregister(ctx, wt.RepoPath, st.path); err != nil {
@@ -115,7 +131,7 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 		reasons = append(reasons, Reason{Kind: Locked, Detail: "locked: " + orNone(st.reg.lockReason)})
 	}
 	if st.reg != nil && st.present {
-		dirty, err := m.dirty(ctx, st.path)
+		dirty, err := m.dirty(ctx, repoPath, st.path)
 		if err != nil {
 			return nil, err
 		}
@@ -134,6 +150,14 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 // whose .git link is gone. It still refuses a path that isn't this repo's
 // worktree.
 func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *Worktree) error {
+	if err := m.owns(ctx, ticket, wt); err != nil {
+		return err
+	}
+	unlock, err := m.lockRepo(ctx, wt.RepoPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	st, err := m.inspect(ctx, ticket, wt)
 	if err != nil {
 		return err
@@ -141,7 +165,7 @@ func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *W
 	switch {
 	case st.reg != nil && st.present:
 		if err := m.forceRemove(ctx, wt.RepoPath, st.path); err != nil {
-			return err
+			return m.afterFailedRemove(ctx, wt.RepoPath, st, err)
 		}
 	case st.reg != nil:
 		if err := m.unregister(ctx, wt.RepoPath, st.path); err != nil {
@@ -156,18 +180,19 @@ func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *W
 }
 
 func (m *Manager) forceRemove(ctx context.Context, repoPath, path string) error {
-	err := m.checkWorktree(ctx, path)
+	err := m.checkWorktree(ctx, repoPath, path)
 	switch {
 	case err == nil:
-		// Twice, so a locked worktree goes too: the user asked for it gone.
-		if _, err := m.git.Run(ctx, repoPath, "worktree", "remove", "--force", "--force", path); err != nil {
-			return fmt.Errorf("worktree: removing %s: %w", path, err)
-		}
-		return nil
+		return m.removeWorktree(ctx, repoPath, path, true)
 	case errors.Is(err, ErrBroken):
-		// git won't remove a worktree it can't validate. The path is ours
-		// (owns), registered to this repo (inspect), and a real directory
-		// (checkWorktree got as far as asking git), so delete it ourselves.
+		// git won't remove a worktree it can't validate. Delete it ourselves,
+		// but only what is plainly the remains of ours: the path is ours
+		// (owns), registered to this repo (inspect), a real directory
+		// (checkWorktree), and has no .git at all, so it isn't some other
+		// checkout put there since.
+		if _, statErr := os.Lstat(filepath.Join(path, ".git")); !errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("worktree: %w", err)
+		}
 		if err := os.RemoveAll(path); err != nil {
 			return fmt.Errorf("worktree: removing %s: %w", path, err)
 		}
@@ -175,6 +200,40 @@ func (m *Manager) forceRemove(ctx context.Context, repoPath, path string) error 
 	default:
 		return fmt.Errorf("worktree: %w", err)
 	}
+}
+
+// removeWorktree is `git worktree remove`; force twice also takes a locked
+// one, for ForceCleanup.
+func (m *Manager) removeWorktree(ctx context.Context, repoPath, path string, force bool) error {
+	// git's own pre-removal check honours status.showUntrackedFiles; with it
+	// set to "no" it would remove a worktree holding untracked files.
+	args := []string{"-c", "status.showUntrackedFiles=normal", "worktree", "remove"}
+	if force {
+		args = append(args, "--force", "--force")
+	}
+	if _, err := m.git.Run(ctx, repoPath, append(args, path)...); err != nil {
+		return fmt.Errorf("worktree: removing %s: %w", path, err)
+	}
+	return nil
+}
+
+// afterFailedRemove explains a failed removal. git drops the registration
+// before deleting the files, so a file it can't delete (read-only, or owned
+// by root from a container build) leaves a directory that is no longer a
+// worktree, and that every later call would take for someone else's. Say
+// so now, and finish with the branches, which were checked safe to delete.
+func (m *Manager) afterFailedRemove(ctx context.Context, repoPath string, st *state, removeErr error) error {
+	reg, err := m.registration(ctx, repoPath, st.path)
+	if err != nil || reg != nil {
+		return errors.Join(removeErr, err)
+	}
+	if present, err := exists(st.path); err != nil || !present {
+		return errors.Join(removeErr, err, m.deleteBranches(ctx, repoPath, st.branches))
+	}
+	return errors.Join(
+		fmt.Errorf("%w: git unregistered %s but couldn't delete all of it; delete what's left by hand: %w",
+			ErrLeftover, st.path, removeErr),
+		m.deleteBranches(ctx, repoPath, st.branches))
 }
 
 // branchRef is a branch and the commit it pointed at when inspected.
@@ -192,14 +251,12 @@ type state struct {
 	branches []branchRef
 }
 
-// inspect checks wt is ours and finds its registration and the ticket's
+// inspect finds wt's registration and the ticket's
 // branches. It errors on a path that exists but isn't this repo's worktree,
 // which is never touched. A deleted worktree's detached HEAD is saved to a
 // ticket branch, since its registration is all that holds those commits.
+// The caller has checked wt with owns and holds the repo's lock.
 func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktree) (*state, error) {
-	if err := m.owns(ctx, ticket, wt); err != nil {
-		return nil, err
-	}
 	st := &state{path: m.path(ticket, wt.Repo)}
 	var err error
 	if st.reg, err = m.registration(ctx, wt.RepoPath, st.path); err != nil {
@@ -228,8 +285,8 @@ func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktr
 	return st, nil
 }
 
-func (m *Manager) dirty(ctx context.Context, path string) ([]Reason, error) {
-	out, err := m.inWorktree(ctx, path, "status", "--porcelain=v1", "--untracked-files=all")
+func (m *Manager) dirty(ctx context.Context, repoPath, path string) ([]Reason, error) {
+	out, err := m.inWorktree(ctx, repoPath, path, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
 		return nil, fmt.Errorf("worktree: status of %s: %w", path, err)
 	}
@@ -314,6 +371,15 @@ func (m *Manager) deleteBranches(ctx context.Context, repoPath string, branches 
 		}
 		if _, err := m.git.Run(ctx, repoPath, "update-ref", "-d", b.ref, b.oid); err != nil {
 			errs = append(errs, fmt.Errorf("worktree: deleting %s: %w", b.ref, err))
+			continue
+		}
+		// update-ref, unlike `branch -D`, leaves branch.<name>.* (the
+		// upstream `push -u` set) behind, and a later branch of the same name
+		// would inherit it.
+		section := "branch." + strings.TrimPrefix(b.ref, "refs/heads/")
+		if _, err := m.git.Run(ctx, repoPath, "config", "--local", "--remove-section", section); err != nil &&
+			!errors.Is(err, gitx.ErrNoSuchSection) {
+			errs = append(errs, fmt.Errorf("worktree: removing %s config: %w", section, err))
 		}
 	}
 	return errors.Join(errs...)

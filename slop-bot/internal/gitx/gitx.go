@@ -26,6 +26,7 @@ var (
 	ErrUnknownRevision = errors.New("unknown revision")
 	ErrDirtyWorktree   = errors.New("worktree has modified or untracked files")
 	ErrNotAWorktree    = errors.New("not a working tree")
+	ErrNoSuchSection   = errors.New("no such config section")
 )
 
 // stderrKinds maps git's messages (under LC_ALL=C) to sentinels. Order
@@ -39,6 +40,7 @@ var stderrKinds = []struct {
 	{"a branch named", ErrBranchExists},
 	{"contains modified or untracked files", ErrDirtyWorktree},
 	{"is not a working tree", ErrNotAWorktree},
+	{"no such section", ErrNoSuchSection},
 	{"already exists", ErrPathExists},
 	{"unknown revision", ErrUnknownRevision},
 	{"invalid reference", ErrUnknownRevision},

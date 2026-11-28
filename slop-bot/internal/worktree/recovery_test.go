@@ -39,7 +39,7 @@ func TestCleanupOfADeletedDetachedWorktreeSavesItsCommits(t *testing.T) {
 		assert.Equal(t, []ReasonKind{Unpushed}, kinds(r.Reasons))
 		assert.True(t, f.reachable("a", head), "the detached commit must stay on a branch")
 	}
-	assert.True(t, f.branchExists("a", "slop-bot/t20/detached-"+head[:12]))
+	assert.True(t, f.branchExists("a", "slop-bot/t20/detached-"+head))
 }
 
 // Only the ticket's own registration is touched: a user's worktree on
