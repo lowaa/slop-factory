@@ -35,6 +35,8 @@ measure options:
   --only LIST          comma-separated, of: coverage,complexity,testtime (default all)
   --coverprofile FILE  a cover profile; repeat to merge several
   --coverdir DIR       a GOCOVERDIR, converted with go tool covdata; repeatable
+  --rerun-profile FILE a cover profile of one of several runs of the same suite;
+                       repeatable: a block counts only if every rerun covers it
   --test-json FILE     go test -json output, for testtime
   --baseline-dir DIR   default MODULE/quality_baseline
   --report-dir DIR     where --mode report writes
@@ -56,7 +58,7 @@ func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
 
 type measureArgs struct {
 	module, mode, only, testJSON, baselineDir, reportDir, pruneCmd string
-	profiles, coverDirs                                            listFlag
+	profiles, coverDirs, reruns                                    listFlag
 }
 
 // Run runs the command line args and returns the exit code.
@@ -106,6 +108,7 @@ func (a *App) parseMeasure(args []string) (*measureArgs, error) {
 	fs.StringVar(&m.pruneCmd, "prune-cmd", "quality.sh --prune", "")
 	fs.Var(&m.profiles, "coverprofile", "")
 	fs.Var(&m.coverDirs, "coverdir", "")
+	fs.Var(&m.reruns, "rerun-profile", "")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -175,7 +178,7 @@ func (a *App) runOne(r *ratchet.Runner, name string, m *measureArgs, mod *gosrc.
 			conv = &coverage.GoConverter{}
 		}
 		return ratchet.Run(r, &coverage.Metric{
-			Module: mod, Profiles: m.profiles, CoverDirs: m.coverDirs, Converter: conv, TempDir: tmp,
+			Module: mod, Profiles: m.profiles, CoverDirs: m.coverDirs, Reruns: m.reruns, Converter: conv, TempDir: tmp,
 		})
 	case "complexity":
 		return ratchet.Run(r, &complexity.Metric{Module: mod})
