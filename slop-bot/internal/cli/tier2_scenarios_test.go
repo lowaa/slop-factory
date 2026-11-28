@@ -81,6 +81,10 @@ func scenarioAskAnswerDone(b *t2) {
 	assert.NotContains(t, b.h.ok(t, "asks"), "TIER2-QUESTION", "answered")
 	comments := strings.Join(commentBodies(b.h.ticket(t, "ticket", "show", tk.ID)), "\n")
 	assert.Contains(t, comments, "Exported as CSV.")
+	// The harness's own session file, read by its transcript reader and
+	// retained at the ticket's end.
+	assert.Equal(t, 1, b.count("transcript.retained", tk.ID))
+	assert.Contains(t, b.h.ok(t, "transcript", agent, "--full"), "TIER2-ASKED")
 }
 
 func scenarioStatusSet(b *t2) {
@@ -121,7 +125,7 @@ func scenarioTellMidTurn(b *t2) {
 	// in the request that delivered the long tool's result, the same turn.
 	steered, reqs := b.firstWith("TIER2-STEER")
 	require.GreaterOrEqual(t, steered, 0, b.requests())
-	assert.Contains(t, strings.Join(reqs[steered].ToolResults, "\n"), hold.Marker(), "mid-turn: %s", b.requests())
+	assert.Contains(t, strings.Join(newResults(reqs, steered), "\n"), hold.Marker(), "mid-turn: %s", b.requests())
 }
 
 func scenarioMerge(b *t2) {
@@ -167,9 +171,10 @@ func scenarioAttach(b *t2) {
 	// Held for the hand-back: the person is in the TUI.
 	b.h.ok(t, "tell", agent, "TIER2-HELD while you were out")
 	// The TUI resumed the agent's own conversation: it shows its history.
-	b.tui.drive(b.ctx(), term, "TIER2-ASKED")
-
+	at := b.tui.opened(b.ctx(), term, "TIER2-ASKED")
+	// Scripted before the quit: the hand-back's turn follows it at once.
 	b.script(b.slopBot("done", "--summary", "after the attach"), reply("finished"))
+	b.tui.quitAt(b.ctx(), term, at)
 	code, screen := term.done(b.ctx())
 	assert.Equal(t, 0, code, screen)
 	assert.Contains(t, screen, "back to slop-bot: resumed")

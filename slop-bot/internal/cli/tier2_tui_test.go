@@ -42,12 +42,18 @@ var (
 	piTUI = &tuiScript{ready: "/128k", quit: "/quit"}
 )
 
-// drive waits for the TUI to be ready, checks it shows history (so it
-// resumed the agent's conversation), and quits it.
-func (s *tuiScript) drive(ctx context.Context, term *terminal, history string) {
+// opened waits for the TUI to be ready and to show history, so it resumed
+// the agent's conversation, and returns where on the screen it is.
+func (s *tuiScript) opened(ctx context.Context, term *terminal, history string) int {
 	term.t.Helper()
 	at := term.until(ctx, 0, contains(s.ready))
 	term.until(ctx, 0, contains(history))
+	return at
+}
+
+// quitAt quits the TUI opened returned at.
+func (s *tuiScript) quitAt(ctx context.Context, term *terminal, at int) {
+	term.t.Helper()
 	term.typeRaw(s.quit)
 	term.until(ctx, at, contains(s.quit))
 	term.typeRaw(keyEnter)

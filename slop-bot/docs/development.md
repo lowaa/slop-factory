@@ -34,7 +34,7 @@ repo's `go.work`. Tests use the `go-clock` module's fake clock, never
 | `internal/doctor`, `internal/setup`, `internal/service` | `doctor`, `install`'s config and briefing stubs, and the systemd and launchd managers |
 | `internal/scriptedmodel` | a model server that plays back a script (see its README) |
 | `internal/lifecycle` | components with ordered `Start` and `Stop` |
-| `tier2/` | the tier 2 Dockerfile and `harness_versions.env` |
+| `tier2/` | the tier 2 Dockerfile, `harness_versions.env`, and `run_tests.sh`, its default run |
 | `quality_baseline/`, `deadcode/` | ratchet baselines |
 
 Under `internal/harness`:
@@ -62,13 +62,23 @@ All run from `slop-bot/`. CI runs `test.sh` and `quality.sh`, and
 | `test.sh [go test args]` | the linters and the deadcode check (`dev-tools/lint/go.sh`), `gofmt -l`, `go vet`, then `go test -race ./...`. Arguments replace `./...`, so `./test.sh -run TestScheduler ./internal/agents` filters. |
 | `scan.sh` | the repo's security scan: `scan_go` and `scan_secrets` (`dev-tools/security/README.md`), SARIF to `$SCAN_REPORT_DIR` |
 | `quality.sh` | coverage, complexity and test time, ratcheted against `quality_baseline/` (`dev-tools/quality/README.md`). `--prune` after an improvement, `--rebaseline --only=<measure>` only for a deliberate regression, `--report` for the full reports. |
-| `tier2.sh` | the real harness CLIs driven through slop-bot's adapters against the scripted model |
+| `tier2.sh` | the real harness CLIs driven through slop-bot's adapters, and through a real daemon, against the scripted model |
 
 ### Tier 2
 
 Tier 2 runs real Claude Code, Codex and pi binaries, with the scripted model
 answering for the model: no credential, no tokens, no network. The tests are
 opt-in (`SLOP_BOT_TIER2=1`), so `test.sh` skips them.
+
+It has two parts. The conformance suite (`internal/harness/conformance/scripted`)
+drives each adapter directly. The daemon scenarios (`TestTier2Scenarios` in
+`internal/cli`) run a real daemon in-process with each harness, the scripted
+model making the agent run the real CLI from its shell: ask and answer,
+`status set`, a mid-turn `tell`, the merge guard and `tell --merge`, an attach
+through the harness's own TUI under a pty, and a daemon restart. Each
+harness's setup (temp config dirs, dummy keys, its shell tool) is one
+`scripted.Target`, which both use. Filter with e.g.
+`./tier2.sh -run 'TestTier2Scenarios/pi/attach' ./internal/cli`.
 
 | Invocation | What |
 | --- | --- |
@@ -168,6 +178,10 @@ only `harness.AIHarness` and `harness.Conversation`
    message, interrupt, stop idle and forced, resume, and a crash. Run it
    against the fake for the kit (`fake_test.go`), and for the real CLI
    through `conformance/scripted` (the puppet drives the scripted model).
+   Give it a `scripted.Target` constructor in `conformance/scripted/targets.go`,
+   a `tier2Targets` entry in `internal/cli/tier2_test.go`, and its TUI's
+   `tuiScript` (ready marker, quit command) in `tier2_tui_test.go`, so the
+   daemon scenarios run it.
 5. **Teach the scripted model the wire API** the harness uses
    (`internal/scriptedmodel`: Anthropic, OpenAI responses and chat, Gemini
    adapters exist), and add the harness to `tier2/Dockerfile` and

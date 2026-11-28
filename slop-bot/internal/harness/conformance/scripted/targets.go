@@ -73,6 +73,8 @@ type Target struct {
 	Guarded bool
 	// Harness is the adapter.
 	Harness harness.AIHarness
+	// claudeConfig is Claude Code's config dir, for TrustClaudeFolder.
+	claudeConfig string
 }
 
 // TargetOptions are what a Target is built from.
@@ -119,12 +121,9 @@ func ClaudeCode(t *testing.T, o *TargetOptions) *Target {
 	config := t.TempDir()
 	seedClaudeConfig(t, config)
 	return &Target{
-		Name: claudecode.Name, APIKeyOptIn: true, Guarded: true,
+		Name: claudecode.Name, APIKeyOptIn: true, Guarded: true, claudeConfig: config,
 		Shell: ClaudeCodeShell,
 		Env: map[string]string{
-			// A config dir of its own: nothing is written to ~/.claude or
-			// ~/.claude.json, and no login of the user's is seen.
-			"CLAUDE_CONFIG_DIR":   config,
 			"ANTHROPIC_BASE_URL":  o.ServerURL,
 			"DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
 			// CLAUDE_CODE_* is dropped from the base environment (a parent
@@ -136,7 +135,11 @@ func ClaudeCode(t *testing.T, o *TargetOptions) *Target {
 		},
 		Harness: &claudecode.Harness{
 			Binary: o.Binary, Logger: discard(), Clock: clock.Real{}, PreToolHook: o.PreToolHook,
-			Environ: environ(t.TempDir(), "ANTHROPIC_API_KEY="+ClaudeKey),
+			// A config dir of its own: nothing is written to ~/.claude or
+			// ~/.claude.json, and no login of the user's is seen. In the base
+			// environment, not a workspace's, so the transcript reader, which
+			// reads that, finds the sessions there.
+			Environ: environ(t.TempDir(), "ANTHROPIC_API_KEY="+ClaudeKey, "CLAUDE_CONFIG_DIR="+config),
 		},
 	}
 }
@@ -173,7 +176,8 @@ func seedClaudeConfig(t *testing.T, dir string) {
 // so a move made before that is lost and an Enter after it picks "No, exit".
 func (tg *Target) TrustClaudeFolder(t *testing.T, dir string) {
 	t.Helper()
-	path := filepath.Join(tg.Env["CLAUDE_CONFIG_DIR"], ".claude.json")
+	require.NotEmpty(t, tg.claudeConfig, "%s isn't Claude Code", tg.Name)
+	path := filepath.Join(tg.claudeConfig, ".claude.json")
 	raw, err := os.ReadFile(path) // #nosec G304 -- the test's own config dir
 	require.NoError(t, err)
 	var cfg map[string]any

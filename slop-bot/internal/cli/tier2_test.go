@@ -19,6 +19,7 @@ import (
 	sbharness "github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 )
 
 // Tier 2 through the daemon: the tier-1 setup (a real daemon in-process, the
@@ -65,6 +66,12 @@ type tier2Start struct {
 	resumed bool
 	// dir is its cwd: the primary worktree.
 	dir string
+}
+
+// Transcripts passes on the adapter's reader, which embedding the
+// interface would hide: the daemon finds one by asserting for it.
+func (h *tier2Harness) Transcripts() transcript.Reader {
+	return h.AIHarness.(transcript.Provider).Transcripts()
 }
 
 func (h *tier2Harness) Start(ctx context.Context, ws *sbharness.Workspace, resume *sbharness.ConversationRef) (sbharness.Conversation, error) {
