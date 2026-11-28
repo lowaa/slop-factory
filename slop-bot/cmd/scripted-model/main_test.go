@@ -63,6 +63,7 @@ func TestRunRefuses(t *testing.T) {
 		want string
 	}{
 		{"an unknown flag", []string{"-nope"}, "flag provided but not defined"},
+		{"a mistyped subcommand", []string{"ctrl", "load", "f.json"}, `unexpected argument "ctrl"`},
 		{"a missing scenario file", []string{"-scenario", filepath.Join(t.TempDir(), "missing.json")}, "no such file"},
 		{"an invalid scenario", []string{"-scenario", writeScenario(t, `{"turns": [{}]}`)}, "needs text"},
 		{"an address it cannot listen on", []string{"-listen", "256.0.0.1:0"}, "listen on"},

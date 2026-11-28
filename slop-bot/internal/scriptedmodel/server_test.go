@@ -225,8 +225,11 @@ func TestServerAGatedTurnIsHeldUntilTheGateOpens(t *testing.T) {
 	require.NoError(t, server.Load(textTurn("late", "g")))
 	result := sendAsync(t.Context(), server.URL()+"/v1/messages", messagesBody(false))
 
+	held := make(chan error, 1)
+	go func() { held <- server.WaitHeld(t.Context(), "g") }()
 	select {
-	case <-server.Held("g"):
+	case err := <-held:
+		require.NoError(t, err)
 	case r := <-result:
 		t.Fatalf("answered before the gate was opened: %+v", r)
 	}
@@ -276,13 +279,19 @@ func TestServerAGateNobodyOpensIsAnError(t *testing.T) {
 	assert.Len(t, server.Recording().Errors, 1)
 }
 
+func TestServerLoadRefusesNil(t *testing.T) {
+	t.Parallel()
+	server, _ := newServer(t, nil)
+	require.ErrorIs(t, server.Load(nil), scriptedmodel.ErrScenario)
+}
+
 func TestServerCloseReleasesAHeldRequest(t *testing.T) {
 	t.Parallel()
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
 	require.NoError(t, server.Load(textTurn("late", "g")))
 	result := sendAsync(t.Context(), server.URL()+"/v1/messages", messagesBody(false))
-	<-server.Held("g")
+	require.NoError(t, server.WaitHeld(t.Context(), "g"))
 	require.NoError(t, server.Close())
 	<-result
 	require.NoError(t, server.Close(), "a second Close is a no-op")

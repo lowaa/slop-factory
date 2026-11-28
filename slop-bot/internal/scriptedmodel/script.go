@@ -12,20 +12,32 @@ import (
 var ErrUnexpectedRequest = errors.New("unexpected request")
 
 // A gate holds a turn until it is opened. Once open it stays open, so a test
-// may release a gate before the request that waits on it arrives.
+// may release a gate before the request that waits on it arrives. A gate
+// belongs to the scenario loaded when it was made: replacing the scenario
+// opens and retires it, and the next scenario's gate of that name is new.
 type gate struct {
 	opened   chan struct{}
 	openOnce sync.Once
 	held     chan struct{}
 	heldOnce sync.Once
+	retired  chan struct{}
 }
 
 func newGate() *gate {
-	return &gate{opened: make(chan struct{}), held: make(chan struct{})}
+	return &gate{opened: make(chan struct{}), held: make(chan struct{}), retired: make(chan struct{})}
 }
 
 func (g *gate) open()     { g.openOnce.Do(func() { close(g.opened) }) }
 func (g *gate) markHeld() { g.heldOnce.Do(func() { close(g.held) }) }
+
+func (g *gate) isOpen() bool {
+	select {
+	case <-g.opened:
+		return true
+	default:
+		return false
+	}
+}
 
 // script hands out a scenario's turns and records what it was asked. It is
 // API-independent: an adapter turns a wire request into a Request and a Turn
@@ -67,6 +79,7 @@ func (s *script) replace(scenario *Scenario) {
 	defer s.mu.Unlock()
 	for _, g := range s.gates {
 		g.open()
+		close(g.retired)
 	}
 	s.gates = map[string]*gate{}
 	s.scenario = scenario

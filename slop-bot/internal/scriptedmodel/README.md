@@ -18,7 +18,7 @@ for agy. `cmd/scripted-model` serves it as a binary for tier 2's containers.
 - A request with **no tools** is taken to be the harness's own housekeeping (a title, a quota probe): it gets the
   text `ok` and does not use up the script (`Request.Auxiliary`, left out of `Recording.Conversation`).
 - A gated turn waits until the test **releases** its gate: how a test acts between two turns without sleeping.
-  A gate released before its request arrives stays open. `Held(gate)` is closed once a request waits there, the
+  A gate released before its request arrives (in the same scenario) stays open. `WaitHeld(ctx, gate)` returns once a request waits there, the
   synchronisation point for "the harness has asked for that turn". Loading or resetting the scenario releases
   every held request, so it cannot time out into the next scenario's errors. A gate nobody opens fails after
   `GateTimeout` (default 60s).
@@ -37,7 +37,7 @@ server.URL()                        // http://127.0.0.1:<port>: point the harnes
 server.Load(scenario)               // validate, replace, reset the recording
 server.Reset()
 server.Release("gate")
-<-server.Held("gate")
+server.WaitHeld(ctx, "gate")       // a request waits there; ErrGateRetired if the scenario is replaced
 rec := server.Recording()           // a copy: rec.Requests, rec.Errors, rec.Conversation()
 server.Remaining()
 ```
@@ -56,7 +56,7 @@ Control endpoints, the Python server's paths and semantics, plus `held`:
 | `GET /_scripted/errors` | the unexpected-request failures |
 | `GET /_scripted/remaining` | `{"remaining": n}` |
 | `PUT /_scripted/gates/{name}` | release a gate |
-| `GET /_scripted/gates/{name}/held` | new: blocks until a request waits at the gate |
+| `GET /_scripted/gates/{name}/held` | new: blocks until a request waits at the gate; 409 if the scenario is replaced first |
 | `GET /healthz` | `{"ok": true}` |
 
 `Client` wraps them for a Go test driving a container (`NewClient(url, nil).Load(ctx, scenario)`, `Release`,
@@ -101,9 +101,16 @@ Gemini, from Google's API reference and what agy 1.5.18 sends:
 
 ## Differences from the Python server
 
+- The binary listens on `-listen`, default `127.0.0.1:8000`, where the Python one took `--host` (default
+  `0.0.0.0`) and `--port`: a container must pass `-listen 0.0.0.0:8000` to be reachable from the harness's.
+- A harness that hangs up while its turn waits at a gate is a recorded error: the turn was used up but never
+  delivered, and a retry would get the next one. (The Python server noticed only when the gate timed out.)
+- Gates belong to the loaded scenario: `Load`/`Reset` opens and retires them, a `Release` before the `Load` does
+  not carry over, and a `GET .../held` waiting across a `Load` gets 409.
+- A scenario with data after its JSON object (a stray brace) is refused.
 - A body that is not valid JSON, or a Gemini method other than the two above (or a stream without `alt=sse`), is
   a recorded error, not only a 400.
-- `GET /_scripted/gates/{name}/held` and `Held` are new: the Python tests polled the recording.
+- `GET /_scripted/gates/{name}/held` and `WaitHeld` are new: the Python tests polled the recording.
 - The gate timeout is `Options.GateTimeout` / `-gate-timeout`, not `SCRIPTED_MODEL_GATE_TIMEOUT`.
 - In the chat adapter's `MessageText` a tool call's arguments appear as sent, not JSON-quoted again.
 

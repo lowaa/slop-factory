@@ -128,9 +128,19 @@ func (s *Server) Reset() { s.script.replace(nil) }
 // Release opens a gate: the turn waiting on it (now or later) is answered.
 func (s *Server) Release(gate string) { s.script.gate(gate).open() }
 
-// Held is closed once a request is waiting at the gate: the point at which a
-// test knows the harness has asked for the gated turn.
-func (s *Server) Held(gate string) <-chan struct{} { return s.script.gate(gate).held }
+// ErrGateRetired is WaitHeld's error when the scenario is replaced while it
+// waits: the gate belonged to that scenario, and nothing can reach it now.
+var ErrGateRetired = errors.New("the scenario was replaced while waiting at the gate")
+
+// ErrServerClosed is WaitHeld's error when the server closes while it waits.
+var ErrServerClosed = errors.New("the scripted model server closed")
+
+// WaitHeld returns once a request is waiting at the loaded scenario's gate:
+// the point at which a test knows the harness has asked for the gated turn.
+// Release likewise opens the loaded scenario's gate.
+func (s *Server) WaitHeld(ctx context.Context, gate string) error {
+	return s.waitHeld(ctx, s.script.gate(gate))
+}
 
 // Recording is a copy of what was received since the scenario was loaded.
 func (s *Server) Recording() *Recording { return s.script.snapshot() }
@@ -211,10 +221,11 @@ func (s *Server) serveModel(w http.ResponseWriter, r *http.Request, a adapter) {
 		s.writeModelError(w, a, http.StatusInternalServerError, err)
 		return
 	}
-	if g != nil && !s.wait(r.Context(), g, turn, req) {
-		s.writeModelError(w, a, http.StatusInternalServerError,
-			s.script.fail(fmt.Sprintf("gate %q was not opened within %s", turn.Gate, s.gateTimeout), req))
-		return
+	if g != nil {
+		if err := s.wait(r.Context(), g, turn, req); err != nil {
+			s.writeModelError(w, a, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	if turn == nil {
 		turn = auxiliaryTurn
@@ -223,23 +234,39 @@ func (s *Server) serveModel(w http.ResponseWriter, r *http.Request, a adapter) {
 	s.writeTurn(w, a.encode(turn, req, responseID), req.Stream)
 }
 
-// wait holds a gated turn until its gate opens, reporting false if it never
-// did. A harness that hangs up, or the server closing, also ends the wait:
-// neither is the scenario's failure.
-func (s *Server) wait(ctx context.Context, g *gate, turn *Turn, req *Request) bool {
+// wait holds a gated turn until its gate opens. A gate that is never opened,
+// or a harness that hangs up while it waits, is an error (recorded): the turn
+// was used up but never delivered, so the harness's retry would get the next
+// one. A gate opened by replacing the scenario, or the server closing, is not.
+func (s *Server) wait(ctx context.Context, g *gate, turn *Turn, req *Request) error {
 	g.markHeld()
 	timer := time.NewTimer(s.gateTimeout)
 	defer timer.Stop()
 	select {
 	case <-g.opened:
-		return true
-	case <-ctx.Done():
-		return true
+		return nil
 	case <-s.closed:
-		return true
+		return nil
+	case <-ctx.Done():
+		if g.isOpen() {
+			return nil
+		}
+		return s.script.fail(fmt.Sprintf("the harness hung up while the turn waited at gate %q", turn.Gate), req)
 	case <-timer.C:
-		s.log.Error("gate timed out", "gate", turn.Gate, "api", req.API)
-		return false
+		return s.script.fail(fmt.Sprintf("gate %q was not opened within %s", turn.Gate, s.gateTimeout), req)
+	}
+}
+
+func (s *Server) waitHeld(ctx context.Context, g *gate) error {
+	select {
+	case <-g.held:
+		return nil
+	case <-g.retired:
+		return ErrGateRetired
+	case <-s.closed:
+		return ErrServerClosed
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -316,12 +343,14 @@ func (s *Server) controlRoutes(mux *http.ServeMux) {
 		writeJSON(w, http.StatusOK, ok)
 	})
 	mux.HandleFunc("GET "+ControlPrefix+"/gates/{name}/held", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-s.Held(r.PathValue("name")):
+		err := s.WaitHeld(r.Context(), r.PathValue("name"))
+		switch {
+		case err == nil:
 			writeJSON(w, http.StatusOK, ok)
-		case <-r.Context().Done():
-		case <-s.closed:
-			writeJSON(w, http.StatusServiceUnavailable, errorBody("the server is closing"))
+		case errors.Is(err, ErrGateRetired):
+			writeJSON(w, http.StatusConflict, errorBody(err.Error()))
+		default:
+			writeJSON(w, http.StatusServiceUnavailable, errorBody(err.Error()))
 		}
 	})
 }

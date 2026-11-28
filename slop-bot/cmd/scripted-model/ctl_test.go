@@ -82,7 +82,7 @@ func TestCtlLoadsReleasesAndReads(t *testing.T) {
 func TestCtlRefusesBadUsage(t *testing.T) {
 	t.Parallel()
 	server := newCtlServer(t)
-	for _, args := range [][]string{{}, {"nope"}, {"load"}, {"release", "a", "b"}, {"requests", "-x"}} {
+	for _, args := range [][]string{{}, {"nope"}, {"load"}, {"release", "a", "b"}, {"requests", "-x"}, {"reset", "now"}, {"remaining", "x"}, {"requests", "extra"}} {
 		_, err := ctl(t, server, args...)
 		require.ErrorIs(t, err, errCtlUsage, args)
 	}

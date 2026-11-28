@@ -44,6 +44,10 @@ func run(ctx context.Context, args []string, logs io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	// A mistyped subcommand must not quietly start a server.
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected argument %q (the control commands are under `scripted-model ctl`)", flags.Arg(0))
+	}
 	scenario, err := readScenario(*scenarioPath)
 	if err != nil {
 		return err

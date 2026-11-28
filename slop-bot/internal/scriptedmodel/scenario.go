@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 )
 
 // A Scenario is the ordered turns the scripted model plays back. A turn is
@@ -56,6 +57,10 @@ func ParseScenario(data []byte) (*Scenario, error) {
 	if err := dec.Decode(&scenario); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrScenario, err)
 	}
+	// A stray brace must not load the first half of a file and drop the rest.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w: data after the scenario's JSON object", ErrScenario)
+	}
 	if scenario.Turns == nil {
 		return nil, fmt.Errorf("%w: a scenario is {name, turns: [...]}", ErrScenario)
 	}
@@ -70,6 +75,9 @@ func ParseScenario(data []byte) (*Scenario, error) {
 
 // Validate reports the first turn that cannot be played.
 func (s *Scenario) Validate() error {
+	if s == nil {
+		return fmt.Errorf("%w: no scenario", ErrScenario)
+	}
 	for i, turn := range s.Turns {
 		if turn == nil || (turn.Text == "" && len(turn.ToolCalls) == 0) {
 			return fmt.Errorf("%w: turn %d needs text or at least one tool call", ErrScenario, i+1)

@@ -40,6 +40,8 @@ func TestParseScenarioRefuses(t *testing.T) {
 		{"a tool call with no name", `{"turns": [{"tool_calls": [{"input": {}}]}]}`, "tool call with no name"},
 		{"no turns", `{"name": "s"}`, "a scenario is {name, turns: [...]}"},
 		{"not an object", `[]`, "cannot unmarshal"},
+		{"a stray brace's trailing data", `{"turns": [{"text": "a"}]}, {"text": "b"}]}`, "after the scenario"},
+		{"two scenarios", `{"turns": [{"text": "a"}]} {"turns": [{"text": "b"}]}`, "after the scenario"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

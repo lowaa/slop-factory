@@ -30,6 +30,9 @@ func runCtl(ctx context.Context, args []string, out io.Writer) error {
 	}
 	client := scriptedmodel.NewClient(*url, nil)
 	command, rest := flags.Arg(0), flags.Args()[1:]
+	if command != "requests" && command != "load" && command != "release" && command != "held" && len(rest) != 0 {
+		return errCtlUsage
+	}
 	switch command {
 	case "load", "release", "held":
 		if len(rest) != 1 {
@@ -72,6 +75,9 @@ func ctlRequests(ctx context.Context, client *scriptedmodel.Client, args []strin
 	conversation := flags.Bool("conversation", false, "leave out the harness's own housekeeping requests")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errCtlUsage, err)
+	}
+	if flags.NArg() != 0 {
+		return errCtlUsage
 	}
 	requests, err := client.Requests(ctx)
 	if err == nil && *conversation {

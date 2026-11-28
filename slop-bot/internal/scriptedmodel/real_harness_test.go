@@ -27,6 +27,9 @@ const realHarnessesEnv = "SCRIPTED_MODEL_REAL_HARNESSES"
 // seconds when it works.
 const harnessRunLimit = 3 * time.Minute
 
+// How long a killed run's leftover children may hold its output open.
+const harnessWaitDelay = 10 * time.Second
+
 const echoMarker = "scripted-echo-7f3a"
 
 type realHarness struct {
@@ -112,6 +115,9 @@ func runRealHarness(t *testing.T, h *realHarness) {
 	cmd.Dir = dir
 	cmd.Env = append([]string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH"), "TERM=xterm"}, env...)
 	cmd.Stdin = strings.NewReader("")
+	// The harnesses' own children (shells, helpers) inherit the output pipes;
+	// without a WaitDelay a killed run would still wait for them.
+	cmd.WaitDelay = harnessWaitDelay
 	out, runErr := cmd.CombinedOutput()
 
 	rec := server.Recording()
