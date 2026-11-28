@@ -203,6 +203,15 @@ func (c *Config) applyDefaults(home string) {
 	if c.Ticketing.System == "" {
 		c.Ticketing.System = "local"
 	}
+	c.defaultConcurrency()
+	if c.Autonomy.TicketsPerAgent == 0 {
+		c.Autonomy.TicketsPerAgent = 10
+	}
+	c.defaultHarnesses()
+	c.defaultDurations()
+}
+
+func (c *Config) defaultConcurrency() {
 	if c.Concurrency.MaxActive == 0 {
 		c.Concurrency.MaxActive = 4
 	}
@@ -212,9 +221,9 @@ func (c *Config) applyDefaults(home string) {
 	if c.Concurrency.Urgent.MaxActive == 0 {
 		c.Concurrency.Urgent.MaxActive = 1
 	}
-	if c.Autonomy.TicketsPerAgent == 0 {
-		c.Autonomy.TicketsPerAgent = 10
-	}
+}
+
+func (c *Config) defaultHarnesses() {
 	if len(c.Harnesses) == 0 {
 		c.Harnesses = map[string]*HarnessConfig{c.DefaultHarness: {}}
 	}
@@ -233,7 +242,6 @@ func (c *Config) applyDefaults(home string) {
 			h.LimitThreshold = DefaultLimitThreshold
 		}
 	}
-	c.defaultDurations()
 }
 
 func (c *Config) defaultDurations() {
