@@ -5,7 +5,9 @@
 // session-only flags and a sidecar folder beside the worktree for the
 // session's hooks and briefing (see sidecar). On a consumer Google sign-in,
 // driving agy from another program is against Google's terms; that is the
-// user's call, for doctor to raise (see the design doc's terms caveat).
+// user's call, for doctor to raise (see the design doc's terms caveat). With
+// the API key opted in (api_key_opt_in, GEMINI_API_KEY), the session runs on
+// the key instead, through a session-only modelProvider (see hasAPIKey).
 package agy
 
 import (
