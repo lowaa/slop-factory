@@ -106,6 +106,9 @@ type Agent struct {
 	CreatedAt  time.Time
 	// EndedAt is set once the agent entered a state that Ends.
 	EndedAt *time.Time
+	// ParkedAt is when the agent was stopped to free a process past
+	// max_live; nil while it has one.
+	ParkedAt *time.Time
 }
 
 // NewAgent is what Create needs.
@@ -196,6 +199,7 @@ type agentRow struct {
 	TokenHash       string `bun:"token_hash"`
 	CreatedAt       int64  `bun:"created_at"`
 	EndedAt         *int64 `bun:"ended_at"`
+	ParkedAt        *int64 `bun:"parked_at"`
 }
 
 func (r *agentRow) agent() *Agent {
@@ -221,6 +225,7 @@ func (r *agentRow) agent() *Agent {
 		Recoveries:      r.Recoveries,
 		CreatedAt:       fromMillis(r.CreatedAt),
 		EndedAt:         fromMillisPtr(r.EndedAt),
+		ParkedAt:        fromMillisPtr(r.ParkedAt),
 	}
 	if r.LeaseExpiresAt != nil {
 		a.Lease = &Lease{Holder: r.LeaseHolder, ExpiresAt: fromMillis(*r.LeaseExpiresAt)}
@@ -455,6 +460,19 @@ func (a *Agents) RotateTokenHash(ctx context.Context, id ident.AgentID, hash str
 func (a *Agents) SetDeclared(ctx context.Context, id ident.AgentID, declared, summary string) error {
 	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
 		return q.Set("declared = ?", declared).Set("declared_summary = ?", summary)
+	})
+}
+
+// SetParked records whether the agent is parked: stopped to free a process,
+// to be resumed by id when it next has work.
+func (a *Agents) SetParked(ctx context.Context, id ident.AgentID, parked bool) error {
+	var at *int64
+	if parked {
+		ms := toMillis(a.clock.Now())
+		at = &ms
+	}
+	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
+		return q.Set("parked_at = ?", at)
 	})
 }
 

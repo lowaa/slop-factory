@@ -26,7 +26,11 @@ type PruneCutoffs struct {
 	DeliveredMessages time.Time
 	// EndedAgents deletes agents that ended before it, with their history.
 	// One that still has worktrees recorded is kept, so no worktree slop-bot
-	// made is orphaned: cleanup removes the worktree first.
+	// made is orphaned: cleanup removes the worktree first. An agent
+	// released to a person (`attach --no-resume`) is never deleted: its row
+	// is what keeps the scheduler from starting a new agent on work the
+	// person took over (ReleasedForTicket), for as long as the ticket stays
+	// assigned. Agents slop-bot gave up on block nothing, so they go.
 	EndedAgents time.Time
 }
 
@@ -58,6 +62,7 @@ func (p *Pruner) Prune(ctx context.Context, c *PruneCutoffs) (*PruneResult, erro
 			{"delivered messages", c.DeliveredMessages, &r.Messages, `DELETE FROM messages WHERE status <> 'queued' AND coalesce(read_at, delivered_at) < ?
 				AND id NOT IN (SELECT message_id FROM asks WHERE closed_at IS NULL)`},
 			{"ended agents", c.EndedAgents, &r.Agents, `DELETE FROM agents WHERE ended_at < ?
+				AND NOT (state = 'released' AND given_up = 0)
 				AND NOT EXISTS (SELECT 1 FROM agent_worktrees w WHERE w.agent_id = agents.id)`},
 		}
 		for _, s := range steps {
