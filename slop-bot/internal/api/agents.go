@@ -58,6 +58,9 @@ type Tell struct {
 	Text      string `json:"text"`
 	All       bool   `json:"all,omitempty"`
 	Interrupt bool   `json:"interrupt,omitempty"`
+	// Merge authorises the agent to merge its ticket's work (user only);
+	// a Text of just "merge" does too.
+	Merge bool `json:"merge,omitempty"`
 }
 
 // Told answers POST /v1/tell.
@@ -115,17 +118,21 @@ type Note struct {
 
 // AgentStatus is one agent in GET /v1/status.
 type AgentStatus struct {
-	ID      string    `json:"id"`
-	Ticket  string    `json:"ticket"`
-	Title   string    `json:"title"`
-	State   string    `json:"state"`
-	Since   time.Time `json:"since"`
-	Harness string    `json:"harness"`
-	Model   string    `json:"model,omitempty"`
-	Effort  string    `json:"effort,omitempty"`
-	Pool    string    `json:"pool"`
-	Note    string    `json:"note,omitempty"`
-	Nudges  int       `json:"nudges,omitempty"`
+	ID     string `json:"id"`
+	Ticket string `json:"ticket"`
+	Title  string `json:"title"`
+	// TicketStatus is the ticket's own status, e.g. preparing or in_progress.
+	TicketStatus string `json:"ticket_status,omitempty"`
+	// Blockers are the ticket's blockers that aren't done.
+	Blockers []string  `json:"blockers,omitempty"`
+	State    string    `json:"state"`
+	Since    time.Time `json:"since"`
+	Harness  string    `json:"harness"`
+	Model    string    `json:"model,omitempty"`
+	Effort   string    `json:"effort,omitempty"`
+	Pool     string    `json:"pool"`
+	Note     string    `json:"note,omitempty"`
+	Nudges   int       `json:"nudges,omitempty"`
 }
 
 // Status is GET /v1/status.
@@ -133,10 +140,18 @@ type Status struct {
 	Agents   []AgentStatus `json:"agents"`
 	Autonomy bool          `json:"autonomy"`
 	// Budget and Outstanding are the autonomy budget and its use.
-	Budget      int `json:"budget"`
-	Outstanding int `json:"outstanding"`
+	Budget      int         `json:"budget"`
+	Outstanding int         `json:"outstanding"`
+	Pools       []PoolUsage `json:"pools,omitempty"`
 	// Limits are the harnesses' plan allowances, as last reported.
 	Limits []HarnessLimit `json:"limits"`
+}
+
+// PoolUsage is how many of a pool's slots are in a turn.
+type PoolUsage struct {
+	Pool   string `json:"pool"`
+	Active int    `json:"active"`
+	Max    int    `json:"max"`
 }
 
 // Event is one entry of GET /v1/events.

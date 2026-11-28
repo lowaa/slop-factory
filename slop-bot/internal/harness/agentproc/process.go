@@ -33,6 +33,8 @@ type Process struct {
 	cmd    *exec.Cmd
 	Stdin  io.WriteCloser
 	Stdout io.ReadCloser
+	stdout *stdoutReader
+	drain  time.Duration
 	stderr *tail
 	done   chan struct{}
 	exit   exitResult
@@ -74,7 +76,8 @@ func start(_ context.Context, spec *harness.LaunchSpec, drain time.Duration) (*P
 	}
 	cmd.Stdout = stdoutW
 	cmd.WaitDelay = drain
-	p := &Process{cmd: cmd, Stdin: stdin, Stdout: stdout, stderr: &tail{max: stderrKeep}, done: make(chan struct{})}
+	out := &stdoutReader{f: stdout, eof: make(chan struct{})}
+	p := &Process{cmd: cmd, Stdin: stdin, Stdout: out, stdout: out, drain: drain, stderr: &tail{max: stderrKeep}, done: make(chan struct{})}
 	cmd.Stderr = p.stderr
 	err = cmd.Start()
 	// The child has its own copy of the write end; ours must go, or the
@@ -107,6 +110,48 @@ func (p *Process) wait() {
 	}
 	p.exit = exitResult{code: code, err: err}
 	close(p.done)
+	go p.drainStdout()
+}
+
+// drainStdout bounds how long stdout may stay open once the harness has
+// exited. A child it left behind holding stdout would otherwise keep the
+// reader from ever seeing EOF, and with it the conversation from ever
+// reporting the exit. Past the bound the rest of the group is killed and the
+// read end closed. The group is only signalled while it still exists (a
+// member holds the pipe), so its id can't have been reused.
+func (p *Process) drainStdout() {
+	t := time.NewTimer(p.drain)
+	defer t.Stop()
+	select {
+	case <-p.stdout.eof:
+		return
+	case <-t.C:
+	}
+	pgid := p.cmd.Process.Pid
+	if syscall.Kill(-pgid, 0) == nil {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	}
+	_ = p.stdout.Close()
+}
+
+// stdoutReader is the harness's stdout, noting when it reached EOF.
+type stdoutReader struct {
+	f       *os.File
+	eof     chan struct{}
+	eofOnce sync.Once
+}
+
+func (r *stdoutReader) Read(b []byte) (int, error) {
+	n, err := r.f.Read(b)
+	if err != nil {
+		r.eofOnce.Do(func() { close(r.eof) })
+	}
+	return n, err
+}
+
+func (r *stdoutReader) Close() error {
+	r.eofOnce.Do(func() { close(r.eof) })
+	return r.f.Close()
 }
 
 // Done is closed once the process has exited.

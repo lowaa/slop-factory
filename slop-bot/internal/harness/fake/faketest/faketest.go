@@ -29,8 +29,32 @@ import (
 // fakeharness. No separate build step, and nothing to go stale.
 const reexec = "SLOP_BOT_FAKE_REEXEC"
 
-// Timeout bounds each step: a safety net, never a synchronisation.
-const Timeout = 20 * time.Second
+// Timeout bounds each step: a safety net, never a synchronisation. It is
+// generous because the whole suite runs under -race (and quality.sh's
+// -coverpkg) on a loaded machine, where every fake and every hook is a
+// start of this test binary: a step that takes a second idle has been seen
+// to take twenty.
+const Timeout = 60 * time.Second
+
+// Under the wall clock, the kit's own bounds are raised past anything a
+// loaded machine takes, so that a slow fake reads as slow, not as a
+// harness that failed: they are not what these tests are about.
+const (
+	// renderTimeout bounds a paste's showing on screen.
+	renderTimeout = Timeout / 2
+	// confirmTimeout bounds a key's confirmation. Only a fake told to drop
+	// submits needs the second press, and the tests that tell it to run on
+	// a fake clock.
+	confirmTimeout = Timeout / 2
+	// hookTrust keeps the screen from overriding what a hook said for as
+	// long as a step may take. The fake reports everything by hook, and on
+	// the wall clock the screen would race the test's scripting: a prompt
+	// submitted but not yet started by the fake, a poll interval on, reads
+	// as one that started no turn, and ends quietly. The poll still runs at
+	// the kit's interval, for the held-message retry and the exit watcher's
+	// back-off it also paces; the screen's own tests run on a fake clock.
+	hookTrust = Timeout
+)
 
 // Main is a test package's TestMain body.
 func Main(m *testing.M) {
@@ -93,11 +117,15 @@ type TUI struct {
 }
 
 // TUIOptions shape a TUI rig; the zero value is the wall clock and the
-// kit's default timings.
+// kit's default timings, but for RenderTimeout.
 type TUIOptions struct {
 	Clock          clock.Clock
 	PollInterval   time.Duration
+	HookTrust      time.Duration
 	ConfirmTimeout time.Duration
+	// RenderTimeout is on the wall clock whatever Clock is; zero is
+	// renderTimeout.
+	RenderTimeout time.Duration
 }
 
 // NewTUI is a fake/tui rig, torn down when the test ends.
@@ -112,15 +140,18 @@ func NewTUI(t *testing.T, opts *TUIOptions) *TUI {
 		Binary: self(t), Control: ctl.Socket(),
 		Sessions: tuidriver.Sessions{
 			Host: host, Hub: hub, Pointer: Pointer, Logger: slog.New(slog.DiscardHandler), Clock: clock.Or(opts.Clock),
-			PollInterval: opts.PollInterval, ConfirmTimeout: opts.ConfirmTimeout,
+			PollInterval: opts.PollInterval, HookTrust: opts.HookTrust, ConfirmTimeout: opts.ConfirmTimeout, RenderTimeout: opts.RenderTimeout,
 		},
+	}
+	if h.RenderTimeout == 0 {
+		h.RenderTimeout = renderTimeout
 	}
 	return &TUI{Ctl: ctl, Host: host, Hub: hub, Harness: h, Puppet: &Puppet{ctl: ctl, tui: true}}
 }
 
 // TUISubject is fake/tui under the conformance suite.
 func TUISubject(t *testing.T) *conformance.Subject {
-	rig := NewTUI(t, &TUIOptions{})
+	rig := NewTUI(t, &TUIOptions{HookTrust: hookTrust, ConfirmTimeout: confirmTimeout})
 	return &conformance.Subject{
 		Harness:   rig.Harness,
 		Workspace: func(t *testing.T) *harness.Workspace { return Workspace(t, "a1") },

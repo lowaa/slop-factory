@@ -42,6 +42,7 @@ const stepTimeout = 60 * time.Second
 
 func TestMain(m *testing.M) {
 	scripted.ExecIfLauncher()
+	execIfHook()
 	os.Exit(m.Run())
 }
 

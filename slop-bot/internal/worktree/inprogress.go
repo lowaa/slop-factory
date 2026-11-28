@@ -49,7 +49,14 @@ func (m *Manager) adminDir(ctx context.Context, repoPath, path string) (string, 
 		if err != nil {
 			return "", err
 		}
-		if canon(strings.TrimSpace(string(raw))) == canon(want) {
+		// With worktree.useRelativePaths the path is relative to the admin
+		// dir; unresolved, the worktree goes unrecognised and its autostash
+		// unprotected.
+		gitdir := strings.TrimSpace(string(raw))
+		if !filepath.IsAbs(gitdir) {
+			gitdir = filepath.Join(dir, gitdir)
+		}
+		if canon(gitdir) == canon(want) {
 			return dir, nil
 		}
 	}

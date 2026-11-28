@@ -104,7 +104,12 @@ func TestAHeldMessageIsRetriedOnAnIdleAgent(t *testing.T) {
 	// fails, nothing was typed, and it is held.
 	require.NoError(t, r.conv.Interrupt(r.ctx))
 	<-held.ch
-	// No turn will end on an idle agent: the next screen poll retries.
+	// No turn will end on an idle agent: the next screen poll retries. The
+	// fake draws its cancel only once the hook that reported it returns, and
+	// on the fake clock the poll's trust in that hook lapses at once: polled
+	// before the redraw, the screen shows the turn still running, and the
+	// poll starts it again.
+	r.idleOnScreen(t)
 	r.clk.Advance(poll)
 	assert.Equal(t, pointer("held"), r.await(t, fake.RepUser).Text)
 }

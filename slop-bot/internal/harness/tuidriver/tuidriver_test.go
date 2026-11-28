@@ -82,6 +82,17 @@ func (r *rig) await(t *testing.T, rep string) *fake.Report {
 	return got
 }
 
+// idleOnScreen waits for the fake's screen to show it idle. The screen
+// changes with no event to wait for, so this waits on the tmux state
+// itself, bounded.
+func (r *rig) idleOnScreen(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		s, err := r.Host.Capture(r.ctx, fake.SessionName("a1"))
+		return err == nil && strings.Contains(s, "[fake] idle")
+	}, faketest.Timeout, 5*time.Millisecond)
+}
+
 // inTurn starts a turn, as the harness would on a prompt.
 func (r *rig) inTurn(t *testing.T) {
 	t.Helper()
@@ -199,12 +210,7 @@ func TestTheScreenReportsACancelNoHookDoes(t *testing.T) {
 		require.Failf(t, "event before the poll", "%+v", ev)
 	default:
 	}
-	// The screen changes with no event to wait for, so this waits on the
-	// tmux state itself, bounded.
-	require.Eventually(t, func() bool {
-		s, err := r.Host.Capture(r.ctx, fake.SessionName("a1"))
-		return err == nil && strings.Contains(s, "[fake] idle")
-	}, faketest.Timeout, 5*time.Millisecond)
+	r.idleOnScreen(t)
 	r.clk.Advance(poll)
 	assert.Equal(t, harness.TurnInterrupted, next(r.ctx, t, r.conv, harness.TurnEnded).Outcome)
 	require.NoError(t, <-interrupted)

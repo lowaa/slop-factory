@@ -3,6 +3,7 @@ package agentproc
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -166,4 +167,36 @@ func TestAChildHoldingStderrDoesntHideTheExit(t *testing.T) {
 	// No assertion on the stderr tail: once the drain bound passes, how much
 	// of it was copied is a race, and TestPipesAndExitCode covers it.
 	assert.NoError(t, p.Err())
+}
+
+func TestAChildHoldingStdoutDoesntHideTheEnd(t *testing.T) {
+	t.Parallel()
+	// The harness exits, leaving a child that keeps stdout open: the reader
+	// must still reach the end, and the child must be gone.
+	p, err := start(context.Background(), sh(t, `sleep 1000 & echo $!; exit 0`), time.Millisecond)
+	require.NoError(t, err)
+	r := bufio.NewReader(p.Stdout)
+	line, err := r.ReadString('\n')
+	require.NoError(t, err)
+	var orphan int
+	_, err = fmtSscan(strings.TrimSpace(line), &orphan)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = syscall.Kill(orphan, syscall.SIGKILL) })
+
+	ended := make(chan error, 1)
+	go func() {
+		_, err := io.ReadAll(r)
+		ended <- err
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), testWait)
+	defer cancel()
+	select {
+	case err := <-ended:
+		// Closing the read end past the drain bound is how the reader is
+		// released, so that's an expected way to end.
+		assert.True(t, err == nil || errors.Is(err, os.ErrClosed), "reading stdout: %v", err)
+	case <-ctx.Done():
+		t.Fatal("the reader never reached the end of stdout")
+	}
+	assert.Eventually(t, func() bool { return syscall.Kill(orphan, 0) != nil }, testWait, testTick, "the child holding stdout is gone")
 }

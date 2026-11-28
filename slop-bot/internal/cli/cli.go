@@ -102,6 +102,8 @@ func (a *app) root() *cobra.Command {
 		a.installCmd(),
 		a.uninstallCmd(),
 		a.ticketCmd(),
+		a.tuiCmd(),
+		a.hookCmd(),
 	)
 	root.AddCommand(a.agentCmds()...)
 	return root

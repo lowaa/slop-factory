@@ -75,6 +75,8 @@ const (
 	EventHandedBack = "agent.handed_back"
 	// EventTUILaunched: the attached CLI started the TUI.
 	EventTUILaunched = "agent.tui_launched"
+	// EventJoinedExit: the harness exited in a session a person had joined.
+	EventJoinedExit = "agent.joined_exit"
 )
 
 // Record logs an attach event the daemon's routes observe, on the agent's
@@ -217,7 +219,15 @@ func (m *Manager) stopForAttach(ctx context.Context, r *runner, a *state.Agent, 
 
 // beginAttach marks r attaching for holder, refusing a runner that is
 // finishing, attached, or already being attached by someone.
+//
+// It runs under deliverMu, so a delivery in flight either finishes first,
+// and the slot queue entry it made is dropped below, or sees the attach
+// and holds its messages. Between the two, it would queue the attached
+// agent after the drop: at the front of its pool, for a slot it never
+// takes, stalling every agent behind it.
 func (m *Manager) beginAttach(r *runner, a *state.Agent, holder string) error {
+	r.deliverMu.Lock()
+	defer r.deliverMu.Unlock()
 	r.mu.Lock()
 	switch {
 	case r.stopping:

@@ -23,9 +23,10 @@ type Sessions struct {
 	Pointer func(msgs []*harness.Message) string
 	Logger  *slog.Logger
 	Clock   clock.Clock
-	// PollInterval, ConfirmTimeout and RenderTimeout are Options'; zero is
-	// the kit's default.
+	// PollInterval, HookTrust, ConfirmTimeout and RenderTimeout are
+	// Options'; zero is the kit's default.
 	PollInterval   time.Duration
+	HookTrust      time.Duration
 	ConfirmTimeout time.Duration
 	RenderTimeout  time.Duration
 }
@@ -35,7 +36,7 @@ func (s *Sessions) Options(p *Profile, session string) *Options {
 	return &Options{
 		Profile: p, Host: s.Host, Hub: s.Hub, Session: session,
 		Pointer: s.Pointer, Logger: s.Logger, Clock: s.Clock,
-		PollInterval: s.PollInterval, ConfirmTimeout: s.ConfirmTimeout, RenderTimeout: s.RenderTimeout,
+		PollInterval: s.PollInterval, HookTrust: s.HookTrust, ConfirmTimeout: s.ConfirmTimeout, RenderTimeout: s.RenderTimeout,
 	}
 }
 

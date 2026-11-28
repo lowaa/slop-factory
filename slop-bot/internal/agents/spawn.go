@@ -219,6 +219,9 @@ func (m *Manager) giveUp(ctx context.Context, a *state.Agent, why string) {
 // entry goes.
 func (m *Manager) endRecord(ctx context.Context, a *state.Agent, st state.AgentState, reason string) {
 	ctx = context.WithoutCancel(ctx)
+	if st == state.StateDone {
+		m.revokeMerge(ctx, a.Ticket) // done here means its ticket ended
+	}
 	m.cleanup(ctx, a.ID, a.Ticket)
 	if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: st, Reason: reason, GivenUp: true}); err != nil {
 		m.opts.Logger.Warn("agents: ending an agent", "agent", a.ID, "err", err)

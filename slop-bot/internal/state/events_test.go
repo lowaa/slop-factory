@@ -80,6 +80,24 @@ func TestReadAfterPagesInOrder(t *testing.T) {
 	assert.Equal(t, all, got)
 }
 
+// A limit of zero or less is the default page, not "none" and not "all".
+func TestReadAfterDefaultsANonPositiveLimit(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	for i := range state.DefaultEventLimit + 1 {
+		f.appendEvent(t, fmt.Sprint("e", i))
+	}
+	for _, limit := range []int{0, -1} {
+		evs, err := f.Events.ReadAfter(ctx, 0, limit)
+		require.NoError(t, err)
+		assert.Len(t, evs, state.DefaultEventLimit, "limit %d", limit)
+	}
+	evs, err := f.Events.ReadAfter(ctx, 0, 1)
+	require.NoError(t, err)
+	assert.Len(t, evs, 1)
+}
+
 func TestSeqIsNeverReusedAfterPruning(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -213,13 +231,17 @@ func TestFollowersSeeEveryEventInOrderUnderConcurrentAppends(t *testing.T) {
 		})
 	}
 
+	// A failed writer leaves the followers waiting for events that never
+	// come, so its error is checked before they are waited on.
 	appended := make([][]int64, writers)
+	werrs := make(chan error, writers)
 	var wwg sync.WaitGroup
 	for w := range writers {
 		wwg.Go(func() {
 			for i := range perWriter {
 				seq, err := f.Events.Append(context.Background(), &state.NewEvent{Type: state.EventType(fmt.Sprintf("w%d-%d", w, i))})
-				if !assert.NoError(t, err) {
+				if err != nil {
+					werrs <- err
 					return
 				}
 				appended[w] = append(appended[w], seq)
@@ -227,6 +249,10 @@ func TestFollowersSeeEveryEventInOrderUnderConcurrentAppends(t *testing.T) {
 		})
 	}
 	wwg.Wait()
+	close(werrs)
+	for err := range werrs {
+		require.NoError(t, err)
+	}
 	fwg.Wait()
 
 	var want []int64

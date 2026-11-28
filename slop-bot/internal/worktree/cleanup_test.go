@@ -10,6 +10,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// An agent that cuts its own branch name and commits without pushing: the
+// user must hear of it as for a ticket branch, though Cleanup never deletes
+// a branch outside slop-bot/t<ticket>/.
+func TestCleanupReportsUnpushedWorkOnANonTicketBranchAndKeepsIt(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "a")
+	wt := f.create("73", []string{"a"}, "a")[0]
+	f.run(wt.Path, "switch", "-q", "-c", "feature/mine")
+	f.commit(wt.Path, "work", "unpushed")
+
+	r := f.m.Cleanup(context.Background(), "73", []*Worktree{wt})[0]
+	require.NoError(t, r.Err)
+	assert.False(t, r.Removed)
+	assert.Contains(t, kinds(r.Reasons), Unpushed)
+
+	// Forced, the worktree goes but the branch the agent named stays.
+	require.NoError(t, f.m.ForceCleanup(context.Background(), "73", wt))
+	assert.True(t, f.branchExists("a", "feature/mine"))
+}
+
 func TestCleanupSafeguards(t *testing.T) {
 	t.Parallel()
 	const branch = "slop-bot/t9/work"

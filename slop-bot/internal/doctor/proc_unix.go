@@ -18,8 +18,13 @@ func inOwnGroup(cmd *exec.Cmd) {
 }
 
 // endGroup ends what is left of a probe's group after it exited.
-func endGroup(cmd *exec.Cmd) {
+func endGroup(cmd *exec.Cmd) { signalGroup(cmd, syscall.SIGTERM) }
+
+// killGroup kills what is left of the group when ending it didn't.
+func killGroup(cmd *exec.Cmd) { signalGroup(cmd, syscall.SIGKILL) }
+
+func signalGroup(cmd *exec.Cmd, sig syscall.Signal) {
 	if cmd.Process != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		_ = syscall.Kill(-cmd.Process.Pid, sig)
 	}
 }

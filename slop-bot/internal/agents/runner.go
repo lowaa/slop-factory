@@ -186,6 +186,13 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 	if ev.Kind == harness.LimitReport && ev.Limit != nil {
 		r.m.reportLimit(ctx, r, ev.Limit)
 	}
+	// Likewise a turn's end resets the recovery count before its event: a
+	// finished turn shows the harness works again after a recovery.
+	if ev.Kind == harness.TurnEnded {
+		if err := r.m.opts.State.Agents.ResetRecoveries(ctx, r.id); err != nil {
+			r.m.opts.Logger.Debug("agents: resetting recoveries", "agent", r.id, "err", err)
+		}
+	}
 	// The conversation's own events go in the log first, so `slop-bot watch`
 	// shows a turn ending before the state it leads to. Ready and Exited
 	// aren't the conversation: the states say them.
@@ -206,10 +213,6 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		r.mu.Lock()
 		r.inTurn = false
 		r.mu.Unlock()
-		// A finished turn shows the harness works again after a recovery.
-		if err := r.m.opts.State.Agents.ResetRecoveries(ctx, r.id); err != nil {
-			r.m.opts.Logger.Debug("agents: resetting recoveries", "agent", r.id, "err", err)
-		}
 		r.turnEnded(ctx, ev)
 	case harness.Exited:
 		r.exitedWith(ctx, ev)

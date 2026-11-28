@@ -71,6 +71,20 @@ type harnessHooks struct {
 	// send runs before each Send; an error fails it, nothing sent.
 	send    func(ctx context.Context, agent ident.AgentID, msg *harness.Message) error
 	noSteer bool
+	// stop runs before each Stop.
+	stop func(agent ident.AgentID)
+}
+
+func (h *harnessHooks) onStop(agent ident.AgentID) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	stop := h.stop
+	h.mu.Unlock()
+	if stop != nil {
+		stop(agent)
+	}
 }
 
 func (h *harnessHooks) set(f func(h *harnessHooks)) {
@@ -133,6 +147,11 @@ func (c *hookedConversation) Send(ctx context.Context, msg *harness.Message) err
 	return c.Conversation.Send(ctx, msg)
 }
 
+func (c *hookedConversation) Stop(ctx context.Context, force bool) error {
+	c.hooks.onStop(c.agent)
+	return c.Conversation.Stop(ctx, force)
+}
+
 // recordingWorktrees stands in for git: worktree behaviour is tested
 // against real git in its own package.
 type recordingWorktrees struct {
@@ -141,6 +160,9 @@ type recordingWorktrees struct {
 	cleanups []ident.TicketID
 	removed  []string
 	dir      string
+	// leftover, when set, is reported alongside each removal, as the real
+	// manager does for branches it couldn't delete.
+	leftover error
 }
 
 func (w *recordingWorktrees) Create(_ context.Context, ticket ident.TicketID, repos []string, primary string) ([]*worktree.Worktree, error) {
@@ -170,7 +192,7 @@ func (w *recordingWorktrees) Cleanup(_ context.Context, ticket ident.TicketID, w
 			continue
 		}
 		w.removed = append(w.removed, wt.Path)
-		out = append(out, &worktree.CleanupResult{Worktree: wt, Removed: true})
+		out = append(out, &worktree.CleanupResult{Worktree: wt, Removed: true, Err: w.leftover})
 	}
 	return out
 }
@@ -321,8 +343,11 @@ func (f *fixture) newManager(h agents.Harnesses) *agents.Manager {
 	return m
 }
 
+// ctx is a step's safety net, never a synchronisation: generous, for a
+// suite under -race and -coverpkg on a loaded machine, where one step
+// (thirty Tells, say) has outrun twenty seconds.
 func (f *fixture) ctx() context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	f.t.Cleanup(cancel)
 	return ctx
 }
@@ -497,6 +522,33 @@ func TestDoneFinishesTheTicketAndCleansUp(t *testing.T) {
 	assert.Equal(t, state.StateDone, ended.State)
 }
 
+// A worktree removed but with branches left behind is forgotten and the user
+// still told why: the error isn't lost behind the removal.
+func TestACleanupThatRemovedButFailedTellsTheUser(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	f.wts.mu.Lock()
+	f.wts.leftover = errors.New("branch slop-bot/t1 is checked out elsewhere")
+	f.wts.mu.Unlock()
+	tk := f.file("t", func(nt *tickets.NewTicket) { nt.Status = tickets.StatusOpen })
+	s := f.session()
+	f.user(s)
+	a := f.agentFor(tk.ID)
+	f.turn(s, func() {
+		require.NoError(t, f.mgr.Done(f.ctx(), ident.AgentPrincipal(a.ID, tk.ID), "Exported as CSV."))
+	})
+	f.await(agents.EventFinished, nil)
+
+	pending, err := f.state.Messages.Pending(context.Background(), state.UserParty)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Contains(t, pending[0].Body, "couldn't fully clean up")
+	assert.Contains(t, pending[0].Body, "checked out elsewhere")
+	ended, err := f.state.Agents.Get(context.Background(), a.ID)
+	require.NoError(t, err)
+	assert.Empty(t, ended.Worktrees, "the removed worktree is no longer recorded")
+}
+
 func TestMaxActiveCountsAgentsInATurnOnly(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, oneSlot)
@@ -641,8 +693,14 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 	f.do(s, fake.Command{Cmd: fake.CmdTurnStart})
 	f.await(agents.EventState, toState(state.StateRefining))
 
+	draining := make(chan struct{})
+	var once sync.Once
+	f.hooks.set(func(h *harnessHooks) { h.stop = func(ident.AgentID) { once.Do(func() { close(draining) }) } })
 	stopped := make(chan error, 1)
 	go func() { stopped <- f.mgr.Stop(context.Background()) }()
+	// Ended before the drain began, the turn would be one the agent ended
+	// without saying why, and the restart would find it idle and nudged.
+	<-draining
 	f.do(s, fake.Command{Cmd: fake.CmdTurnEnd}) // the drain waits for the turn
 	require.NoError(t, <-stopped)
 

@@ -55,7 +55,7 @@ func TestPruneEventsAndStateChangesStrictlyBeforeTheCutoff(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestPruneReadMessagesKeepsUnreadAndOpenAsks(t *testing.T) {
+func TestPruneDeliveredMessagesKeepsUnreadAndOpenAsks(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	ctx := context.Background()
@@ -74,7 +74,7 @@ func TestPruneReadMessagesKeepsUnreadAndOpenAsks(t *testing.T) {
 	require.NoError(t, err)
 
 	f.clock.Advance(time.Hour)
-	r, err := f.Pruner.Prune(ctx, &state.PruneCutoffs{ReadMessages: f.clock.Now()})
+	r, err := f.Pruner.Prune(ctx, &state.PruneCutoffs{DeliveredMessages: f.clock.Now()})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, r.Messages)
 
@@ -88,7 +88,28 @@ func TestPruneReadMessagesKeepsUnreadAndOpenAsks(t *testing.T) {
 	assert.EqualValues(t, 1, f.count(t, "asks"), "the pruned ask's row went with its message")
 }
 
-func TestPruneReadMessagesUsesWhenTheyWereRead(t *testing.T) {
+// A message pushed into an agent's conversation (steer or turn) is delivered
+// but never read unless the agent runs `inbox`, so retention must cover it.
+func TestPruneDeliveredMessagesCoversDeliveredButUnread(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	f.createAgent(t, "a1", "1")
+	pushed, err := f.Messages.Enqueue(ctx, &state.NewMessage{From: state.UserParty, To: "a1", Kind: state.KindTell, Body: "pushed"})
+	require.NoError(t, err)
+	require.NoError(t, f.Messages.MarkDelivered(ctx, pushed.ID, state.DeliveryTurn))
+	queued := f.enqueue(t, tell(state.UserParty, "a1", "still queued"))
+	f.clock.Advance(365 * 24 * time.Hour)
+
+	r, err := f.Pruner.Prune(ctx, &state.PruneCutoffs{DeliveredMessages: f.clock.Now()})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, r.Messages)
+	log, err := f.Messages.Log(ctx, &state.LogQuery{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{queued.Body}, bodies(log))
+}
+
+func TestPruneDeliveredMessagesUsesWhenTheyWereRead(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	ctx := context.Background()
@@ -97,7 +118,7 @@ func TestPruneReadMessagesUsesWhenTheyWereRead(t *testing.T) {
 	_, err := f.Messages.MarkRead(ctx, "a1", []int64{m.ID})
 	require.NoError(t, err)
 
-	r, err := f.Pruner.Prune(ctx, &state.PruneCutoffs{ReadMessages: f.clock.Now()})
+	r, err := f.Pruner.Prune(ctx, &state.PruneCutoffs{DeliveredMessages: f.clock.Now()})
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, r.Messages, "read just now")
 }

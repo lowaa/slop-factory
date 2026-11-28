@@ -210,6 +210,7 @@ func (m *Manager) end(ctx context.Context, r *runner, force bool, reason string)
 	}
 	r.ending, r.stopping = true, true
 	r.mu.Unlock()
+	m.revokeMerge(ctx, r.ticket)
 	m.ends.Go(func() {
 		ctx := context.WithoutCancel(ctx)
 		r.stopConv(ctx, force)

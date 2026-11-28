@@ -80,7 +80,7 @@ func TestTheFakeKeepsATranscriptAndReportsLimits(t *testing.T) {
 	s := faketest.RPCSubject(t)
 	h := s.Harness.(*fake.Harness)
 	h.TranscriptDir = t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), faketest.Timeout)
 	defer cancel()
 	conv, err := h.Start(ctx, s.Workspace(t), nil)
 	require.NoError(t, err)
