@@ -2,3 +2,8 @@
 # trimmed and scrubbed by hand when the codec was written; re-record on a
 # harness version bump.
 turn_with_tool.jsonl linguist-generated=true
+# A `claude -p` session's own transcript (~/.claude/projects/<cwd>/<id>.jsonl),
+# cut to its user and assistant lines plus one attachment and scrubbed by
+# script (workspace to /ws, thinking signatures and request ids dropped) for
+# the transcript reader; re-record on a harness version bump.
+transcript.jsonl linguist-generated=true

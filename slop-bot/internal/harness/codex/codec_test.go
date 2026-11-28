@@ -247,13 +247,13 @@ func TestARecordedTurn(t *testing.T) {
 
 	evs := newPlayer(t, f.p, "turn_completed").decode(f.c, f.w, nil)
 	assert.Equal(t, []harness.EventKind{
-		harness.TurnStarted, harness.Text, harness.LimitReport, harness.UsageReport, harness.TurnEnded,
+		harness.TurnStarted, harness.Text, harness.LimitReport, harness.LimitReport, harness.UsageReport, harness.TurnEnded,
 	}, kinds(evs))
 	assert.Equal(t, "PONG, ZEBRA-42", evs[1].Text)
-	assert.InDelta(t, 4.0, evs[2].Limit.UsedPercent, 0.001, "the 5-hour window, the tighter of the two")
-	assert.Equal(t, time.Unix(1795844239, 0).UTC(), evs[2].Limit.ResetsAt)
-	assert.Equal(t, &harness.Usage{InputTokens: 16110 - 13952, CacheReadTokens: 13952, OutputTokens: 12}, evs[3].Usage)
-	assert.Equal(t, harness.TurnCompleted, evs[4].Outcome)
+	assert.Equal(t, &harness.Limit{Window: "codex/primary", UsedPercent: 4, ResetsAt: time.Unix(1795844239, 0).UTC()}, evs[2].Limit)
+	assert.Equal(t, &harness.Limit{Window: "codex/secondary", UsedPercent: 1, ResetsAt: time.Unix(1796431039, 0).UTC()}, evs[3].Limit)
+	assert.Equal(t, &harness.Usage{InputTokens: 16110 - 13952, CacheReadTokens: 13952, OutputTokens: 12}, evs[4].Usage)
+	assert.Equal(t, harness.TurnCompleted, evs[5].Outcome)
 }
 
 func TestAMidTurnMessageSteersTheRunningTurn(t *testing.T) {
@@ -364,9 +364,9 @@ func TestInterruptEndsTheTurnAndItsCommands(t *testing.T) {
 	// The command never completes inside the turn, so the turn's end closes
 	// it; its late item/completed adds nothing.
 	assert.Equal(t, []harness.EventKind{
-		harness.LimitReport, harness.ToolEnded, harness.UsageReport, harness.TurnEnded,
+		harness.LimitReport, harness.LimitReport, harness.ToolEnded, harness.UsageReport, harness.TurnEnded,
 	}, kinds(evs))
-	assert.Equal(t, harness.TurnInterrupted, evs[3].Outcome)
+	assert.Equal(t, harness.TurnInterrupted, evs[4].Outcome)
 	var clean protocol.ThreadBackgroundTerminalsCleanParams
 	f.p.last(protocol.MethodThreadBackgroundTerminalsClean, &clean)
 	assert.Equal(t, thread, clean.ThreadID)
@@ -545,23 +545,29 @@ func TestCacheWritesAreCountedApartFromInput(t *testing.T) {
 	assert.Equal(t, &harness.Usage{InputTokens: 100, CacheReadTokens: 600, CacheWriteTokens: 300, OutputTokens: 5}, f.c.usage)
 }
 
-func TestSparseRateLimitUpdatesMerge(t *testing.T) {
+// Each window is its own report, named by limit id and slot, so a sparse
+// update, or another limit id's, can't stand in for a window it left out.
+func TestEachRateLimitWindowIsReportedApart(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, nil)
-	decode := func(limits string) []harness.Event {
+	decode := func(limits string) []*harness.Limit {
 		evs, err := f.c.Decode([]byte(`{"method":"account/rateLimits/updated","params":{"rateLimits":`+limits+`}}`), f.w)
 		require.NoError(t, err)
-		return evs
+		var out []*harness.Limit
+		for _, ev := range evs {
+			require.Equal(t, harness.LimitReport, ev.Kind)
+			out = append(out, ev.Limit)
+		}
+		return out
 	}
-	evs := decode(`{"limitId":"codex","primary":{"usedPercent":90,"resetsAt":100},"secondary":{"usedPercent":10,"resetsAt":200}}`)
-	assert.InDelta(t, 90.0, evs[0].Limit.UsedPercent, 0.001)
-	// Only the weekly window: the 5-hour one is still at 90%.
-	evs = decode(`{"limitId":"codex","secondary":{"usedPercent":20,"resetsAt":200}}`)
-	assert.InDelta(t, 90.0, evs[0].Limit.UsedPercent, 0.001)
-	assert.Equal(t, time.Unix(100, 0).UTC(), evs[0].Limit.ResetsAt)
-	// Another limit's windows don't mix with the plan's.
-	evs = decode(`{"limitId":"other","primary":{"usedPercent":5}}`)
-	assert.InDelta(t, 5.0, evs[0].Limit.UsedPercent, 0.001)
+	assert.Equal(t, []*harness.Limit{
+		{Window: "codex/primary", UsedPercent: 90, ResetsAt: time.Unix(100, 0).UTC()},
+		{Window: "codex/secondary", UsedPercent: 10, ResetsAt: time.Unix(200, 0).UTC()},
+	}, decode(`{"limitId":"codex","primary":{"usedPercent":90,"resetsAt":100},"secondary":{"usedPercent":10,"resetsAt":200}}`))
+	assert.Equal(t, []*harness.Limit{{Window: "codex/secondary", UsedPercent: 20, ResetsAt: time.Unix(200, 0).UTC()}},
+		decode(`{"limitId":"codex","secondary":{"usedPercent":20,"resetsAt":200}}`), "only what the update carries")
+	assert.Equal(t, []*harness.Limit{{Window: "other/primary", UsedPercent: 5}},
+		decode(`{"limitId":"other","primary":{"usedPercent":5}}`), "no reset time: zero, not 1970")
 	assert.Empty(t, decode(`{"limitId":"empty"}`))
 }
 

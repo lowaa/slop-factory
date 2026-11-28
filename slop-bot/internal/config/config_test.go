@@ -36,6 +36,7 @@ func TestEmptyConfigGetsEveryDefault(t *testing.T) {
 	assert.Equal(t, "stream-json", c.Harnesses[ClaudeCode].Driver)
 	assert.True(t, *c.Harnesses[ClaudeCode].Permissive)
 	assert.False(t, c.Harnesses[ClaudeCode].APIKeyOptIn)
+	assert.InDelta(t, 95.0, c.Harnesses[ClaudeCode].LimitThreshold, 0)
 }
 
 func TestFullConfig(t *testing.T) {
@@ -52,7 +53,7 @@ repos:
 concurrency: {max_active: 2, max_live: 10, urgent: {max_active: 2}}
 autonomy: {enabled: true, tickets_per_agent: 3}
 harnesses:
-  codex: {}
+  codex: {limit_threshold: 80}
   agy: {driver: tui, permissive: false, model: gemini-x}
   pi:
 agents: {nudges: 5, stall_after: 30m, ask_reminder_after: 2h}
@@ -68,6 +69,7 @@ doctor: {require: [gh, shellcheck]}
 	assert.Equal(t, "/etc/rel", r.Path)
 	assert.Equal(t, 12, c.AutonomyBudget(), "3 × (2 + 2) slots")
 	assert.Equal(t, "app-server", c.Harnesses[Codex].Driver)
+	assert.InDelta(t, 80.0, c.Harnesses[Codex].LimitThreshold, 0)
 	assert.Equal(t, "rpc", c.Harnesses[Pi].Driver, "a bare harness key gets its default driver")
 	assert.False(t, *c.Harnesses[Agy].Permissive)
 	assert.Equal(t, "gemini-x", c.Harnesses[Agy].Model)
@@ -95,6 +97,9 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"zero budget":           {"autonomy: {tickets_per_agent: -1}\n", "tickets_per_agent: must be at least 1"},
 		"negative concurrency":  {"concurrency: {max_active: -1}\n", "max_active and urgent.max_active must be at least 1"},
 		"blank required binary": {"doctor: {require: [gh, \"\"]}\n", "doctor.require[1]: is empty"},
+		"limit over 100":        {"harnesses: {claude-code: {limit_threshold: 101}}\n", "harnesses.claude-code.limit_threshold: 101 isn't a percentage"},
+		"negative limit":        {"harnesses: {claude-code: {limit_threshold: -5}}\n", "limit_threshold: -5"},
+		"negative retention":    {"retention: {transcripts: -1h}\n", "retention: transcripts and events must be positive"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

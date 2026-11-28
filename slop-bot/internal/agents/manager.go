@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
@@ -23,6 +24,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
@@ -54,6 +56,14 @@ type Options struct {
 	// CLIReference is the briefing's command list, generated from the CLI's
 	// command tree so it can't drift from it.
 	CLIReference string
+	// Transcripts keeps an agent's transcript once it ends.
+	Transcripts Retainer
+}
+
+// Retainer copies an ended agent's transcript to where slop-bot keeps it
+// (transcript.Library).
+type Retainer interface {
+	Retain(ctx context.Context, a *state.Agent) error
 }
 
 // Manager runs every agent. It is a lifecycle component: Start resumes the
@@ -69,6 +79,12 @@ type Manager struct {
 	wantSlot []ident.AgentID
 	stopping bool
 
+	limits *limits
+	// wake fires when the earliest held harness's window resets, at
+	// wakeTime; only the scheduler goroutine touches them.
+	wake     <-chan time.Time
+	wakeTime time.Time
+
 	kick chan struct{}
 	stop chan struct{}
 	done chan struct{}
@@ -77,12 +93,13 @@ type Manager struct {
 // New makes a Manager; nothing runs until Start.
 func New(opts *Options) (*Manager, error) {
 	if opts == nil || opts.Config == nil || opts.Paths == nil || opts.State == nil || opts.Tickets == nil ||
-		opts.Harnesses == nil || opts.Worktrees == nil || opts.Logger == nil || opts.Clock == nil {
+		opts.Harnesses == nil || opts.Worktrees == nil || opts.Logger == nil || opts.Clock == nil || opts.Transcripts == nil {
 		return nil, errors.New("agents: New is missing a dependency")
 	}
 	return &Manager{
 		opts:    opts,
 		runners: map[ident.AgentID]*runner{},
+		limits:  newLimits(),
 		kick:    make(chan struct{}, 1),
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
@@ -91,6 +108,9 @@ func New(opts *Options) (*Manager, error) {
 
 // Start resumes live agents and starts the scheduler.
 func (m *Manager) Start(ctx context.Context) error {
+	if err := m.loadLimits(ctx); err != nil {
+		return err
+	}
 	if err := m.resumeAll(ctx); err != nil {
 		return err
 	}
@@ -165,6 +185,27 @@ func (m *Manager) event(ctx context.Context, typ string, agent ident.AgentID, ti
 	}
 }
 
+// retain keeps an ended agent's transcript, because the harness prunes its
+// own. A failure costs the copy, not the ending, so it's told, not
+// returned.
+func (m *Manager) retain(ctx context.Context, id ident.AgentID) {
+	a, err := m.opts.State.Agents.Get(ctx, id)
+	if err == nil {
+		err = m.opts.Transcripts.Retain(ctx, a)
+	}
+	// An agent that never got a conversation going has nothing to keep;
+	// one that did and has no transcript is worth knowing about.
+	if errors.Is(err, transcript.ErrNotFound) && a != nil && a.ConversationID == "" {
+		return
+	}
+	if err != nil {
+		m.opts.Logger.Warn("agents: retaining a transcript", "agent", id, "err", err)
+		m.tellUser(ctx, id, fmt.Sprintf("agent %s's transcript couldn't be kept: %v", id, err))
+		return
+	}
+	m.event(ctx, EventRetained, id, a.Ticket, nil)
+}
+
 // TellUser puts a system message from slop-bot in the user's inbox.
 func (m *Manager) TellUser(ctx context.Context, body string) { m.tellUser(ctx, "", body) }
 
@@ -200,4 +241,11 @@ const (
 	EventFinished     = "agent.finished"
 	EventSpawnFailed  = "agent.spawn_failed"
 	EventMisconfigure = "ticket.misconfigured"
+	// EventHeld is a ticket waiting for its harness's plan window to reset.
+	EventHeld = "ticket.held"
+	// EventRetained is an ended agent's transcript, kept.
+	EventRetained = "transcript.retained"
+	// EventHarness prefixes the conversation's own events: harness.text,
+	// harness.tool_started, and so on, which `slop-bot watch` shows.
+	EventHarness = "harness."
 )

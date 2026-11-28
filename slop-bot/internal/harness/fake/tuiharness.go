@@ -99,7 +99,7 @@ func (h *TUIHarness) Profile() *tuidriver.Profile {
 	return &tuidriver.Profile{
 		Harness: Name,
 		Command: func(ws *harness.Workspace, resume *harness.ConversationRef) (*harness.LaunchSpec, error) {
-			return launch(h.Binary, h.Control, ws, resume, "--tui"), nil
+			return launch(h.Binary, h.Control, "", ws, resume, "--tui"), nil
 		},
 		InstallHooks: installHooks,
 		SubmitKey:    "Enter",

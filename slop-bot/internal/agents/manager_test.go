@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets/local"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
@@ -39,11 +41,19 @@ func TestMain(m *testing.M) {
 
 var t0 = time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC)
 
-// fakeHarness runs the fake for every harness name, with the re-exec env.
-type fakeHarness struct{ h *fake.Harness }
+// fakeHarness runs the fake, with the re-exec env, for claude-code, or for
+// each of names when given.
+type fakeHarness struct {
+	h     *fake.Harness
+	names []string
+}
 
 func (f *fakeHarness) Harness(name string) (harness.AIHarness, bool) {
-	if name != config.ClaudeCode {
+	names := f.names
+	if names == nil {
+		names = []string{config.ClaudeCode}
+	}
+	if !slices.Contains(names, name) {
 		return nil, false
 	}
 	return &envHarness{f.h}, true
@@ -143,16 +153,26 @@ type fixture struct {
 	tickets *local.System
 	// racing is the ticketing system the manager sees: tickets, with a hook
 	// that can land a write between the manager's read and its update.
-	racing *racingTickets
-	clock  *clock.Fake
-	wts    *recordingWorktrees
-	cfg    *config.Config
-	paths  *paths.Paths
-	mgr    *agents.Manager
-	cursor int64
+	racing  *racingTickets
+	clock   *clock.Fake
+	wts     *recordingWorktrees
+	cfg     *config.Config
+	paths   *paths.Paths
+	mgr     *agents.Manager
+	cursor  int64
+	archive *transcript.Archive
+	// transcripts is where the fakes keep theirs.
+	transcripts string
 }
 
 func newFixture(t *testing.T, cfgYAML string) *fixture {
+	t.Helper()
+	return newFixtureFor(t, cfgYAML, nil)
+}
+
+// newFixtureFor runs the fake for each harness in names (claude-code when
+// nil).
+func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	t.Helper()
 	dir := t.TempDir()
 	ctx := context.Background()
@@ -181,8 +201,13 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 	require.NoError(t, ts.Start(ctx, ""))
 	self, err := os.Executable()
 	require.NoError(t, err)
+	archive, err := transcript.NewArchive(&transcript.ArchiveOptions{
+		Dir: p.TranscriptsDir(), Index: st.Transcripts, Retain: cfg.Retention.Transcripts.D(), Clock: clk,
+	})
+	require.NoError(t, err)
 	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, racing: &racingTickets{TicketingSystem: ts}, clock: clk, cfg: cfg, paths: p,
-		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}}
+		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}, archive: archive, transcripts: filepath.Join(dir, "fake-transcripts")}
+	require.NoError(t, os.MkdirAll(f.transcripts, 0o700))
 	t.Cleanup(func() {
 		if t.Failed() {
 			evs, _ := st.Events.ReadAfter(context.Background(), 0, 500)
@@ -191,7 +216,7 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 			}
 		}
 	})
-	f.mgr = f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: ctl.Socket(), Logger: quiet, Clock: clock.Real{}}})
+	f.mgr = f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: f.transcripts, Logger: quiet, Clock: clock.Real{}}, names: names})
 	require.NoError(t, f.mgr.Start(ctx))
 	t.Cleanup(func() { _ = f.mgr.Stop(context.Background()) })
 	// Cleanups run last-first: closing the controller first makes every
@@ -205,6 +230,7 @@ func (f *fixture) newManager(h agents.Harnesses) *agents.Manager {
 	m, err := agents.New(&agents.Options{
 		Config: f.cfg, Paths: f.paths, State: f.state, Tickets: f.racing, Harnesses: h,
 		Worktrees: f.wts, User: "ada", Logger: slog.New(slog.NewTextHandler(testWriter{f.t}, nil)), Clock: f.clock, CLI: "/usr/bin/slop-bot",
+		Transcripts: transcript.NewLibrary(h, f.archive),
 	})
 	require.NoError(f.t, err)
 	return m
@@ -537,7 +563,7 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 
 	self, err := os.Executable()
 	require.NoError(t, err)
-	m := f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: f.ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
 	require.NoError(t, m.Start(context.Background()))
 	t.Cleanup(func() { _ = m.Stop(context.Background()) })
 	t.Cleanup(func() { _ = f.ctl.Close() })

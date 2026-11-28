@@ -112,7 +112,15 @@ type HarnessConfig struct {
 	// Model is what agents run on when their ticket names none. Blank
 	// leaves it to the harness (pi's adapter then picks a known-good one).
 	Model string `yaml:"model"`
+	// LimitThreshold is the percentage of the plan's allowance at which no
+	// new agent is started on this harness until the window resets. 0, or
+	// unset, is DefaultLimitThreshold.
+	LimitThreshold float64 `yaml:"limit_threshold"`
 }
+
+// DefaultLimitThreshold leaves a little of the allowance for the agents
+// already running, and for the user's own interactive use.
+const DefaultLimitThreshold = 95
 
 // Agents holds the lifecycle timings.
 type Agents struct {
@@ -221,6 +229,9 @@ func (c *Config) applyDefaults(home string) {
 		if h.Permissive == nil {
 			h.Permissive = ptr(true)
 		}
+		if h.LimitThreshold == 0 {
+			h.LimitThreshold = DefaultLimitThreshold
+		}
 	}
 	c.defaultDurations()
 }
@@ -277,54 +288,79 @@ func absPath(p, dir, home string) (string, error) {
 }
 
 func (c *Config) validate() error {
-	var errs []error
-	add := func(format string, a ...any) { errs = append(errs, fmt.Errorf("config: "+format, a...)) }
+	v := &validation{}
+	c.validateHarnesses(v)
+	c.validateRepos(v)
+	c.validateLimits(v)
+	for i, bin := range c.Doctor.Require {
+		if strings.TrimSpace(bin) == "" {
+			v.add("doctor.require[%d]: is empty", i)
+		}
+	}
+	return errors.Join(v.errs...)
+}
+
+// validation collects every problem, so one load names them all.
+type validation struct{ errs []error }
+
+func (v *validation) add(format string, a ...any) {
+	v.errs = append(v.errs, fmt.Errorf("config: "+format, a...))
+}
+
+func (c *Config) validateHarnesses(v *validation) {
 	for name, h := range c.Harnesses {
 		known, ok := drivers[name]
 		switch {
 		case !ok:
-			add("harnesses.%s: unknown harness (known: claude-code, codex, pi, agy)", name)
+			v.add("harnesses.%s: unknown harness (known: claude-code, codex, pi, agy)", name)
 		case !slices.Contains(known, h.Driver):
-			add("harnesses.%s.driver: %q isn't a driver for %s (have: %s)", name, h.Driver, name, strings.Join(known, ", "))
+			v.add("harnesses.%s.driver: %q isn't a driver for %s (have: %s)", name, h.Driver, name, strings.Join(known, ", "))
+		}
+		if h.LimitThreshold <= 0 || h.LimitThreshold > 100 {
+			v.add("harnesses.%s.limit_threshold: %v isn't a percentage above 0, up to 100", name, h.LimitThreshold)
 		}
 	}
 	if _, ok := c.Harnesses[c.DefaultHarness]; !ok {
-		add("default_harness: %q isn't configured under harnesses", c.DefaultHarness)
+		v.add("default_harness: %q isn't configured under harnesses", c.DefaultHarness)
 	}
 	if c.Ticketing.System != "local" {
-		add("ticketing.system: %q isn't available (have: local)", c.Ticketing.System)
+		v.add("ticketing.system: %q isn't available (have: local)", c.Ticketing.System)
 	}
+}
+
+func (c *Config) validateRepos(v *validation) {
 	seen := map[string]bool{}
 	for i, r := range c.Repos {
 		if r.Name == "" {
-			add("repos[%d].name: is empty", i)
+			v.add("repos[%d].name: is empty", i)
 		} else if err := CheckRepoName(r.Name); err != nil {
-			add("repos[%d].name: %v", i, err)
+			v.add("repos[%d].name: %v", i, err)
 		}
 		if seen[r.Name] {
-			add("repos[%d].name: %q is listed twice", i, r.Name)
+			v.add("repos[%d].name: %q is listed twice", i, r.Name)
 		}
 		seen[r.Name] = true
 	}
+}
+
+// validateLimits checks the numbers: concurrency, budgets and retention.
+func (c *Config) validateLimits(v *validation) {
 	if c.Concurrency.MaxActive < 1 || c.Concurrency.Urgent.MaxActive < 1 {
-		add("concurrency: max_active and urgent.max_active must be at least 1")
+		v.add("concurrency: max_active and urgent.max_active must be at least 1")
 	}
 	if c.Concurrency.MaxLive < c.Concurrency.MaxActive+c.Concurrency.Urgent.MaxActive {
-		add("concurrency.max_live: %d is below max_active + urgent.max_active (%d)",
+		v.add("concurrency.max_live: %d is below max_active + urgent.max_active (%d)",
 			c.Concurrency.MaxLive, c.Concurrency.MaxActive+c.Concurrency.Urgent.MaxActive)
 	}
 	if c.Autonomy.TicketsPerAgent < 1 {
-		add("autonomy.tickets_per_agent: must be at least 1")
+		v.add("autonomy.tickets_per_agent: must be at least 1")
+	}
+	if c.Retention.Transcripts < 0 || c.Retention.Events < 0 {
+		v.add("retention: transcripts and events must be positive durations")
 	}
 	if c.Agents.Nudges < 1 {
-		add("agents.nudges: must be at least 1")
+		v.add("agents.nudges: must be at least 1")
 	}
-	for i, bin := range c.Doctor.Require {
-		if strings.TrimSpace(bin) == "" {
-			add("doctor.require[%d]: is empty", i)
-		}
-	}
-	return errors.Join(errs...)
 }
 
 // Slots is every agent slot, normal and urgent: what the autonomy budget
