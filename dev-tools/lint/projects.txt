@@ -12,6 +12,7 @@ go go-llm-usage
 go go-privacy
 go go-settings
 go go-web
+go slop-bot
 go slop-haus/server
 go slop-review
 go slop-review/report

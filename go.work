@@ -17,6 +17,7 @@ use (
 	./go-privacy
 	./go-settings
 	./go-web
+	./slop-bot
 	./slop-review
 	./slop-review/report
 	./slop-haus/server
