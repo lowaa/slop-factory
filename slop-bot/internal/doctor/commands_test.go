@@ -86,27 +86,37 @@ func TestExecCommandsTakesAnExitThatLeftAChildBehind(t *testing.T) {
 }
 
 // A child that left the probe's group survives the group's end; doctor
-// stops reading what it holds open rather than wait on it.
+// stops reading what it holds open rather than wait on it, with or without
+// Done. The timeout is far past go test's own, so a regression hangs.
 func TestExecCommandsStopsReadingWhatAnEscapedChildHolds(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("setsid"); err != nil {
 		t.Skip("setsid is not installed")
 	}
-	dir := t.TempDir()
-	escaped, pidFile := filepath.Join(dir, "escaped"), filepath.Join(dir, "pid")
-	require.NoError(t, syscall.Mkfifo(escaped, 0o600))
-	// The probe exits only once the child has left its group (the child's
-	// write to the fifo): otherwise the group's end could catch it first.
-	script := `setsid sh -c 'echo $$ > "$0"; exec sleep 3600' "$0" & read pid < "$0"; echo "$pid" > "$1"`
-	res, err := doctor.ExecCommands{Timeout: probeTimeout, WaitDelay: time.Millisecond, GroupDelay: time.Millisecond}.Run(context.Background(),
-		&doctor.Command{Path: "/bin/sh", Args: []string{"-c", script, escaped, pidFile}})
-	require.NoError(t, err)
-	assert.Equal(t, 0, res.ExitCode)
-	b, err := os.ReadFile(pidFile)
-	require.NoError(t, err)
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	require.NoError(t, err)
-	assert.NoError(t, syscall.Kill(pid, syscall.SIGKILL), "the escaped child outlived the group")
+	for name, done := range map[string]func(string) bool{
+		"output":   nil,
+		"a server": func(string) bool { return false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			escaped, pidFile := filepath.Join(dir, "escaped"), filepath.Join(dir, "pid")
+			require.NoError(t, syscall.Mkfifo(escaped, 0o600))
+			// The probe exits only once the child has left its group (the
+			// child's write to the fifo): otherwise the group's end could
+			// catch it first.
+			script := `setsid sh -c 'echo $$ > "$0"; exec sleep 3600' "$0" & read pid < "$0"; echo "$pid" > "$1"`
+			res, err := doctor.ExecCommands{Timeout: 24 * time.Hour, WaitDelay: time.Millisecond, GroupDelay: time.Millisecond}.Run(context.Background(),
+				&doctor.Command{Path: "/bin/sh", Args: []string{"-c", script, escaped, pidFile}, Done: done})
+			require.NoError(t, err)
+			assert.Equal(t, 0, res.ExitCode)
+			b, err := os.ReadFile(pidFile)
+			require.NoError(t, err)
+			pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+			require.NoError(t, err)
+			assert.NoError(t, syscall.Kill(pid, syscall.SIGKILL), "the escaped child outlived the group")
+		})
+	}
 }
 
 func TestExecCommandsRunsWithTheGivenEnvironment(t *testing.T) {
