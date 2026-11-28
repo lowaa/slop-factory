@@ -15,6 +15,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex/protocol"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/rpcdriver"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
 // ErrNoRollout is a resume of a thread Codex has no rollout file for: the
@@ -38,9 +39,14 @@ type codecOptions struct {
 	resumeParams *protocol.ThreadResumeParams
 	// effort is the reasoning effort each turn/start asks for.
 	effort string
-	// permissive approves the server requests that slip through; without
-	// it they are declined (approvals.go).
+	// permissive approves the server requests Codex sends (every command,
+	// when guarded; any that slip through, when not); without it they are
+	// declined (approvals.go).
 	permissive bool
+	// guard, when set, is asked about each command Codex asks to run, as
+	// by, the agent (approvals.go). Only a permissive agent has one.
+	guard Guard
+	by    ident.Principal
 }
 
 // codec speaks Codex's app-server JSON-RPC: requests and their responses,
@@ -294,9 +300,12 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 	if err := json.Unmarshal(line, &m); err != nil {
 		return nil, err
 	}
+	// Before mu: the guard may run git and read state.db, and a Send
+	// needn't wait for that.
+	screened := c.screen(&m)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	evs, err := c.handle(w, &m)
+	evs, err := c.handle(w, &m, screened)
 	if err != nil && len(evs) > 0 {
 		// rpcdriver drops the events of a line that errs, and a lost
 		// TurnEnded would leave the conversation in a turn for ever. The
@@ -308,10 +317,10 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 	return evs, err
 }
 
-func (c *codec) handle(w *rpcdriver.Wire, m *message) ([]harness.Event, error) {
+func (c *codec) handle(w *rpcdriver.Wire, m *message, s *screened) ([]harness.Event, error) {
 	switch {
 	case m.Method != "" && m.ID != nil:
-		return nil, c.answer(w, m)
+		return nil, c.answer(w, m, s)
 	case m.Method != "":
 		return c.notification(w, m)
 	case m.ID != nil:

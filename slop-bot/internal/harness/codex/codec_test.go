@@ -193,7 +193,7 @@ func newFixture(t *testing.T, opts *codecOptions) *fixture {
 	if opts == nil {
 		ws := &harness.Workspace{Dir: "/ws", Permissive: true, Briefing: "brief", Effort: "low"}
 		opts = &codecOptions{effort: ws.Effort, permissive: ws.Permissive}
-		opts.start, opts.resumeParams = threadParams(ws)
+		opts.start, opts.resumeParams = threadParams(ws, false)
 	}
 	opts.logger = slog.New(slog.DiscardHandler)
 	p := &peer{t: t, ids: map[string]json.RawMessage{}}
@@ -464,7 +464,7 @@ func TestALostInterruptRaceIsHarmless(t *testing.T) {
 func resumeOptions() *codecOptions {
 	ws := &harness.Workspace{Dir: "/ws", Permissive: true}
 	opts := &codecOptions{resume: thread, permissive: ws.Permissive}
-	opts.start, opts.resumeParams = threadParams(ws)
+	opts.start, opts.resumeParams = threadParams(ws, false)
 	opts.resumeParams.ThreadID = thread
 	return opts
 }
@@ -498,7 +498,7 @@ func TestResumeOfAMissingThread(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNoRollout)
 }
 
-// The cases below aren't recorded: permissive Codex sends no approvals, and
+// The cases below aren't recorded: an unguarded Codex sends no approvals, and
 // a failed turn needs a failing model. They are written from the schema.
 
 func TestAFailedTurnSaysWhy(t *testing.T) {
@@ -630,7 +630,7 @@ func TestServerRequestsAreDeclinedWithoutPermissiveMode(t *testing.T) {
 			t.Parallel()
 			ws := &harness.Workspace{Dir: "/ws"}
 			opts := &codecOptions{}
-			opts.start, opts.resumeParams = threadParams(ws)
+			opts.start, opts.resumeParams = threadParams(ws, false)
 			f := newFixture(t, opts)
 			_, err := f.c.Decode([]byte(`{"id":1,"method":"`+m+`","params":{"permissions":{"network":{"enabled":true}}}}`), f.w)
 			require.NoError(t, err)

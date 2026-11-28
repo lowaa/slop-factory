@@ -168,7 +168,9 @@ func TestCodexConformance(t *testing.T) {
 			return map[string]any{"cmd": cmd, "yield_time_ms": 30000}
 		}})
 		h := &codex.Harness{
-			Binary: f.bin, Logger: logger(), Clock: clock.Real{},
+			// Guarded, as the daemon runs it: every command goes through
+			// an approval, which must not slow or break anything else.
+			Binary: f.bin, Logger: logger(), Clock: clock.Real{}, Guard: codexGuard(t),
 			// A CODEX_HOME of its own: the user's login, config and
 			// sessions are never read or written.
 			Environ:       environ(t.TempDir(), "CODEX_HOME="+t.TempDir(), "SCRIPTED_MODEL_API_KEY=scripted-model-not-a-real-key"),

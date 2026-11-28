@@ -14,6 +14,7 @@ strict decode in `protocol/protocol_test.go`.
 | `interrupt_refused.jsonl` | `turn/interrupt` after its turn ended |
 | `resume.jsonl` | a fresh app-server's `initialize` and `thread/resume` of the thread above |
 | `resume_missing.jsonl` | `thread/resume` of a thread with no rollout |
+| `turn_guarded.jsonl` | a guarded turn, played after `start.jsonl`: `thread/start` with `approvalPolicy: untrusted`, `approvalsReviewer: user`, `sandbox: danger-full-access`; the scripted model (not the real one) runs `ls`, answered `accept`, then `gh pr merge 12 --squash`, answered `decline` with the reason sent as `turn/steer`, then replies `DONE`. Its `thread/started` and `warning` (no model metadata for `scripted-model-1`) are dropped too |
 
 `rollout.jsonl` is not stdout: it is the rollout file Codex wrote for an
 app-server thread (`thread/start`, then one `turn/start` asking for `cat
@@ -58,6 +59,9 @@ On a Codex version bump, after `go generate ./internal/harness/codex/protocol`:
 5. Delete the recorded threads through Codex (`thread/delete`) so they don't
    stay in the user's `codex resume` list.
 
-The approval requests and failed turns in `codec_test.go` aren't recorded:
-permissive Codex sends no approvals, and a failure needs a failing model.
-They are written from the schema.
+`turn_guarded.jsonl` is recorded against the scripted model (a temp
+`CODEX_HOME`, as tier 2 runs it), with a client that answers each approval
+the way the codec does; the steered text is scrubbed to the guard's
+opening words. The other approval requests and the failed turns in
+`codec_test.go` aren't recorded: an unguarded Codex sends no approvals, and
+a failure needs a failing model. They are written from the schema.

@@ -100,6 +100,12 @@ type AdditionalNetworkPermissions struct {
 	Enabled bool `json:"enabled,omitempty"`
 }
 
+type AdditionalPermissionProfile struct {
+	FileSystem *AdditionalFileSystemPermissions `json:"fileSystem,omitempty"`
+	// Partial overlay used for per-command permission requests.
+	Network *AdditionalNetworkPermissions `json:"network,omitempty"`
+}
+
 type AgentMessageDelivery string
 
 const (
@@ -265,6 +271,47 @@ const (
 	CommandExecutionApprovalDecisionDecline          = "decline"
 	CommandExecutionApprovalDecisionCancel           = "cancel"
 )
+
+// Distinguishes a command approval from input sent to an existing terminal.
+type CommandExecutionApprovalKind string
+
+const (
+	CommandExecutionApprovalKindCommand      CommandExecutionApprovalKind = "command"
+	CommandExecutionApprovalKindWriteStdin   CommandExecutionApprovalKind = "writeStdin"
+	CommandExecutionApprovalKindHumanCommand CommandExecutionApprovalKind = "humanCommand"
+)
+
+type CommandExecutionRequestApprovalParams struct {
+	// Optional additional permissions requested for this command.
+	AdditionalPermissions *AdditionalPermissionProfile `json:"additionalPermissions,omitempty"`
+	// Unique identifier for this specific approval callback.
+	ApprovalID string `json:"approvalId,omitempty"`
+	// Ordered list of decisions the client may present for this prompt.
+	AvailableDecisions []CommandExecutionApprovalDecision `json:"availableDecisions,omitempty"`
+	// The command to be executed.
+	Command string `json:"command,omitempty"`
+	// Best-effort parsed command actions for friendly display.
+	CommandActions []CommandAction `json:"commandActions,omitempty"`
+	// The command's working directory.
+	Cwd LegacyAppPathString `json:"cwd,omitempty"`
+	// Environment in which the command will run.
+	EnvironmentID string `json:"environmentId,omitempty"`
+	ItemID        string `json:"itemId"`
+	// Kind of action under review. Defaults to `command` for older servers.
+	Kind CommandExecutionApprovalKind `json:"kind,omitempty"`
+	// Optional context for a managed-network approval prompt.
+	NetworkApprovalContext *NetworkApprovalContext `json:"networkApprovalContext,omitempty"`
+	// Optional proposed execpolicy amendment to allow similar commands without prompting.
+	ProposedExecpolicyAmendment []string `json:"proposedExecpolicyAmendment,omitempty"`
+	// Optional proposed network policy amendments (allow/deny host) for future requests.
+	ProposedNetworkPolicyAmendments []NetworkPolicyAmendment `json:"proposedNetworkPolicyAmendments,omitempty"`
+	// Optional explanatory reason (e.g. request for network access).
+	Reason string `json:"reason,omitempty"`
+	// Unix timestamp (in milliseconds) when this approval request started.
+	StartedAtMs int64  `json:"startedAtMs"`
+	ThreadID    string `json:"threadId"`
+	TurnID      string `json:"turnId"`
+}
 
 type CommandExecutionRequestApprovalResponse struct {
 	Decision CommandExecutionApprovalDecision `json:"decision"`
@@ -606,6 +653,32 @@ type MultiAgentMode = any
 const (
 	MultiAgentModeExplicitRequestOnly = "explicitRequestOnly"
 	MultiAgentModeProactive           = "proactive"
+)
+
+type NetworkApprovalContext struct {
+	Host     string                  `json:"host"`
+	Protocol NetworkApprovalProtocol `json:"protocol"`
+}
+
+type NetworkApprovalProtocol string
+
+const (
+	NetworkApprovalProtocolHTTP      NetworkApprovalProtocol = "http"
+	NetworkApprovalProtocolHTTPS     NetworkApprovalProtocol = "https"
+	NetworkApprovalProtocolSocks5TCP NetworkApprovalProtocol = "socks5Tcp"
+	NetworkApprovalProtocolSocks5UDP NetworkApprovalProtocol = "socks5Udp"
+)
+
+type NetworkPolicyAmendment struct {
+	Action NetworkPolicyRuleAction `json:"action"`
+	Host   string                  `json:"host"`
+}
+
+type NetworkPolicyRuleAction string
+
+const (
+	NetworkPolicyRuleActionAllow NetworkPolicyRuleAction = "allow"
+	NetworkPolicyRuleActionDeny  NetworkPolicyRuleAction = "deny"
 )
 
 type PatchChangeKind struct {

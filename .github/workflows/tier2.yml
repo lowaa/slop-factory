@@ -25,6 +25,9 @@ on:
       - slop-bot/internal/mergeguard/**
       - slop-bot/internal/cli/hook.go
       - slop-bot/internal/api/guard.go
+      # Codex's guard is built in-process from the real classifier.
+      - slop-bot/internal/tickets/**
+      - slop-bot/internal/gitx/**
       - slop-bot/go.mod
       - slop-bot/go.sum
       - go-clock/**
