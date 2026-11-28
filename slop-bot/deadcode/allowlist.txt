@@ -1,19 +1,13 @@
-# <file> <symbol> #36 (the tracking issue); the plan task that wires each is in the issue
-# Delete the line when that task lands.
+# <file> <symbol> #<ticket that wires it>
+# Delete the line when that ticket merges.
+internal/briefing/ package #36
+internal/control/auth.go NewToken #36
 internal/control/auth.go PrincipalFrom #36
 internal/control/client.go Client.Stream #36
 internal/control/http.go DecodeJSON #36
 internal/control/http.go StatusFor #36
 internal/control/server.go Server.Handle #36
 internal/daemon/daemon.go Daemon.Ready #36
-internal/ident/ident.go AgentPrincipal #36
-internal/paths/paths.go Paths.AgentDir #36
-internal/paths/paths.go Paths.DefaultBriefing #36
-internal/paths/paths.go Paths.TranscriptsDir #36
-internal/sqlitex/ package #36
-internal/sqlitex/sqlitextest/ package #36
-internal/control/auth.go NewToken #36
-internal/harness/conformance/ package #36
 internal/harness/agentproc/env.go AgentEnv #36
 internal/harness/agentproc/process.go Process.Done #36
 internal/harness/agentproc/process.go Process.Err #36
@@ -25,6 +19,8 @@ internal/harness/agentproc/process.go Process.Stderr #36
 internal/harness/agentproc/process.go Start #36
 internal/harness/agentproc/process.go tail.String #36
 internal/harness/agentproc/process.go tail.Write #36
+internal/harness/claudecode/ package #36
+internal/harness/conformance/ package #36
 internal/harness/fake/codec.go codec.Decode #36
 internal/harness/fake/codec.go codec.Interrupt #36
 internal/harness/fake/codec.go codec.Open #36
@@ -46,9 +42,13 @@ internal/harness/rpcdriver/rpcdriver.go Conversation.Interrupt #36
 internal/harness/rpcdriver/rpcdriver.go Conversation.Ref #36
 internal/harness/rpcdriver/rpcdriver.go Conversation.Send #36
 internal/harness/rpcdriver/rpcdriver.go Conversation.Stop #36
+internal/harness/rpcdriver/rpcdriver.go NewWire #36
 internal/harness/rpcdriver/rpcdriver.go Start #36
 internal/harness/rpcdriver/rpcdriver.go Wire.WriteLine #36
-internal/briefing/ package #36
-internal/harness/claudecode/ package #36
-internal/harness/rpcdriver/rpcdriver.go NewWire #36
+internal/ident/ident.go AgentPrincipal #36
+internal/paths/paths.go Paths.AgentDir #36
+internal/paths/paths.go Paths.DefaultBriefing #36
+internal/paths/paths.go Paths.TranscriptsDir #36
+internal/sqlitex/ package #36
+internal/sqlitex/sqlitextest/ package #36
 internal/state/ package #36
