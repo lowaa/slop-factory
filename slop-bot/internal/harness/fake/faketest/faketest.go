@@ -45,13 +45,14 @@ const (
 	// submits needs the second press, and the tests that tell it to run on
 	// a fake clock.
 	confirmTimeout = Timeout / 2
-	// screenPoll is effectively never. The poll is the fallback for what a
-	// harness's hooks don't report, and the fake reports all of it; on the
-	// wall clock it would race the test's scripting: a prompt submitted but
-	// not yet started by the fake, past one poll interval, reads as one that
-	// started no turn, and ends quietly. The poll's own tests run it on a
-	// fake clock.
-	screenPoll = 24 * time.Hour
+	// hookTrust keeps the screen from overriding what a hook said for as
+	// long as a step may take. The fake reports everything by hook, and on
+	// the wall clock the screen would race the test's scripting: a prompt
+	// submitted but not yet started by the fake, a poll interval on, reads
+	// as one that started no turn, and ends quietly. The poll still runs at
+	// the kit's interval, for the held-message retry and the exit watcher's
+	// back-off it also paces; the screen's own tests run on a fake clock.
+	hookTrust = Timeout
 )
 
 // Main is a test package's TestMain body.
@@ -119,6 +120,7 @@ type TUI struct {
 type TUIOptions struct {
 	Clock          clock.Clock
 	PollInterval   time.Duration
+	HookTrust      time.Duration
 	ConfirmTimeout time.Duration
 	// RenderTimeout is on the wall clock whatever Clock is; zero is
 	// renderTimeout.
@@ -136,7 +138,7 @@ func NewTUI(t *testing.T, opts *TUIOptions) *TUI {
 	h := &fake.TUIHarness{
 		Binary: self(t), Control: ctl.Socket(), Host: host, Hub: hub,
 		Pointer: Pointer, Logger: slog.New(slog.DiscardHandler), Clock: clock.Or(opts.Clock),
-		PollInterval: opts.PollInterval, ConfirmTimeout: opts.ConfirmTimeout, RenderTimeout: opts.RenderTimeout,
+		PollInterval: opts.PollInterval, HookTrust: opts.HookTrust, ConfirmTimeout: opts.ConfirmTimeout, RenderTimeout: opts.RenderTimeout,
 	}
 	if h.RenderTimeout == 0 {
 		h.RenderTimeout = renderTimeout
@@ -146,7 +148,7 @@ func NewTUI(t *testing.T, opts *TUIOptions) *TUI {
 
 // TUISubject is fake/tui under the conformance suite.
 func TUISubject(t *testing.T) *conformance.Subject {
-	rig := NewTUI(t, &TUIOptions{PollInterval: screenPoll, ConfirmTimeout: confirmTimeout})
+	rig := NewTUI(t, &TUIOptions{HookTrust: hookTrust, ConfirmTimeout: confirmTimeout})
 	return &conformance.Subject{
 		Harness:   rig.Harness,
 		Workspace: func(t *testing.T) *harness.Workspace { return Workspace(t, "a1") },

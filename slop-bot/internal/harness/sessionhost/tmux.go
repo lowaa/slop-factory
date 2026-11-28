@@ -26,11 +26,11 @@ const DefaultSocket = "slop-bot"
 const diedChannel = "slop-bot-died-"
 
 // helperTimeout bounds the tmux commands WaitExit and Status run for their
-// own bookkeeping (a channel's signal, a reaping child). They answer in
-// milliseconds; the bound only stops a wedged server hanging the caller. It
-// is not the recheck interval: under load a command can outlast a short
-// interval, and one killed before it reached the server leaves undone what
-// it was run for.
+// own bookkeeping (a channel's signal, a reaping child), and the wait for a
+// signalled client to return. They answer in milliseconds; the bound only
+// stops a wedged server hanging the caller. It is not the recheck interval:
+// under load a command can outlast a short interval, and one killed before
+// it reached the server leaves undone what it was run for.
 const helperTimeout = 10 * time.Second
 
 // sessionName is what slop-bot names sessions: it keeps every name safe in a
@@ -46,7 +46,8 @@ type TmuxOptions struct {
 	Socket string
 	// TmpDir is TMUX_TMPDIR, where the socket lives; "" is tmux's default.
 	TmpDir string
-	// ExitRecheck bounds each WaitExit (see there); 0 is a second.
+	// ExitRecheck bounds each WaitExit that its signal ends (see there);
+	// one whose signal is lost takes up to helperTimeout more. 0 is a second.
 	ExitRecheck time.Duration
 	Logger      *slog.Logger
 }

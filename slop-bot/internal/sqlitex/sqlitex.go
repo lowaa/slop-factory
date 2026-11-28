@@ -126,8 +126,9 @@ func (d *DB) Close() error { return d.DB.Close() }
 
 // dsn sets the pragmas on every connection the pool opens, not just the
 // first: foreign keys and busy_timeout are per connection in SQLite.
-// _txlock=immediate takes the write lock at BEGIN, so two write transactions
-// queue on busy_timeout instead of one failing at its first write.
+// _txlock=immediate takes the write lock at BEGIN, so a write transaction
+// waits on busy_timeout (when RunInTx hasn't queued it: another process's)
+// instead of failing at its first write.
 func dsn(path string, durable bool) string {
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")
