@@ -39,6 +39,7 @@ const oversizedPrefix = 64 << 10
 const maxQueued = 1024
 
 var (
+	errExited     = errors.New("rpcdriver: the session has exited")
 	errWireClosed = errors.New("rpcdriver: the harness's input is closed")
 	errWireFull   = errors.New("rpcdriver: the harness isn't reading its input")
 )
@@ -60,10 +61,11 @@ type Wire struct {
 	queue  [][]byte
 	closed bool
 	err    error
-	// queued counts the lines WriteLine took, and written those written to
-	// the pipe whole: a Send's message is out once written reaches the
-	// count its lines were queued at (sent).
+	// queued counts the lines taken, and written those written to the
+	// pipe whole. carrying are the messages lines carry (WriteMessage),
+	// each with its line's count, until that line is written.
 	queued, written uint64
+	carrying        []carried
 }
 
 // NewWire wraps w, writing in WriteLine itself. Codec tests use it to
@@ -79,9 +81,20 @@ func newQueuedWire(wc io.WriteCloser) *Wire {
 	return w
 }
 
+// carried is a message a line carries, and that line's count.
+type carried struct {
+	msg *harness.Message
+	n   uint64
+}
+
 // WriteLine queues b and a newline as one message, or for NewWire's,
 // writes it.
-func (w *Wire) WriteLine(b []byte) error {
+func (w *Wire) WriteLine(b []byte) error { return w.WriteMessage(b, nil) }
+
+// WriteMessage is WriteLine for a line carrying msg, a message Send took:
+// until the line is written whole, msg is Undelivered. It is recorded with
+// the line, in one step, so no exit can fall between them.
+func (w *Wire) WriteMessage(b []byte, msg *harness.Message) error {
 	line := append(append(make([]byte, 0, len(b)+1), b...), '\n')
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -102,22 +115,22 @@ func (w *Wire) WriteLine(b []byte) error {
 	}
 	w.queue = append(w.queue, line)
 	w.queued++
+	if msg != nil {
+		w.carrying = append(w.carrying, carried{msg: msg, n: w.queued})
+	}
 	w.cond.Signal()
 	return nil
 }
 
-// mark is how many lines have been queued so far.
-func (w *Wire) mark() uint64 {
+// unwritten are the messages whose lines aren't yet written whole.
+func (w *Wire) unwritten() []*harness.Message {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.queued
-}
-
-// out says the lines queued up to mark have all been written.
-func (w *Wire) out(mark uint64) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.written >= mark
+	out := make([]*harness.Message, 0, len(w.carrying))
+	for _, c := range w.carrying {
+		out = append(out, c.msg)
+	}
+	return out
 }
 
 func (w *Wire) write() {
@@ -145,6 +158,10 @@ func (w *Wire) write() {
 		}
 		w.mu.Lock()
 		w.written++
+		// Lines are written in order, so the written ones lead.
+		for len(w.carrying) > 0 && w.carrying[0].n <= w.written {
+			w.carrying = w.carrying[1:]
+		}
 		w.mu.Unlock()
 	}
 }
@@ -272,9 +289,14 @@ type Conversation struct {
 	// from it; dispatch reads the rest, so no line can fall between them.
 	lines  chan stdoutLine
 	exited chan struct{}
-	// inflight are the messages Send took whose lines may not have been
-	// written yet (sent).
-	inflight []sentMessage
+	// sendMu keeps a Send and the exit apart: a Send holds it shared from
+	// its check to its codec's return, and the exit takes it whole to mark
+	// the session gone. A message is then either recorded (the codec holds
+	// it, or the Wire carries it) before Exited, or refused.
+	sendMu sync.RWMutex
+	// gone is set as the exit is reported, under sendMu: a Send then is
+	// refused rather than taken by a codec nobody will ask again.
+	gone bool
 }
 
 // Start launches the process and runs the codec's handshake.
@@ -424,6 +446,14 @@ func (c *Conversation) dispatch() {
 	if code != 0 {
 		exitErr = fmt.Errorf("%s exited with status %d: %s", c.opts.Harness, code, lastLine(c.proc.Stderr()))
 	}
+	// No Send is between its check and its codec's return (sendMu), so
+	// whatever one took is recorded by now, for Undelivered; later ones are
+	// refused.
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	c.mu.Lock()
+	c.gone = true
+	c.mu.Unlock()
 	c.setTurn(false)
 	c.events.Push(harness.Event{Kind: harness.Exited, At: c.opts.Clock.Now(), ExitCode: code, Err: exitErr})
 	c.events.Close()
@@ -487,7 +517,15 @@ func (c *Conversation) Ref() harness.ConversationRef {
 // it: otherwise a graceful Stop landing between the write and the harness's
 // turn-start would see no turn, close stdin, and cut the turn off.
 func (c *Conversation) Send(ctx context.Context, msg *harness.Message) error {
+	// A codec's Send never waits on the harness (its writes are queued), so
+	// holding this across it holds up the exit only as long as that takes.
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
 	c.mu.Lock()
+	if c.gone {
+		c.mu.Unlock()
+		return errExited
+	}
 	mid := c.inTurn
 	c.mu.Unlock()
 	if !mid {
@@ -499,31 +537,7 @@ func (c *Conversation) Send(ctx context.Context, msg *harness.Message) error {
 		}
 		return err
 	}
-	c.sent(msg)
 	return nil
-}
-
-// sentMessage is a message Send took, and the Wire's mark once its lines
-// were queued.
-type sentMessage struct {
-	msg  *harness.Message
-	mark uint64
-}
-
-// sent notes msg as taken but perhaps not yet written: Send returns once
-// its lines are queued, and the caller marks it delivered, so one the
-// harness exits before reading is Undelivered.
-func (c *Conversation) sent(msg *harness.Message) {
-	mark := c.wire.mark()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	kept := c.inflight[:0]
-	for _, s := range c.inflight {
-		if !c.wire.out(s.mark) {
-			kept = append(kept, s)
-		}
-	}
-	c.inflight = append(kept, sentMessage{msg: msg, mark: mark})
 }
 
 // Interrupt implements harness.Conversation.
@@ -584,7 +598,7 @@ func (c *Conversation) kill(ctx context.Context) error {
 }
 
 // Undelivered implements harness.Conversation: what the codec still holds,
-// and what Send queued that never reached the harness's stdin whole.
+// and the messages whose lines never reached the harness's stdin whole.
 func (c *Conversation) Undelivered() []*harness.Message {
 	var out []*harness.Message
 	if h, ok := c.opts.Codec.(Holder); ok {
@@ -594,11 +608,9 @@ func (c *Conversation) Undelivered() []*harness.Message {
 	for _, m := range out {
 		held[m] = true
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, s := range c.inflight {
-		if !held[s.msg] && !c.wire.out(s.mark) {
-			out = append(out, s.msg)
+	for _, m := range c.wire.unwritten() {
+		if !held[m] {
+			out = append(out, m)
 		}
 	}
 	return out

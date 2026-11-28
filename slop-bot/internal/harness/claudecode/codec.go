@@ -54,7 +54,7 @@ type textContent struct {
 // absorbs it into the running turn at the next model call (protocol spike),
 // so it steers rather than queueing a new turn.
 func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, _ bool) error {
-	return write(w, userRecord{
+	return writeCarrying(w, msg, userRecord{
 		Type:    "user",
 		Message: userMessage{Role: "user", Content: []textContent{{Type: "text", Text: msg.Text}}},
 	})
@@ -242,10 +242,14 @@ func unixOrZero(s int64) time.Time {
 	return time.Unix(s, 0).UTC()
 }
 
-func write(w *rpcdriver.Wire, v any) error {
+func write(w *rpcdriver.Wire, v any) error { return writeCarrying(w, nil, v) }
+
+// writeCarrying writes v, a line that carries msg (nil for none): until it
+// is written, msg is Undelivered (rpcdriver.Wire.WriteMessage).
+func writeCarrying(w *rpcdriver.Wire, msg *harness.Message, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("claudecode: encoding: %w", err)
 	}
-	return w.WriteLine(b)
+	return w.WriteMessage(b, msg)
 }

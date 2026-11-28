@@ -22,7 +22,7 @@ import (
 type lineCodec struct{ readyCodec }
 
 func (lineCodec) Send(_ context.Context, w *Wire, msg *harness.Message, _ bool) error {
-	return w.WriteLine([]byte(msg.Text))
+	return w.WriteMessage([]byte(msg.Text), msg)
 }
 
 // A Send never waits on the harness reading its stdin: one that did held a

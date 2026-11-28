@@ -30,7 +30,7 @@ func (codec) Open(ctx context.Context, w *rpcdriver.Wire, next func(context.Cont
 }
 
 func (codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, _ bool) error {
-	return writeJSON(w, inMsg{Op: "user", Text: msg.Text, From: msg.From.String()})
+	return writeCarrying(w, msg, inMsg{Op: "user", Text: msg.Text, From: msg.From.String()})
 }
 
 func (codec) Interrupt(_ context.Context, w *rpcdriver.Wire) error {
@@ -66,10 +66,14 @@ func (codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) {
 	}
 }
 
-func writeJSON(w *rpcdriver.Wire, v any) error {
+func writeJSON(w *rpcdriver.Wire, v any) error { return writeCarrying(w, nil, v) }
+
+// writeCarrying writes v, a line that carries msg (nil for none): until it
+// is written, msg is Undelivered (rpcdriver.Wire.WriteMessage).
+func writeCarrying(w *rpcdriver.Wire, msg *harness.Message, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return w.WriteLine(b)
+	return w.WriteMessage(b, msg)
 }

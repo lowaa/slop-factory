@@ -201,7 +201,7 @@ func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message,
 func (c *codec) prompt(w *rpcdriver.Wire, p *pending) error {
 	id := c.nextID()
 	c.prompts[id] = p
-	if err := write(w, command{ID: id, Type: "prompt", Message: p.msg.Text, StreamingBehavior: "steer"}); err != nil {
+	if err := writeCarrying(w, p.msg, command{ID: id, Type: "prompt", Message: p.msg.Text, StreamingBehavior: "steer"}); err != nil {
 		delete(c.prompts, id)
 		return err
 	}
@@ -549,10 +549,16 @@ func (c *codec) bridged(r *record, d *disposition, msg *harness.Message) []harne
 	return b.end
 }
 
-func write(w *rpcdriver.Wire, v any) error {
+func write(w *rpcdriver.Wire, v any) error { return writeCarrying(w, nil, v) }
+
+// writeCarrying writes v, a line that carries msg (nil for none): until it
+// is written, msg is Undelivered (rpcdriver.Wire.WriteMessage). A held
+// message resent goes this way too, so one queued when pi exits is still
+// accounted for.
+func writeCarrying(w *rpcdriver.Wire, msg *harness.Message, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("pi: encoding: %w", err)
 	}
-	return w.WriteLine(b)
+	return w.WriteMessage(b, msg)
 }

@@ -100,8 +100,8 @@ const (
 
 type request struct {
 	kind requestKind
-	// msg and turn are a steer's message and the turn it named, for when
-	// the steer is refused.
+	// msg is the message a turn/start or a steer carries; with turn, the
+	// turn a steer named, for when the steer is refused.
 	msg  *harness.Message
 	turn string
 	// decline is the command approval a guard's refusal answers once this
@@ -226,7 +226,7 @@ func (c *codec) request(w *rpcdriver.Wire, r *request, method string, params any
 		return 0, fmt.Errorf("codex: encoding %s: %w", method, err)
 	}
 	c.pending[id] = r
-	if err := write(w, &message{ID: json.RawMessage(fmt.Sprint(id)), Method: method, Params: b}); err != nil {
+	if err := writeCarrying(w, &message{ID: json.RawMessage(fmt.Sprint(id)), Method: method, Params: b}, r.msg); err != nil {
 		delete(c.pending, id)
 		return 0, err
 	}
@@ -270,13 +270,13 @@ func (c *codec) deliver(w *rpcdriver.Wire, msg *harness.Message) error {
 		})
 		return err
 	}
-	return c.startTurn(w, msg.Text)
+	return c.startTurn(w, msg)
 }
 
-func (c *codec) startTurn(w *rpcdriver.Wire, text string) error {
+func (c *codec) startTurn(w *rpcdriver.Wire, msg *harness.Message) error {
 	c.starting = true
-	_, err := c.request(w, &request{kind: reqTurn}, protocol.MethodTurnStart, &protocol.TurnStartParams{
-		ThreadID: c.threadID, Input: textInput(text), Effort: protocol.ReasoningEffort(c.opts.effort),
+	_, err := c.request(w, &request{kind: reqTurn, msg: msg}, protocol.MethodTurnStart, &protocol.TurnStartParams{
+		ThreadID: c.threadID, Input: textInput(msg.Text), Effort: protocol.ReasoningEffort(c.opts.effort),
 	})
 	if err != nil {
 		c.starting = false
@@ -518,7 +518,7 @@ func (c *codec) turnCompleted(w *rpcdriver.Wire, params json.RawMessage) ([]harn
 	if next {
 		msg := c.queued[0]
 		c.queued = c.queued[1:]
-		return evs, c.startTurn(w, msg.Text)
+		return evs, c.startTurn(w, msg)
 	}
 	return evs, nil
 }
@@ -650,10 +650,14 @@ func limitOf(window string, win *protocol.RateLimitWindow) *harness.Limit {
 	return l
 }
 
-func write(w *rpcdriver.Wire, m *message) error {
+func write(w *rpcdriver.Wire, m *message) error { return writeCarrying(w, m, nil) }
+
+// writeCarrying writes m, a line that carries msg (nil for none): until it
+// is written, msg is Undelivered (rpcdriver.Wire.WriteMessage).
+func writeCarrying(w *rpcdriver.Wire, m *message, msg *harness.Message) error {
 	b, err := json.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("codex: encoding: %w", err)
 	}
-	return w.WriteLine(b)
+	return w.WriteMessage(b, msg)
 }
