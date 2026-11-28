@@ -160,7 +160,7 @@ func (m *Manager) finish(ctx context.Context, r *runner, summary string) {
 			m.opts.Logger.Warn("agents: posting the summary", "agent", r.id, "err", err)
 		}
 	}
-	m.advanceTo(ctx, r.ticket, tickets.StatusDone)
+	m.advanceTo(ctx, by, r.ticket, tickets.StatusDone)
 	_ = r.conv.Stop(ctx, false)
 	go func() {
 		<-r.exited
@@ -198,9 +198,10 @@ func (m *Manager) cleanup(ctx context.Context, r *runner) {
 }
 
 // advanceTo walks a ticket forward to target through the statuses the
-// rules allow (preparing → open → in_progress → done), as slop-bot acting
-// for the user.
-func (m *Manager) advanceTo(ctx context.Context, id ident.TicketID, target tickets.Status) {
+// rules allow (preparing → open → in_progress → done), as the ticket's
+// agent: an agent can't reopen a ticket, so a move made on a stale read
+// can't undo a ticket that has meanwhile finished.
+func (m *Manager) advanceTo(ctx context.Context, by ident.Principal, id ident.TicketID, target tickets.Status) {
 	path := []tickets.Status{tickets.StatusOpen, tickets.StatusInProgress, tickets.StatusDone}
 	t, err := m.opts.Tickets.Get(ctx, id)
 	if err != nil {
@@ -210,11 +211,11 @@ func (m *Manager) advanceTo(ctx context.Context, id ident.TicketID, target ticke
 		if t.Status == target || t.Status.Terminal() {
 			return
 		}
-		if !tickets.CanTransition(t.Status, next) {
+		if next == t.Status || !tickets.CanTransition(t.Status, next) {
 			continue
 		}
 		st := next
-		if t, err = m.opts.Tickets.Update(ctx, ident.UserPrincipal(), id, &tickets.TicketChange{Status: &st}); err != nil {
+		if t, err = m.opts.Tickets.Update(ctx, by, id, &tickets.TicketChange{Status: &st}); err != nil {
 			m.opts.Logger.Warn("agents: moving a ticket", "ticket", id, "to", next, "err", err)
 			return
 		}

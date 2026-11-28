@@ -111,7 +111,6 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 	case harness.TurnStarted:
 		r.mu.Lock()
 		r.inTurn = true
-		r.decl, r.summary = declNone, ""
 		r.mu.Unlock()
 		r.setState(ctx, r.workingState(ctx), "turn started")
 	case harness.ToolStarted, harness.ToolEnded, harness.Text:
@@ -142,9 +141,20 @@ func (r *runner) workingState(ctx context.Context) state.AgentState {
 }
 
 func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
+	// The declaration is consumed here, not cleared when a turn starts: the
+	// agent's CLI call can land before this goroutine has even seen the
+	// turn start.
 	r.mu.Lock()
-	decl, summary := r.decl, r.summary
+	decl, summary, stopping := r.decl, r.summary, r.stopping
+	if !stopping {
+		r.decl, r.summary = declNone, ""
+	}
 	r.mu.Unlock()
+	// Draining for a daemon stop: start nothing new. The agent keeps its
+	// state, so a resume knows it was mid-work and says so.
+	if stopping && decl != declDone {
+		return
+	}
 	if decl == declDone {
 		r.m.finish(ctx, r, summary)
 		return

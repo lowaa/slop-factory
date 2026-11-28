@@ -166,7 +166,9 @@ func (m *Manager) deliverPending(ctx context.Context, r *runner) bool {
 			m.opts.Logger.Warn("agents: marking delivered", "message", msg.ID, "err", err)
 		}
 	}
-	_ = m.opts.State.Agents.ResetNudges(ctx, r.id)
+	if !onlyNudges(pending) {
+		_ = m.opts.State.Agents.ResetNudges(ctx, r.id)
+	}
 	m.event(ctx, EventDelivered, r.id, r.ticket, map[string]any{"count": len(pending), "path": string(path)})
 	return true
 }
@@ -180,7 +182,7 @@ func render(msgs []state.Message) string {
 			b.WriteString("\n\n")
 		}
 		switch {
-		case msg.Kind == state.KindSystem:
+		case msg.Kind == state.KindSystem || msg.Kind == state.KindNudge:
 			fmt.Fprintf(&b, "[slop-bot] %s", msg.Body)
 		case msg.From == state.UserParty:
 			fmt.Fprintf(&b, "[slop-bot] Message from the user (it carries the user's authority):\n%s", msg.Body)
@@ -207,7 +209,22 @@ func (m *Manager) nudge(ctx context.Context, r *runner) {
 	}
 	r.setState(ctx, state.StateIdle, "nudged")
 	m.event(ctx, EventNudged, r.id, r.ticket, map[string]int{"nudge": n})
-	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: "[slop-bot] " + nudgeText}); err != nil {
+	// Through the inbox like any message, so a nudge waits its turn for a
+	// slot rather than jumping an agent with an answer to act on.
+	if _, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{
+		From: state.UserParty, To: state.AgentParty(r.id), Kind: state.KindNudge, Body: nudgeText,
+	}); err != nil {
 		m.opts.Logger.Warn("agents: nudging", "agent", r.id, "err", err)
+		return
 	}
+	m.deliverPending(ctx, r)
+}
+
+func onlyNudges(msgs []state.Message) bool {
+	for _, msg := range msgs {
+		if msg.Kind != state.KindNudge {
+			return false
+		}
+	}
+	return true
 }

@@ -136,6 +136,14 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 	require.NoError(t, err)
 	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, clock: clk, cfg: cfg, paths: p,
 		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}}
+	t.Cleanup(func() {
+		if t.Failed() {
+			evs, _ := st.Events.ReadAfter(context.Background(), 0, 500)
+			for _, e := range evs {
+				t.Logf("event %d %s %s %s %s", e.Seq, e.Type, e.Agent, e.Ticket, e.Payload)
+			}
+		}
+	})
 	f.mgr = f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: ctl.Socket(), Logger: quiet, Clock: clock.Real{}}})
 	require.NoError(t, f.mgr.Start(ctx))
 	t.Cleanup(func() { _ = f.mgr.Stop(context.Background()) })
@@ -149,7 +157,7 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 func (f *fixture) newManager(h agents.Harnesses) *agents.Manager {
 	m, err := agents.New(&agents.Options{
 		Config: f.cfg, Paths: f.paths, State: f.state, Tickets: f.tickets, Harnesses: h,
-		Worktrees: f.wts, User: "ada", Logger: slog.New(slog.DiscardHandler), Clock: f.clock, CLI: "/usr/bin/slop-bot",
+		Worktrees: f.wts, User: "ada", Logger: slog.New(slog.NewTextHandler(testWriter{f.t}, nil)), Clock: f.clock, CLI: "/usr/bin/slop-bot",
 	})
 	require.NoError(f.t, err)
 	return m
@@ -372,6 +380,11 @@ func TestAnAnsweredAgentWaitsForASlotAheadOfNewWork(t *testing.T) {
 
 	_, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), string(a1.ID), "go ahead", false)
 	require.NoError(t, err)
+	// Tell delivers synchronously when it can: with the only slot taken, the
+	// answer must still be waiting.
+	pending, err := f.state.Messages.Pending(context.Background(), state.AgentParty(a1.ID))
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "delivered while another agent held the only slot")
 	third := f.file("third", nil)
 
 	f.do(s2, fake.Command{Cmd: fake.CmdTurnEnd}) // frees the slot
@@ -486,4 +499,12 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 	note := f.user(resumed)
 	assert.Contains(t, note.Text, "slop-bot restarted")
 	_ = tk
+}
+
+// testWriter sends the Manager's logs to the test's, shown on failure.
+type testWriter struct{ t *testing.T }
+
+func (w testWriter) Write(p []byte) (int, error) {
+	w.t.Log(string(p))
+	return len(p), nil
 }

@@ -53,7 +53,7 @@ func (m *Manager) onTicketEvent(ctx context.Context, ev *tickets.TicketEvent) {
 	}
 	switch {
 	case t.Status == tickets.StatusOpen && len(t.BlockedBy) == 0:
-		m.advanceTo(ctx, t.ID, tickets.StatusInProgress)
+		m.advanceTo(ctx, ident.AgentPrincipal(a.ID, a.Ticket), t.ID, tickets.StatusInProgress)
 		if ev.Kind == tickets.EventUnblocked {
 			_, _ = m.Tell(ctx, ident.UserPrincipal(), string(a.ID), "Your ticket's blockers are done: start the work.", false)
 		}
@@ -86,7 +86,9 @@ func (m *Manager) evaluate(ctx context.Context) {
 		if t.Urgent {
 			pool = state.PoolUrgent
 		}
-		if !m.slotFree(pool, "") || m.liveCount() >= m.opts.Config.Concurrency.MaxLive {
+		// New work never jumps an agent already queued for a slot, even
+		// when a slot has freed since the queue was served.
+		if m.queued(pool) || !m.slotFree(pool, "") || m.liveCount() >= m.opts.Config.Concurrency.MaxLive {
 			continue
 		}
 		if err := m.spawn(ctx, t, pool); err != nil && !errors.Is(err, errMisconfigured) {
@@ -135,10 +137,23 @@ func (m *Manager) slotFree(pool state.Pool, except ident.AgentID) bool {
 	return n < limit
 }
 
-// takeSlot claims a slot for an idle agent about to take a turn; when none
-// is free it joins the queue, ahead of new work, and reports false.
+// takeSlot claims a slot for an idle agent about to take a turn. Agents
+// queued for a slot are served in order, ahead of new work: one that isn't
+// at the front waits even when a slot is free, and joins the queue.
 func (m *Manager) takeSlot(r *runner) bool {
-	if m.slotFree(r.pool, r.id) {
+	m.mu.Lock()
+	ahead := false
+	for _, id := range m.wantSlot {
+		if id == r.id {
+			break
+		}
+		if other, ok := m.runners[id]; ok && other.pool == r.pool {
+			ahead = true
+			break
+		}
+	}
+	m.mu.Unlock()
+	if !ahead && m.slotFree(r.pool, r.id) {
 		m.mu.Lock()
 		m.wantSlot = slices.DeleteFunc(m.wantSlot, func(id ident.AgentID) bool { return id == r.id })
 		m.mu.Unlock()
@@ -154,6 +169,18 @@ func (m *Manager) takeSlot(r *runner) bool {
 		m.wantSlot = append(m.wantSlot, r.id)
 	}
 	m.mu.Unlock()
+	return false
+}
+
+// queued reports whether an agent in pool is waiting for a slot.
+func (m *Manager) queued(pool state.Pool) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range m.wantSlot {
+		if r, ok := m.runners[id]; ok && r.pool == pool {
+			return true
+		}
+	}
 	return false
 }
 

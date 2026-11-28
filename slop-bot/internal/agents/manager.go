@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/lowaa/slop-factory/go-clock"
@@ -93,7 +94,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err := m.resumeAll(ctx); err != nil {
 		return err
 	}
-	go m.schedule()
+	go m.schedule() // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
 	m.Kick()
 	return nil
 }
@@ -110,6 +111,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.stopping = true
 	runners := make([]*runner, 0, len(m.runners))
 	for _, r := range m.runners {
+		r.mu.Lock()
+		r.stopping = true
+		r.mu.Unlock()
 		runners = append(runners, r)
 	}
 	m.mu.Unlock()
@@ -141,6 +145,8 @@ func (m *Manager) runner(id ident.AgentID) (*runner, bool) {
 func (m *Manager) forget(id ident.AgentID) {
 	m.mu.Lock()
 	delete(m.runners, id)
+	// A gone agent mustn't hold its pool's queue.
+	m.wantSlot = slices.DeleteFunc(m.wantSlot, func(w ident.AgentID) bool { return w == id })
 	m.mu.Unlock()
 	m.Kick()
 }
