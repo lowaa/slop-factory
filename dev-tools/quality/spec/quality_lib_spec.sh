@@ -288,6 +288,14 @@ Describe 'quality_lib.sh'
       End
     End
 
+    It 'runs each of several runs afresh, even with nothing timed'
+      fresh_runs() { calls 'go test -race -count=1 ' | wc -l | tr -d ' '; }
+      When call quality_go "$(project)" --runs=2 --only=coverage
+      The status should be success
+      The stderr should include '(run 2)'
+      The result of function fresh_runs should eq 2
+    End
+
     It 'lets --runs override coverage_runs'
       mkdir -p "$(project)/quality_baseline" && echo 3 > "$(project)/quality_baseline/coverage_runs"
       When call quality_go "$(project)" --prune --runs=1

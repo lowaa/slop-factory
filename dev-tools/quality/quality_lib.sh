@@ -176,9 +176,10 @@ quality_go_test() {
     return 2
   }
   mapfile -t pkgs <<< "${listed}"
-  # A cached result replays in milliseconds, so timing it needs a real run.
+  # A cached result replays in milliseconds, so timing it needs a real run;
+  # and one of several runs (RUN given) would replay the first's coverage.
   local count=()
-  [[ ",${QUALITY_ONLY}," != *,testtime,* ]] || count=(-count=1)
+  [[ ",${QUALITY_ONLY}," != *,testtime,* && -z "${3:-}" ]] || count=(-count=1)
   echo "== go test -race ${count[*]:+${count[*]} }-coverpkg=<the module's ${#pkgs[@]} packages> ./...${3:+ (run $3)}" >&2
   go test -race "${count[@]}" -coverprofile="${dir}/cover${run}.out" -coverpkg="$(
     IFS=,
