@@ -98,7 +98,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 	go m.schedule() // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
-	go m.sweeper()
+	go m.sweeper()  // #nosec G118 -- like the scheduler, it runs until Stop
 	m.Kick()
 	return nil
 }

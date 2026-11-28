@@ -120,6 +120,48 @@ func (m *Manager) Attach(ctx context.Context, req *AttachRequest) (*Attachment, 
 }
 
 func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, req *AttachRequest) (*Attachment, error) {
+	plan, err := m.stopForAttach(ctx, r, a, req)
+	if err != nil {
+		return nil, err
+	}
+	// What follows outlives the request too: see stopForAttach.
+	ctx = context.WithoutCancel(ctx)
+	att := &Attachment{Agent: a}
+	if t, err := m.opts.Tickets.Get(ctx, a.Ticket); err == nil {
+		att.Title = t.Title
+	}
+	if req.NoResume {
+		r.setAttaching(false)
+		r.setState(ctx, state.StateReleased, "released to "+req.Holder)
+		m.dropLease(ctx, a.ID, req.Holder)
+		m.forget(a.ID)
+		att.Released, att.Command = true, plan.Command
+		m.event(ctx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "released": true})
+		return att, nil
+	}
+	r.setState(ctx, state.StateAttached, "attached by "+req.Holder)
+	r.setAttaching(false)
+	token, err := m.rotateToken(ctx, a.ID)
+	if err != nil {
+		// Nobody will run its TUI: hand it straight back, lease first as the
+		// expiry sweep does; Attach's own release then finds nothing to do.
+		m.dropLease(ctx, a.ID, req.Holder)
+		_, _ = m.handBack(ctx, a.ID, "the attach failed: "+err.Error())
+		return nil, err
+	}
+	att.Command = withEnv(plan.Command, control.TokenEnv, token)
+	att.Held, err = m.opts.State.Messages.Pending(ctx, state.AgentParty(a.ID))
+	if err != nil {
+		m.opts.Logger.Warn("agents: reading held messages", "agent", a.ID, "err", err)
+	}
+	m.event(ctx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "now": req.Now})
+	return att, nil
+}
+
+// stopForAttach stops r's conversation for an attach, once its turn has
+// settled (or, with Now, after interrupting it), and returns how to hand it
+// over. r is left attaching: it holds its slot and its messages.
+func (m *Manager) stopForAttach(ctx context.Context, r *runner, a *state.Agent, req *AttachRequest) (*harness.AttachPlan, error) {
 	r.mu.Lock()
 	switch {
 	case r.stopping:
@@ -137,9 +179,7 @@ func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, req *
 		err = fmt.Errorf("%w: %s attaches by joining its session, which isn't supported yet", ErrNoHandOver, a.Harness)
 	}
 	if err != nil {
-		r.mu.Lock()
-		r.attaching = false
-		r.mu.Unlock()
+		r.setAttaching(false)
 		if !errors.Is(err, ErrNoHandOver) {
 			err = fmt.Errorf("%w: %w", ErrNoHandOver, err)
 		}
@@ -164,45 +204,7 @@ func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, req *
 		// is stopping: either way there's nothing to attach to.
 		return nil, fmt.Errorf("%w: agent %s finished while its turn settled", ErrNoLiveAgent, a.ID)
 	}
-	att := &Attachment{Agent: a}
-	if t, err := m.opts.Tickets.Get(ctx, a.Ticket); err == nil {
-		att.Title = t.Title
-	}
-	if req.NoResume {
-		r.mu.Lock()
-		r.attaching = false
-		r.mu.Unlock()
-		r.setState(stopCtx, state.StateReleased, "released to "+req.Holder)
-		m.dropLease(stopCtx, a.ID, req.Holder)
-		m.forget(a.ID)
-		att.Released = true
-		att.Command = plan.Command
-		m.event(stopCtx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "released": true})
-		return att, nil
-	}
-	token, err := m.rotateToken(stopCtx, a.ID)
-	if err != nil {
-		// The conversation is stopped and nobody will run its TUI: hand it
-		// straight back.
-		r.setState(stopCtx, state.StateAttached, "attach failed")
-		r.mu.Lock()
-		r.attaching = false
-		r.mu.Unlock()
-		m.dropLease(stopCtx, a.ID, req.Holder)
-		_, _ = m.handBack(stopCtx, a.ID, "the attach failed: "+err.Error())
-		return nil, err
-	}
-	att.Command = withEnv(plan.Command, control.TokenEnv, token)
-	r.setState(stopCtx, state.StateAttached, "attached by "+req.Holder)
-	r.mu.Lock()
-	r.attaching = false
-	r.mu.Unlock()
-	att.Held, err = m.opts.State.Messages.Pending(stopCtx, state.AgentParty(a.ID))
-	if err != nil {
-		m.opts.Logger.Warn("agents: reading held messages", "agent", a.ID, "err", err)
-	}
-	m.event(stopCtx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "now": req.Now})
-	return att, nil
+	return plan, nil
 }
 
 // LiveAgent is the live agent target names: an agent id, or a ticket id.
@@ -211,9 +213,9 @@ func (m *Manager) LiveAgent(ctx context.Context, target string) (*state.Agent, e
 }
 
 // dropLease releases a lease the caller holds, where failing to is only
-// worth a log: it would expire anyway.
+// worth a log: it would expire anyway. One already released is fine.
 func (m *Manager) dropLease(ctx context.Context, id ident.AgentID, holder string) {
-	if err := m.opts.State.Agents.ReleaseLease(ctx, id, holder); err != nil {
+	if err := m.opts.State.Agents.ReleaseLease(ctx, id, holder); err != nil && !errors.Is(err, state.ErrConflict) {
 		m.opts.Logger.Warn("agents: releasing an attach lease", "agent", id, "err", err)
 	}
 }

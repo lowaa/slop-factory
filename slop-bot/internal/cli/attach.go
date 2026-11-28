@@ -117,49 +117,52 @@ func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequ
 	}
 	at.agent = att.Agent
 	at.show(att)
-	if att.Command == nil {
-		_ = body.Close()
-		return errors.New("attach: the daemon gave no TUI to run")
-	}
-	child := exec.CommandContext(ctx, att.Command.Path, att.Command.Args...) // #nosec G204 -- the daemon's own harness command, for the user's own terminal
-	child.Env, child.Dir = att.Command.Env, att.Command.Dir
-	child.Stdin, child.Stdout, child.Stderr = at.stdin, at.stdout, at.stderr
 	// The TUI owns the terminal's signals: Ctrl-C and Ctrl-\ are its, and
 	// this process only passes on what would otherwise end it.
 	sigs := make(chan os.Signal, 4)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(sigs)
-	if err := child.Start(); err != nil {
+	tui, err := at.startTUI(ctx, att.Command)
+	if err != nil || att.Released {
 		_ = body.Close()
+	}
+	if err != nil {
 		if !att.Released {
 			at.handBack(ctx)
 		}
-		return fmt.Errorf("attach: starting the TUI: %w", err)
+		return err
 	}
-	exited := make(chan error, 1)
-	go func() { exited <- child.Wait() }()
 	if att.Released {
-		_ = body.Close()
+		// Nothing to hand back: just stay in the foreground until it quits.
 		for {
 			select {
 			case s := <-sigs:
-				forward(child, s)
-			case <-exited:
+				tui.forward(s)
+			case <-tui.exited:
 				return nil
 			}
 		}
 	}
-	if err := at.client.Do(ctx, http.MethodPost, agentPath(api.PathLaunched, at.agent), &api.Launched{Holder: at.holder, PID: child.Process.Pid}, nil); err != nil {
+	if err := at.client.Do(ctx, http.MethodPost, agentPath(api.PathLaunched, at.agent), &api.Launched{Holder: at.holder, PID: tui.cmd.Process.Pid}, nil); err != nil {
 		at.say("slop-bot: couldn't tell the daemon the TUI's pid: %v", err)
 	}
 	frames := make(chan api.AttachFrame)
 	go at.follow(streamCtx, body, frames)
-	lost := false
-	var kill *time.Timer
+	if at.supervise(tui, sigs, frames) {
+		at.handBack(ctx)
+	}
+	return nil
+}
+
+// supervise waits for the TUI to exit, ending it when the daemon detaches
+// it or reports the attach over. It reports whether the agent still needs
+// handing back.
+func (at *attachRun) supervise(tui *tuiProcess, sigs <-chan os.Signal, frames <-chan api.AttachFrame) bool {
+	handBack := true
 	for {
 		select {
 		case s := <-sigs:
-			forward(child, s)
+			tui.forward(s)
 		case f, ok := <-frames:
 			if !ok {
 				frames = nil
@@ -168,22 +171,64 @@ func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequ
 			switch f.Type {
 			case api.FrameDetach:
 				at.say("\r\nslop-bot: detached from another terminal; ending the TUI.")
-				kill = end(child)
+				tui.end()
 			case api.FrameEnded:
 				at.say("\r\nslop-bot: the agent was handed back without this terminal (%s); ending the TUI.", f.Reason)
-				lost = true
-				kill = end(child)
+				handBack = false
+				tui.end()
 			}
-		case <-exited:
-			if kill != nil {
-				kill.Stop()
-			}
-			if lost {
-				return nil
-			}
-			at.handBack(ctx)
-			return nil
+		case <-tui.exited:
+			tui.stopKill()
+			return handBack
 		}
+	}
+}
+
+// tuiProcess is the harness's TUI, running in the person's terminal.
+type tuiProcess struct {
+	cmd    *exec.Cmd
+	exited chan struct{}
+	kill   *time.Timer
+}
+
+func (at *attachRun) startTUI(ctx context.Context, c *api.Command) (*tuiProcess, error) {
+	if c == nil {
+		return nil, errors.New("attach: the daemon gave no TUI to run")
+	}
+	cmd := exec.CommandContext(ctx, c.Path, c.Args...) // #nosec G204 -- the daemon's own harness command, for the user's own terminal
+	cmd.Env, cmd.Dir = c.Env, c.Dir
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = at.stdin, at.stdout, at.stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("attach: starting the TUI: %w", err)
+	}
+	t := &tuiProcess{cmd: cmd, exited: make(chan struct{})}
+	go func() {
+		// Its exit status is the person's business, not the attach's.
+		_ = cmd.Wait()
+		close(t.exited)
+	}()
+	return t, nil
+}
+
+// forward passes on the signals that would end this process, so the TUI
+// ends with it; the terminal sends Ctrl-C and the like to the TUI itself.
+func (t *tuiProcess) forward(s os.Signal) {
+	if s == syscall.SIGTERM || s == syscall.SIGHUP {
+		_ = t.cmd.Process.Signal(s)
+	}
+}
+
+// end asks the TUI to quit, and kills it if it hasn't after a grace.
+func (t *tuiProcess) end() {
+	_ = t.cmd.Process.Signal(syscall.SIGTERM)
+	if t.kill == nil {
+		t.kill = time.AfterFunc(tuiTermGrace, func() { _ = t.cmd.Process.Kill() })
+	}
+}
+
+func (t *tuiProcess) stopKill() {
+	if t.kill != nil {
+		t.kill.Stop()
 	}
 }
 
@@ -314,18 +359,4 @@ func (at *attachRun) show(att *api.Attachment) {
 
 func (at *attachRun) say(format string, args ...any) {
 	_, _ = fmt.Fprintf(at.stderr, format+"\r\n", args...)
-}
-
-// forward passes on the signals that would end this process, so the TUI
-// ends with it; the terminal sends Ctrl-C and the like to the TUI itself.
-func forward(child *exec.Cmd, s os.Signal) {
-	if s == syscall.SIGTERM || s == syscall.SIGHUP {
-		_ = child.Process.Signal(s)
-	}
-}
-
-// end asks the TUI to quit, and kills it if it hasn't after a grace.
-func end(child *exec.Cmd) *time.Timer {
-	_ = child.Process.Signal(syscall.SIGTERM)
-	return time.AfterFunc(tuiTermGrace, func() { _ = child.Process.Kill() })
 }

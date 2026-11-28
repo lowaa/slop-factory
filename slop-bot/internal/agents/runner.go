@@ -64,6 +64,12 @@ func (r *runner) active() bool {
 	return r.inTurn || r.attaching || r.holdsSlot || r.st == state.StateStarting || r.st == state.StateAttached
 }
 
+func (r *runner) setAttaching(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attaching = on
+}
+
 // stopConv stops the conversation, if this runner has one.
 func (r *runner) stopConv(ctx context.Context) {
 	if r.conv != nil {
