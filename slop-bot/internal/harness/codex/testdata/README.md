@@ -15,6 +15,17 @@ strict decode in `protocol/protocol_test.go`.
 | `resume.jsonl` | a fresh app-server's `initialize` and `thread/resume` of the thread above |
 | `resume_missing.jsonl` | `thread/resume` of a thread with no rollout |
 
+`rollout.jsonl` is not stdout: it is the rollout file Codex wrote for an
+app-server thread (`thread/start`, then one `turn/start` asking for `cat
+notes.txt`, `cat missing.txt` and the reply `DONE`), for
+`transcript_test.go`. To record it again, drive that thread, copy the file
+at `thread/start`'s `thread.path` once `turn/completed` arrives, and keep
+only `session_meta` (its ids, `cwd`, `originator`, `cli_version`,
+`source`), the `event_msg` records `task_started`, `task_complete`,
+`item_completed` and `token_count` (its `info` only), and the assistant
+`message` and `custom_tool_call(_output)` response_items; replace the
+workspace path with `/ws`, and delete the thread (`thread/delete`).
+
 ## The id convention
 
 A response's `id` is recorded as `"<method>"`, the method of the request it

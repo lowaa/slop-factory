@@ -24,9 +24,18 @@ type Puppet interface {
 	// LongTool makes the next turn start a tool call that runs until release
 	// is called. A message sent meanwhile is mid-turn.
 	LongTool(ctx context.Context) (release func(context.Context) error, err error)
+	// Accepted returns once the harness has taken in text, sent mid-turn,
+	// so the turn cannot end before it does. A puppet that can't see that
+	// before the next model call returns at once.
+	Accepted(ctx context.Context, text string) error
 	// Received checks that the harness received text in the current
-	// session, mid-turn or not.
+	// session, mid-turn or not. It may be called once the turn the text
+	// arrived in has ended: a real harness shows a steer to the model only
+	// at its next model call, after the running tool.
 	Received(ctx context.Context, text string, midTurn bool) error
+	// Remembers checks that the current, resumed session still has text,
+	// which an earlier session of the conversation received.
+	Remembers(ctx context.Context, text string) error
 	// Interrupted checks that the harness saw an interrupt.
 	Interrupted(ctx context.Context) error
 	// Crash makes the harness process die with a non-zero status.
@@ -149,9 +158,10 @@ func testMidTurn(t *testing.T, s *Subject) {
 	ctx := ctxFor(t, s)
 	conv, release := inLongTool(ctx, t, s)
 	send(ctx, t, conv, "main is broken, stop merging")
-	require.NoError(t, s.Puppet.Received(ctx, "main is broken, stop merging", true))
+	require.NoError(t, s.Puppet.Accepted(ctx, "main is broken, stop merging"))
 	require.NoError(t, release(ctx))
-	next(ctx, t, conv, harness.TurnEnded)
+	assert.Equal(t, harness.TurnCompleted, next(ctx, t, conv, harness.TurnEnded).Outcome)
+	require.NoError(t, s.Puppet.Received(ctx, "main is broken, stop merging", true))
 }
 
 func testInterrupt(t *testing.T, s *Subject) {
@@ -203,9 +213,14 @@ func testStopForce(t *testing.T, s *Subject) {
 	next(ctx, t, conv, harness.Exited)
 }
 
+// The first session runs a turn: a real harness keeps nothing to resume
+// until a conversation has one (Codex writes no rollout before it).
 func testResume(t *testing.T, s *Subject) {
 	ctx := ctxFor(t, s)
 	conv := start(ctx, t, s, nil)
+	require.NoError(t, s.Puppet.Reply(ctx, "noted"))
+	send(ctx, t, conv, "remember KUMQUAT")
+	require.Equal(t, harness.TurnCompleted, next(ctx, t, conv, harness.TurnEnded).Outcome)
 	ref := conv.Ref()
 	require.NoError(t, conv.Stop(ctx, false))
 	next(ctx, t, conv, harness.Exited)
@@ -219,6 +234,12 @@ func testResume(t *testing.T, s *Subject) {
 	assert.Equal(t, ref.ID, id)
 	next(ctx, t, resumed, harness.Ready)
 	assert.Equal(t, ref.ID, resumed.Ref().ID)
+
+	require.NoError(t, s.Puppet.Reply(ctx, "KUMQUAT"))
+	send(ctx, t, resumed, "what was the word?")
+	require.Equal(t, harness.TurnCompleted, next(ctx, t, resumed, harness.TurnEnded).Outcome)
+	require.NoError(t, s.Puppet.Received(ctx, "what was the word?", false))
+	require.NoError(t, s.Puppet.Remembers(ctx, "remember KUMQUAT"))
 }
 
 func testCrash(t *testing.T, s *Subject) {

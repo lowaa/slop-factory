@@ -358,15 +358,7 @@ func (g *generator) signature(n *node) (string, bool) {
 	case n.boolean != nil:
 		return "raw", false
 	case n.Ref != "":
-		name := refName(n.Ref)
-		def := g.defs[name]
-		switch {
-		case def != nil && g.kindOf(def) == kindEnum:
-			return "enum:" + name, false
-		case def != nil && g.kindOf(def) == kindAlias && isPlainString(def):
-			return "str:" + name, false
-		}
-		return "ref:" + name, false
+		return g.refSignature(refName(n.Ref)), false
 	case len(n.AllOf) == 1:
 		return g.signature(n.AllOf[0])
 	}
@@ -381,17 +373,32 @@ func (g *generator) signature(n *node) (string, bool) {
 	if len(types) != 1 {
 		return "raw", nullable
 	}
-	switch types[0] {
+	return g.typeSignature(n, types[0]), nullable
+}
+
+func (g *generator) refSignature(name string) string {
+	def := g.defs[name]
+	switch {
+	case def != nil && g.kindOf(def) == kindEnum:
+		return "enum:" + name
+	case def != nil && g.kindOf(def) == kindAlias && isPlainString(def):
+		return "str:" + name
+	}
+	return "ref:" + name
+}
+
+func (g *generator) typeSignature(n *node, typ string) string {
+	switch typ {
 	case "array":
 		s, _ := g.signature(n.Items)
-		return "[]" + s, nullable
+		return "[]" + s
 	case "object":
 		if len(n.Properties) > 0 {
-			return "inline", nullable
+			return "inline"
 		}
-		return "map", nullable
+		return "map"
 	}
-	return types[0], nullable
+	return typ
 }
 
 // writeDiscriminators gives a union's `type` values constants, when each

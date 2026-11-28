@@ -23,6 +23,8 @@ func (m *Manager) schedule() {
 		case <-m.stop:
 			return
 		case <-m.kick:
+		case <-m.wake:
+			m.wake = nil
 		case ev, ok := <-feed:
 			if !ok {
 				feed = nil
@@ -62,7 +64,7 @@ func (m *Manager) onTicketEvent(ctx context.Context, ev *tickets.TicketEvent) {
 			fmt.Sprintf("Your ticket is still blocked by %s: don't start the work yet. End your turn; you'll be told when the blockers are done.", refs(t.BlockedBy)), false)
 	case t.Status == tickets.StatusCancelled:
 		if r, ok := m.runner(a.ID); ok {
-			m.finish(ctx, r, "")
+			m.cancel(ctx, r)
 		}
 	}
 }
@@ -91,7 +93,15 @@ func (m *Manager) evaluate(ctx context.Context) {
 		if m.queued(pool) || !m.slotFree(pool, "") || m.liveCount() >= m.opts.Config.Concurrency.MaxLive {
 			continue
 		}
-		if err := m.spawn(ctx, t, pool); err != nil && !errors.Is(err, errMisconfigured) {
+		spec, err := m.specFor(ctx, t)
+		var hold *errHeld
+		if errors.As(err, &hold) {
+			m.wakeAt(hold.until)
+			m.noteHeld(ctx, t, hold)
+			continue
+		}
+		m.unheld(t.ID)
+		if err := m.spawn(ctx, t, pool, spec); err != nil && !errors.Is(err, errMisconfigured) {
 			m.opts.Logger.Warn("agents: spawning", "ticket", t.ID, "err", err)
 		}
 	}

@@ -265,7 +265,7 @@ func TestABranchThatMovedSinceTheCheckIsNotDeleted(t *testing.T) {
 	f := newFixture(t, "a")
 	ctx := context.Background()
 	wt := f.create("35", []string{"a"}, "a")[0]
-	st, err := f.m.inspect(ctx, "35", wt)
+	st, err := f.m.inspect(ctx, "35", wt, true)
 	require.NoError(t, err)
 	head := f.commit(wt.Path, "late", "landed after the check")
 	f.run(wt.Path, "switch", "-q", "--detach")

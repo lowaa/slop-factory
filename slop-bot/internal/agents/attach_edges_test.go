@@ -23,7 +23,7 @@ func (f *fixture) restarted() *agents.Manager {
 	require.NoError(f.t, f.mgr.Stop(context.Background()))
 	self, err := os.Executable()
 	require.NoError(f.t, err)
-	m := f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: f.ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
 	require.NoError(f.t, m.Start(context.Background()))
 	f.t.Cleanup(func() { _ = m.Stop(context.Background()) })
 	f.t.Cleanup(func() { _ = f.ctl.Close() })
@@ -144,7 +144,7 @@ func TestAHandBackCutShortByARestartResumesTheAgent(t *testing.T) {
 
 	self, err := os.Executable()
 	require.NoError(t, err)
-	m := f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: f.ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
 	require.NoError(t, m.Start(context.Background()))
 	t.Cleanup(func() { _ = m.Stop(context.Background()) })
 	t.Cleanup(func() { _ = f.ctl.Close() })
@@ -187,6 +187,12 @@ func TestAttachingAnAgentQueuedForASlotDoesntStallItsPool(t *testing.T) {
 	f.turn(s3, func() {
 		_, err := f.mgr.Ask(f.ctx(), ident.AgentPrincipal(a3.ID, third.ID), "?", nil, "")
 		require.NoError(t, err)
+	})
+	// The slot is free before the second's turn ends, so the nudge's first
+	// look at the slots decides it: this tests the queue, not the race of
+	// a slot freeing while a nudge is queueing.
+	f.await(agents.EventState, func(e *state.Event) bool {
+		return e.Agent == a3.ID && toState(state.StateWaitingUser)(e)
 	})
 	f.do(s2, fake.Command{Cmd: fake.CmdTurnEnd})
 	nudge := f.user(s2)

@@ -19,11 +19,11 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
 )
 
-// scriptedEnv is the scripted model's opt-in for running real harness CLIs
-// (scriptedmodel/real_harness_test.go). The real pi runs against the
+// scriptedEnv is tier 2's opt-in (slop-bot/tier2.sh) for running real
+// harness CLIs against the scripted model. The real pi runs against the
 // in-process scripted model through Harness.AgentDir: no tokens, and nothing
 // touches the user's ~/.pi.
-const scriptedEnv = "SCRIPTED_MODEL_REAL_HARNESSES"
+const scriptedEnv = "SLOP_BOT_TIER2"
 
 const scriptedModel = "scripted-model-1"
 

@@ -16,6 +16,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# slop-haus is defunct, replaced by slop-bot: its suites (server, frontend,
+# api-client, the Python supervisor and token, e2e, harness-e2e, the
+# deployment examples) and its image publishing no longer run here.
 jobs:
   go-libraries:
     runs-on: ubuntu-latest
@@ -35,20 +38,6 @@ jobs:
           uv: ${{ matrix.lib == 'go-db' }}
       - run: ${{ matrix.lib }}/test.sh
 
-  server:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          go: "true"
-          node: "true"
-          uv: "true"
-      - run: slop-haus/server/test.sh
-
   # The repo-wide linters (knip, jscpd, shellcheck, shfmt): what
   # `lint.sh --changed` runs beside the changed projects' runners, which
   # run here in each suite's own test.sh, in the jobs above and below.
@@ -64,36 +53,6 @@ jobs:
           npm-ci: root
       - run: dev-tools/lint/lint.sh --repo-only
 
-  frontend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          npm-ci: tools
-      - run: slop-haus/frontend/test.sh
-
-  api-client:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          go: "true"
-          uv: "true"
-          npm-ci: root
-      # The committed OpenAPI spec and generated client must match the routes.
-      - run: slop-haus/frontend/generate_api_client.sh --check
-      - run: npm run typecheck -w slop-haus/frontend
-      - working-directory: slop-haus/supervisor
-        run: uv run --frozen pytest tests/contract
-
   js-components:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -106,22 +65,6 @@ jobs:
         with:
           persist-credentials: false
       - run: js-components/test.sh ${{ matrix.mode }}
-
-  python:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [supervisor, token]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          uv: "true"
-      - run: slop-haus/${{ matrix.suite }}/test.sh
 
   dev-tools:
     runs-on: ubuntu-latest
@@ -156,50 +99,51 @@ jobs:
       - run: slop-review/report/test.sh
       - run: slop-review/test.sh
 
-  e2e:
+  # slop-bot's lint and tests, and its quality ratchet, as two jobs on their
+  # own runners: quality.sh runs the tests again for coverage, so serial
+  # they'd take twice as long.
+  slop-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # Two shards, each against a stack of its own, fit a standard runner.
-      - run: slop-haus/e2e_playwright_ts/test.sh
-        env:
-          SHARDS: "2"
-          E2E_RESULTS_OUT: ${{ github.workspace }}/e2e-results
-      - if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: e2e-results
-          path: e2e-results
-          retention-days: 14
-          if-no-files-found: ignore
-
-  harness-e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          uv: "true"
-      - run: slop-haus/harness_e2e/test.sh
-        env:
-          HARNESS_PARALLEL: "1"
+          go: "true"
+      - run: slop-bot/test.sh
 
-  # The deployment examples still render and validate: compose config, helm
-  # lint, and the chart's and Argo CD's manifests against their schemas.
-  deployment-example:
+  slop-bot-quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: deployment_example/test.sh
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+      - run: slop-bot/quality.sh
+
+  dev-tools-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # main's history, for the spec that pending.txt only shrinks
+          # against the merge-base.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+          shellspec: "true"
+      - run: dev-tools/quality/test.sh
+        env:
+          QUALITY_REQUIRE_BASE: "1"
+      - run: dev-tools/quality/quality.sh
 
   # The host-side suites again on an Apple-silicon Mac: with only Linux above,
   # a GNU-only flag or a /proc read passes here and breaks a Mac developer's
@@ -212,16 +156,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: supervisor
-            uv: "true"
-            run: slop-haus/supervisor/test.sh
-          - suite: token
-            uv: "true"
-            run: slop-haus/token/test.sh
           - suite: slop-review
             go: "true"
             npm-ci: tools
             run: slop-review/report/test.sh && slop-review/test.sh
+          # quality_lib.sh is host-side shell every project's quality.sh runs.
+          - suite: dev-tools-quality
+            go: "true"
+            shellspec: "true"
+            run: dev-tools/quality/test.sh
           # The Go libraries whose tests need no database (go-db, go-privacy
           # and go-settings run Postgres in Docker). One runner for the five,
           # each run whatever the one before did, so one red hides nothing.
@@ -257,19 +200,7 @@ jobs:
           go: ${{ matrix.go || 'false' }}
           uv: ${{ matrix.uv || 'false' }}
           npm-ci: ${{ matrix.npm-ci || 'none' }}
-      # What a Mac developer installs too (CONTRIBUTING.md): /bin/bash is 3.2,
-      # and macOS has no flock, which the supervisor's and token's tests use.
-      - run: brew install bash flock
+          shellspec: ${{ matrix.shellspec || 'false' }}
+      # What a Mac developer installs too (CONTRIBUTING.md): /bin/bash is 3.2.
+      - run: brew install bash
       - run: ${{ matrix.run }}
-
-  # Images for main only once every job above but macos has passed, so the
-  # cluster never gets a build ci failed. macos is advisory: it catches what
-  # breaks a Mac developer, not what the images run. Pull requests skip it, and theirs have no
-  # packages: write token to give it anyway.
-  publish-images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [go-libraries, server, lint, frontend, api-client, js-components, python, dev-tools, slop-review, e2e, harness-e2e, deployment-example]
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/publish_images.yml

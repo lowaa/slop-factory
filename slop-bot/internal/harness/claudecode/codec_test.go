@@ -50,20 +50,44 @@ func TestARecordedTurn(t *testing.T) {
 		harness.TurnStarted,
 		harness.ToolStarted,
 		harness.LimitReport,
+		harness.LimitReport,
 		harness.ToolEnded,
 		harness.Text,
+		harness.LimitReport,
 		harness.LimitReport,
 		harness.UsageReport,
 		harness.TurnEnded,
 	}, kinds(evs))
 	assert.Equal(t, "Bash", evs[1].Tool)
-	assert.Equal(t, "DONE", evs[4].Text)
-	assert.InDelta(t, 46.0, evs[2].Limit.UsedPercent, 0.001, "the tightest window: five_hour at 0.46")
+	assert.Equal(t, "DONE", evs[5].Text)
+	assert.Equal(t, "five_hour", evs[2].Limit.Window, "each window apart")
+	assert.InDelta(t, 46.0, evs[2].Limit.UsedPercent, 0.001)
 	assert.Equal(t, time.Unix(1795840800, 0).UTC(), evs[2].Limit.ResetsAt)
-	assert.Equal(t, int64(79), evs[6].Usage.OutputTokens)
-	assert.InDelta(t, 0.00356304, evs[6].Usage.CostUSD, 1e-9)
-	assert.True(t, evs[6].Usage.CostEstimated, "apiKeySource none: the subscription, so the cost is an estimate")
-	assert.Equal(t, harness.TurnCompleted, evs[7].Outcome)
+	assert.Equal(t, "seven_day", evs[3].Limit.Window)
+	assert.InDelta(t, 34.0, evs[3].Limit.UsedPercent, 0.001)
+	assert.Equal(t, int64(79), evs[8].Usage.OutputTokens)
+	assert.InDelta(t, 0.00356304, evs[8].Usage.CostUSD, 1e-9)
+	assert.True(t, evs[8].Usage.CostEstimated, "apiKeySource none: the subscription, so the cost is an estimate")
+	assert.Equal(t, harness.TurnCompleted, evs[9].Outcome)
+}
+
+// A rejection holds even with no window figures, or one the windows don't
+// name; a missing reset is zero, not 1970.
+func TestARejectedRateLimitIsAFullWindow(t *testing.T) {
+	t.Parallel()
+	evs := decodeAll(t, &codec{},
+		`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1795840800,"rateLimitType":"seven_day_opus"}}`,
+		`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.5}}}}`)
+	var limits []*harness.Limit
+	for _, ev := range evs {
+		if ev.Kind == harness.LimitReport {
+			limits = append(limits, ev.Limit)
+		}
+	}
+	assert.Equal(t, []*harness.Limit{
+		{Window: "seven_day_opus", UsedPercent: 100, ResetsAt: time.Unix(1795840800, 0).UTC()},
+		{Window: "five_hour", UsedPercent: 50},
+	}, limits)
 }
 
 func TestTurnOutcomes(t *testing.T) {
@@ -169,4 +193,40 @@ func TestEnvDisablesBackgroundTasksAndKeepsAPIKeysOut(t *testing.T) {
 	assert.NotContains(t, env, "ANTHROPIC_API_KEY=placeholder", "an API key would silently switch billing off the subscription")
 	opted := h.env(&harness.Workspace{APIKeyOptIn: true})
 	assert.Contains(t, opted, "ANTHROPIC_API_KEY=placeholder")
+}
+
+func TestAssistantAndToolResultRecords(t *testing.T) {
+	t.Parallel()
+	evs := decodeAll(t, &codec{},
+		`{"type":"assistant","message":{"content":[{"type":"thinking"},{"type":"text","text":"a"},{"type":"tool_use","name":"Read"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"text","text":"ignored"},{"type":"tool_result"}]}}`,
+	)
+	assert.Equal(t, []harness.EventKind{harness.TurnStarted, harness.Text, harness.ToolStarted, harness.ToolEnded}, kinds(evs))
+	assert.Equal(t, "Read", evs[2].Tool)
+}
+
+func TestARateLimitWithoutInfoReportsNothing(t *testing.T) {
+	t.Parallel()
+	evs := decodeAll(t, &codec{}, `{"type":"rate_limit_event"}`)
+	assert.Equal(t, []harness.EventKind{harness.TurnStarted}, kinds(evs))
+}
+
+func TestMalformedLinesAreErrors(t *testing.T) {
+	t.Parallel()
+	_, err := (&codec{}).Decode([]byte(`{not json`), nil)
+	assert.Error(t, err)
+}
+
+func TestWriteReportsEncodingFailures(t *testing.T) {
+	t.Parallel()
+	assert.Error(t, write(nil, make(chan int)))
+}
+
+func TestAResultResetsTheTurn(t *testing.T) {
+	t.Parallel()
+	c := &codec{}
+	decodeAll(t, c, `{"type":"system","subtype":"init"}`)
+	assert.True(t, c.inTurn)
+	decodeAll(t, c, `{"type":"result","subtype":"success"}`)
+	assert.False(t, c.inTurn)
 }

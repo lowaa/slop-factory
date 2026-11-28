@@ -159,14 +159,14 @@ func TestAttachHandsTheAgentToATUIAndBack(t *testing.T) {
 	// The person works in the TUI; from inside it, the agent's own CLI
 	// calls still work, on the fresh token the TUI was given.
 	term.typeLine("hello")
-	typed, err := tui.Expect(e.ctx(), fake.RepTyped)
+	typed, err := tui.Await(e.ctx(), fake.RepUser)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", typed.Text)
 	e.agent(tui, "status", "set", "steered by hand")
 	assert.Contains(t, e.h.ok(t, "status"), "steered by hand")
 	assert.Contains(t, e.h.ok(t, "status"), "attached")
 
-	term.typeLine(fake.TUIExit)
+	term.typeLine(fake.TUIQuit)
 	code, screen := term.done(e.ctx())
 	assert.Equal(t, 0, code, screen)
 	note := e.resumed(s.ID)
@@ -177,7 +177,7 @@ func TestAttachHandsTheAgentToATUIAndBack(t *testing.T) {
 	assert.Contains(t, screen, "note: reading the code")
 	assert.Contains(t, screen, "the API moved to v2")
 	assert.Contains(t, screen, "Quitting the TUI hands the agent back")
-	assert.Contains(t, screen, "fake-tui: conversation "+s.ID)
+	assert.Contains(t, screen, "fake-tui "+s.ID+" (resumed)")
 	assert.Contains(t, screen, "back to slop-bot: resumed")
 }
 
@@ -194,7 +194,7 @@ func TestASecondAttachIsRefusedAndDetachEndsTheFirst(t *testing.T) {
 	assert.Contains(t, e.h.err.String(), fmt.Sprintf("held by slop-bot attach (pid %d on /dev/pts/", term.cmd.Process.Pid))
 
 	assert.Contains(t, e.h.ok(t, "detach", agent), "handed back: resumed")
-	_, err = tui.Expect(e.ctx(), fake.RepTyped)
+	_, err = tui.Await(e.ctx(), fake.RepUser)
 	require.Error(t, err, "the TUI was ended")
 	code, screen := term.done(e.ctx())
 	assert.Equal(t, 0, code, screen)
@@ -228,7 +228,7 @@ func TestDoneFromInsideTheTUIFinishesTheTicket(t *testing.T) {
 	term := e.attachTerminal("--now", agent)
 	tui, _ := e.tui(s.ID)
 	e.agent(tui, "done", "--summary", "Finished by hand.")
-	term.typeLine(fake.TUIExit)
+	term.typeLine(fake.TUIQuit)
 	code, screen := term.done(e.ctx())
 	assert.Equal(t, 0, code, screen)
 	assert.Contains(t, screen, "back to slop-bot: finished")
@@ -245,7 +245,7 @@ func TestNoResumeReleasesTheAgentToThePerson(t *testing.T) {
 	assert.True(t, tui.TUI)
 	assert.Equal(t, s.ID, tui.ID)
 	e.await("agent.state", toState("released"))
-	term.typeLine(fake.TUIExit)
+	term.typeLine(fake.TUIQuit)
 	code, screen := term.done(e.ctx())
 	assert.Equal(t, 0, code, screen)
 	assert.Contains(t, screen, "Released: slop-bot no longer runs this agent")
@@ -300,9 +300,9 @@ func TestAnAttachSurvivesADaemonRestart(t *testing.T) {
 	// The new daemon learns the TUI's pid, for a hang-up from here on.
 	e.await("agent.tui_launched", nil)
 	term.typeLine("still here")
-	_, err := tui.Expect(e.ctx(), fake.RepTyped)
+	_, err := tui.Await(e.ctx(), fake.RepUser)
 	require.NoError(t, err)
-	term.typeLine(fake.TUIExit)
+	term.typeLine(fake.TUIQuit)
 	code, screen := term.done(e.ctx())
 	assert.Equal(t, 0, code, screen)
 	assert.Contains(t, screen, "reconnected")
@@ -320,7 +320,7 @@ func TestAnAttachWhoseCLIDidntComeBackIsHandedBackWhenItsLeaseExpires(t *testing
 	// The terminal is closed while the daemon is down: nothing can tell it.
 	require.NoError(t, term.cmd.Process.Kill())
 	require.NoError(t, term.pty.Close())
-	_, err := tui.Expect(e.ctx(), fake.RepTyped)
+	_, err := tui.Await(e.ctx(), fake.RepUser)
 	require.Error(t, err, "the TUI went with its terminal")
 
 	e.restart()

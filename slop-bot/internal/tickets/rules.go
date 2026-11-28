@@ -33,6 +33,8 @@ var (
 	ErrCycle = errors.New("tickets: blocker would create a cycle")
 	// ErrBlocked refuses starting the work on a ticket with open blockers.
 	ErrBlocked = errors.New("tickets: ticket has open blockers")
+	// ErrStatusChanged refuses a change whose IfStatus no longer holds.
+	ErrStatusChanged = errors.New("tickets: the ticket's status changed")
 
 	ErrInvalidCursor  = errors.New("tickets: invalid cursor")
 	ErrAlreadyStarted = errors.New("tickets: already started")
@@ -133,9 +135,12 @@ func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketCha
 	if err := CheckPrincipal(by); err != nil {
 		return err
 	}
+	if change.IfStatus != nil && *change.IfStatus != cur.Status {
+		return fmt.Errorf("%w: it is %s, not %s", ErrStatusChanged, cur.Status, *change.IfStatus)
+	}
 	// A retried status call (an agent sending done twice) changes nothing,
 	// so it isn't refused for the ticket having become uneditable.
-	if change.Status != nil && *change.Status == cur.Status && *change == (TicketChange{Status: change.Status}) {
+	if change.Status != nil && *change.Status == cur.Status && *change == (TicketChange{Status: change.Status, IfStatus: change.IfStatus}) {
 		return nil
 	}
 	if !by.IsUser() {

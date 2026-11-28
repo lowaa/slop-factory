@@ -9,6 +9,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 )
 
 // declared is what an agent said, during a turn, it is doing at the turn's
@@ -30,10 +31,11 @@ const (
 // taking its verbs from inside the TUI; the hand-back replaces it with a
 // runner on the resumed conversation.
 type runner struct {
-	m      *Manager
-	id     ident.AgentID
-	ticket ident.TicketID
-	pool   state.Pool
+	m       *Manager
+	id      ident.AgentID
+	ticket  ident.TicketID
+	harness string
+	pool    state.Pool
 	// conv is nil for an agent that was attached when the daemon started:
 	// its conversation is the person's TUI, not ours.
 	conv harness.Conversation
@@ -73,9 +75,9 @@ func (r *runner) setAttaching(on bool) {
 }
 
 // stopConv stops the conversation, if this runner has one.
-func (r *runner) stopConv(ctx context.Context) {
+func (r *runner) stopConv(ctx context.Context, force bool) {
 	if r.conv != nil {
-		_ = r.conv.Stop(ctx, false)
+		_ = r.conv.Stop(ctx, force)
 	}
 }
 
@@ -98,6 +100,9 @@ func (r *runner) setState(ctx context.Context, to state.AgentState, reason strin
 		r.m.opts.Logger.Warn("agents: recording a state", "agent", r.id, "to", to, "err", err)
 	}
 	r.m.event(ctx, EventState, r.id, r.ticket, map[string]string{"from": string(from), "to": string(to), "reason": reason})
+	if to.Ends() {
+		r.m.retain(ctx, r.id)
+	}
 	r.m.Kick()
 }
 
@@ -134,6 +139,17 @@ func (r *runner) run(ctx context.Context) {
 }
 
 func (r *runner) handle(ctx context.Context, ev *harness.Event) {
+	// A limit is recorded before its event, so whoever sees the event (a
+	// test, `status`) finds it in effect.
+	if ev.Kind == harness.LimitReport && ev.Limit != nil {
+		r.m.reportLimit(ctx, r, ev.Limit)
+	}
+	// The conversation's own events go in the log first, so `slop-bot watch`
+	// shows a turn ending before the state it leads to. Ready and Exited
+	// aren't the conversation: the states say them.
+	if ev.Kind != harness.Ready && ev.Kind != harness.Exited {
+		r.m.event(ctx, EventHarness+string(ev.Kind), r.id, r.ticket, eventPayload(ev))
+	}
 	switch ev.Kind {
 	case harness.TurnStarted:
 		r.mu.Lock()
@@ -151,9 +167,6 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		r.turnEnded(ctx, ev)
 	case harness.Exited:
 		r.exitedWith(ctx, ev)
-	}
-	if ev.Kind == harness.ToolStarted || ev.Kind == harness.TurnEnded || ev.Kind == harness.UsageReport {
-		r.m.event(ctx, "harness."+string(ev.Kind), r.id, r.ticket, eventPayload(ev))
 	}
 }
 
@@ -241,7 +254,7 @@ func (r *runner) shutdown(ctx context.Context) {
 	r.mu.Lock()
 	r.stopping = true
 	r.mu.Unlock()
-	r.stopConv(ctx)
+	r.stopConv(ctx, false)
 	<-r.exited
 }
 
@@ -256,5 +269,26 @@ func eventPayload(ev *harness.Event) map[string]any {
 	if ev.Usage != nil {
 		p["input_tokens"], p["output_tokens"] = ev.Usage.InputTokens, ev.Usage.OutputTokens
 	}
+	if ev.Text != "" {
+		// The log is for following what an agent does, not its full
+		// output: that is the transcript's.
+		text, cut := transcript.Cut(ev.Text, eventTextLimit)
+		p["text"] = text
+		if cut > 0 {
+			p["truncated"] = cut
+		}
+	}
+	if ev.Limit != nil {
+		p["used_percent"] = ev.Limit.UsedPercent
+		if ev.Limit.Window != "" {
+			p["window"] = ev.Limit.Window
+		}
+		if !ev.Limit.ResetsAt.IsZero() {
+			p["resets_at"] = ev.Limit.ResetsAt
+		}
+	}
 	return p
 }
+
+// eventTextLimit bounds the text an event carries.
+const eventTextLimit = 2000

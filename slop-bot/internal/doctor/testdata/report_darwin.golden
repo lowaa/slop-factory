@@ -1,0 +1,28 @@
+config
+  warn  config file      none at /Users/ada/.config/slop-bot/slop-bot-config.yaml: running on the defaults
+                         fix: slop-bot install writes a commented default there
+  ok    briefing         none (briefing_path is empty): agents get only slop-bot's own
+
+prerequisites
+  ok    git              2.55.0, with worktree support (2.36 or later)
+  skip  tmux             not needed: no harness this build runs uses the tui driver
+
+harness claude-code
+  ok    binary           /Users/ada/.local/bin/claude
+  ok    version          claude 2.1.332 (tested 2.1.332 up to 2.2)
+  ok    signed in        signed in (claude.ai)
+  ok    model            Claude Code's own default (harnesses.claude-code.model is blank)
+
+repos
+  warn  repos            none configured: agents have no repo to make worktrees from
+                         fix: add your repos under repos: in /Users/ada/.config/slop-bot/slop-bot-config.yaml (or `slop-bot install --repo name=path` on a first install)
+  ok    workspace_dir    /Users/ada/slop-bot/workspace (created on first use)
+
+platform
+  ok    runtime dir      /tmp/sbt/slop-bot (fallback, $XDG_RUNTIME_DIR unset)
+  ok    socket           /tmp/sbt/slop-bot/slop-bot.sock (31 of 103 bytes)
+  ok    service manager  launchd answers
+  warn  service          not installed
+                         fix: slop-bot install
+
+no failures, 3 warnings

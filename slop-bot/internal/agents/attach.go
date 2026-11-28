@@ -376,7 +376,7 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 		m.opts.Logger.Warn("agents: the conversation id changed across an attach", "agent", id, "was", a.ConversationID, "now", got)
 		payload["conversation_was"] = a.ConversationID
 	}
-	nr := m.adopt(ctx, &adoption{id: id, ticket: a.Ticket, pool: a.Pool, conv: conv, caps: caps,
+	nr := m.adopt(ctx, &adoption{id: id, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps,
 		st: state.StateAttached, decl: decl, summary: summary, holdsSlot: true})
 	m.event(ctx, EventHandedBack, id, a.Ticket, payload)
 	if _, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{

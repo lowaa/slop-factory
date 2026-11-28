@@ -194,6 +194,8 @@ func TestNoResumeReleasesTheAgentAndItsTicketIsNotRespawned(t *testing.T) {
 	att := f.attached(s, a, &agents.AttachRequest{NoResume: true})
 	assert.True(t, att.Released)
 	assert.Equal(t, []string{"--tui", "--resume", s.ID}, att.Command.Args)
+	// Released ends the agent, so its transcript is kept like a done one's.
+	f.await(agents.EventRetained, func(e *state.Event) bool { return e.Agent == a.ID })
 	released, err := f.state.Agents.Get(f.ctx(), a.ID)
 	require.NoError(t, err)
 	assert.Equal(t, state.StateReleased, released.State)
@@ -255,7 +257,7 @@ func TestAnAttachSurvivesARestartAndItsCLIReconnects(t *testing.T) {
 
 	self, err := os.Executable()
 	require.NoError(t, err)
-	m := f.newManager(&fakeHarness{&fake.Harness{Binary: self, Control: f.ctl.Socket(), Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
 	require.NoError(t, m.Start(context.Background()))
 	t.Cleanup(func() { _ = m.Stop(context.Background()) })
 	t.Cleanup(func() { _ = f.ctl.Close() })

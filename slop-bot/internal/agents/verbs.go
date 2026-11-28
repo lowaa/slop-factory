@@ -2,13 +2,13 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
-	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
 // own returns the runner for the calling agent: verbs act on the caller's
@@ -149,8 +149,19 @@ func (m *Manager) SetNote(ctx context.Context, p ident.Principal, note string) e
 
 // finish ends an agent whose ticket is done: the summary goes on the
 // ticket, the conversation stops, and the worktrees are cleaned up, except
-// any holding work no remote has.
+// any holding work no remote has. It returns at once: stopping and cleaning
+// up run on their own goroutine, so a caller on the scheduler or the
+// runner's own loop is never held up.
 func (m *Manager) finish(ctx context.Context, r *runner, summary string) {
+	m.end(ctx, r, summary, false)
+}
+
+// cancel ends an agent whose ticket was cancelled: its turn is cut off.
+func (m *Manager) cancel(ctx context.Context, r *runner) {
+	m.end(ctx, r, "", true)
+}
+
+func (m *Manager) end(ctx context.Context, r *runner, summary string, force bool) {
 	r.mu.Lock()
 	r.stopping = true
 	r.mu.Unlock()
@@ -160,13 +171,20 @@ func (m *Manager) finish(ctx context.Context, r *runner, summary string) {
 			m.opts.Logger.Warn("agents: posting the summary", "agent", r.id, "err", err)
 		}
 	}
-	m.advanceTo(ctx, by, r.ticket, tickets.StatusDone)
-	r.stopConv(ctx)
+	if !force {
+		m.advanceTo(ctx, by, r.ticket, tickets.StatusDone)
+	}
 	go func() {
+		ctx := context.WithoutCancel(ctx)
+		r.stopConv(ctx, force)
 		<-r.exited
-		m.cleanup(context.WithoutCancel(ctx), r)
-		r.setState(context.WithoutCancel(ctx), state.StateDone, "the ticket is done")
-		m.event(context.WithoutCancel(ctx), EventFinished, r.id, r.ticket, nil)
+		m.cleanup(ctx, r)
+		reason := "the ticket is done"
+		if force {
+			reason = "the ticket was cancelled"
+		}
+		r.setState(ctx, state.StateDone, reason)
+		m.event(ctx, EventFinished, r.id, r.ticket, nil)
 		m.forget(r.id)
 	}()
 }
@@ -176,11 +194,7 @@ func (m *Manager) cleanup(ctx context.Context, r *runner) {
 	if err != nil || len(a.Worktrees) == 0 {
 		return
 	}
-	wts := make([]*worktree.Worktree, 0, len(a.Worktrees))
-	for _, w := range a.Worktrees {
-		wts = append(wts, &worktree.Worktree{Ticket: r.ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary})
-	}
-	for _, res := range m.opts.Worktrees.Cleanup(ctx, r.ticket, wts) {
+	for _, res := range m.opts.Worktrees.Cleanup(ctx, r.ticket, m.worktreesOf(a)) {
 		switch {
 		case res.Removed:
 			_ = m.opts.State.Agents.RemoveWorktree(ctx, r.id, res.Worktree.Repo)
@@ -214,8 +228,17 @@ func (m *Manager) advanceTo(ctx context.Context, by ident.Principal, id ident.Ti
 		if next == t.Status || !tickets.CanTransition(t.Status, next) {
 			continue
 		}
-		st := next
-		if t, err = m.opts.Tickets.Update(ctx, by, id, &tickets.TicketChange{Status: &st}); err != nil {
+		// Each step is conditional on the status this walk saw: the read
+		// may be stale (the scheduler acts on feed events), and an
+		// unconditional write would undo a move made since, such as the
+		// agent parking the ticket in discussion.
+		st, seen := next, t.Status
+		t, err = m.opts.Tickets.Update(ctx, by, id, &tickets.TicketChange{Status: &st, IfStatus: &seen})
+		if errors.Is(err, tickets.ErrStatusChanged) {
+			m.opts.Logger.Debug("agents: a ticket moved while being walked forward; leaving it", "ticket", id, "to", next)
+			return
+		}
+		if err != nil {
 			m.opts.Logger.Warn("agents: moving a ticket", "ticket", id, "to", next, "err", err)
 			return
 		}

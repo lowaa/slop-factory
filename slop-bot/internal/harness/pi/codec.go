@@ -282,12 +282,7 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 	case "response":
 		return c.response(&r), nil
 	case "agent_start":
-		if c.inTurn {
-			return nil, nil // a retry or a queued message within the same run
-		}
-		c.inTurn = true
-		c.usage, c.failure = &harness.Usage{CostEstimated: true}, ""
-		return []harness.Event{{Kind: harness.TurnStarted}}, nil
+		return c.agentStart(), nil
 	case "agent_settled":
 		return c.settle(&r, w), nil
 	case "tool_execution_start":
@@ -295,11 +290,7 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 	case "tool_execution_end":
 		return []harness.Event{{Kind: harness.ToolEnded, Tool: r.ToolName}}, nil
 	case "message_end":
-		var m message
-		if err := json.Unmarshal(r.Message, &m); err != nil {
-			return nil, err
-		}
-		return c.messageEnd(&m), nil
+		return c.decodeMessageEnd(&r)
 	case "auto_retry_end":
 		if r.FinalError != "" {
 			c.failure = r.FinalError
@@ -307,20 +298,41 @@ func (c *codec) Decode(line []byte, w *rpcdriver.Wire) ([]harness.Event, error) 
 	case "compaction_start":
 		c.compacting = true
 	case "compaction_end":
-		c.compacting = false
-		evs := c.compacted(&r)
-		if !r.Aborted {
-			// An aborted one is part of an interrupt: the held messages wait
-			// for the next Send rather than restart the agent.
-			c.resendHeld(w, false)
-		}
-		return evs, nil
+		return c.compactionEnd(&r, w), nil
 	case "extension_ui_request":
 		return nil, c.cancelDialog(&r, w)
 	case "extension_error":
 		c.log.Warn("pi: extension error", "event", r.Event, "err", r.Error)
 	}
 	return nil, nil
+}
+
+func (c *codec) agentStart() []harness.Event {
+	if c.inTurn {
+		return nil // a retry or a queued message within the same run
+	}
+	c.inTurn = true
+	c.usage, c.failure = &harness.Usage{CostEstimated: true}, ""
+	return []harness.Event{{Kind: harness.TurnStarted}}
+}
+
+func (c *codec) decodeMessageEnd(r *record) ([]harness.Event, error) {
+	var m message
+	if err := json.Unmarshal(r.Message, &m); err != nil {
+		return nil, err
+	}
+	return c.messageEnd(&m), nil
+}
+
+func (c *codec) compactionEnd(r *record, w *rpcdriver.Wire) []harness.Event {
+	c.compacting = false
+	evs := c.compacted(r)
+	if !r.Aborted {
+		// An aborted one is part of an interrupt: the held messages wait
+		// for the next Send rather than restart the agent.
+		c.resendHeld(w, false)
+	}
+	return evs
 }
 
 // response handles a command's answer. Only a prompt's matters: a rejected

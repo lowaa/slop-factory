@@ -9,8 +9,9 @@
 #
 # A shell script is a tracked or untracked *.sh, *.bash or *.bats, or a file
 # whose first line is a sh/bash shebang, less those marked
-# linguist-generated (the golden files under testdata/golden). Both tools
-# run from pinned images, as one pin covers every platform; see README.md.
+# linguist-generated (the golden files under testdata/golden). shfmt skips
+# shellspec specs (*_spec.sh), whose blocks it can't see. Both tools run
+# from pinned images, as one pin covers every platform; see README.md.
 set -euo pipefail
 export LC_ALL=C
 # shellcheck source=SCRIPTDIR/../require_bash.sh
@@ -65,6 +66,13 @@ while IFS= read -r f; do
     *) head -n1 "${f}" 2> /dev/null | grep -qE '^#!.*[/ ](ba|da|k)?sh([[:space:]]|$)' && FILES+=("${f}") ;;
   esac
 done < <(lint_files .)
+# shellspec's Describe/It/End blocks are plain commands to shfmt, which
+# would flatten every spec's nesting to the left margin. shellcheck still
+# reads them: the code inside the blocks is ordinary shell.
+FMT_FILES=()
+for f in "${FILES[@]}"; do
+  [[ "${f}" == *_spec.sh ]] || FMT_FILES+=("${f}")
+done
 
 # in_docker IMAGE ARGS...: the tool over the repo, mounted read-only where
 # its paths stay the ones the findings name.
@@ -109,8 +117,9 @@ run_shellcheck() {
 
 run_shfmt() {
   local out err rc=0
+  ((${#FMT_FILES[@]})) || return 0
   err="$(mktemp)"
-  out="$(in_docker "${SHFMT_IMAGE}" -d "${SHFMT_FLAGS[@]}" "${FILES[@]}" 2> "${err}")" || rc=$?
+  out="$(in_docker "${SHFMT_IMAGE}" -d "${SHFMT_FLAGS[@]}" "${FMT_FILES[@]}" 2> "${err}")" || rc=$?
   # It exits 1 both for a diff and for a file it cannot parse; only the
   # latter writes to stderr.
   if ((rc > 1)) || [[ -s "${err}" ]]; then

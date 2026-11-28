@@ -48,6 +48,14 @@ type Manager interface {
 	Status(ctx context.Context) (*Status, error)
 	// UnitPath is where the unit or plist lives.
 	UnitPath() string
+	// Preflight checks the service manager would take an install, without
+	// changing anything: it answers, and it reads units from where Install
+	// writes them. ErrNoServiceManager when it doesn't answer.
+	Preflight(ctx context.Context) error
+	// ServiceEnv is the environment the installed service's daemon
+	// resolves its paths in, read back from the unit or plist.
+	// ErrNotInstalled when there is no unit. ServicePaths resolves it.
+	ServiceEnv() (*paths.Env, error)
 }
 
 // EnvVar is one variable written into the unit or plist.
@@ -222,6 +230,12 @@ func checkBinary(path string) error {
 		return fmt.Errorf("service: the slop-bot binary %s isn't an executable file", path)
 	}
 	return nil
+}
+
+// ServicePATH is the PATH Install writes for a shell's PATH.
+func ServicePATH(shell string) string {
+	clean, _ := cleanPATH(shell)
+	return clean
 }
 
 // cleanPATH keeps absolute entries, in order, without repeats. Relative and

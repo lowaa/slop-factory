@@ -318,6 +318,15 @@ func (a *Agents) ReleasedForTicket(ctx context.Context, ticket ident.TicketID) (
 	return n > 0, nil
 }
 
+// LatestForTicket returns the ticket's newest agent, live or ended: whose
+// transcript a ticket's id names, and whether the ticket was ever started.
+func (a *Agents) LatestForTicket(ctx context.Context, ticket ident.TicketID) (*Agent, error) {
+	return a.one(ctx, a.db, func(q *bun.SelectQuery) *bun.SelectQuery {
+		// rowid breaks a tie between agents created in the same millisecond.
+		return q.Where("ticket_id = ?", string(ticket)).OrderExpr("created_at DESC, rowid DESC")
+	})
+}
+
 // ListLive returns every agent that hasn't ended, oldest first: the ones the
 // daemon resumes on start.
 func (a *Agents) ListLive(ctx context.Context) ([]*Agent, error) {
