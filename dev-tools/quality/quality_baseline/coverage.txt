@@ -7,4 +7,4 @@
 ./internal/ratchet 85.9
 ./internal/testmod 100.0
 ./internal/testtime 95.6
-total 95.3
+total 95.4

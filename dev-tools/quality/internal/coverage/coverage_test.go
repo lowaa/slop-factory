@@ -317,3 +317,11 @@ func TestDecodeRejectsMalformedBaselines(t *testing.T) {
 		assert.Error(t, err, name)
 	}
 }
+
+func TestMeasureFailsOnSourceItCantParse(t *testing.T) {
+	t.Parallel()
+	m, err := gosrc.LoadModule(testmod.Write(t, map[string]string{"a/a.go": "package a\n\nfunc {"}))
+	require.NoError(t, err)
+	_, err = (&coverage.Metric{Module: m, Profiles: []string{profile(t, "set")}}).Measure()
+	assert.Error(t, err)
+}
