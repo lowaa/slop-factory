@@ -16,10 +16,14 @@ until the user says go.
    that tells the agent to run `ready-to-merge` and end its turn. Each refusal
    is a `merge.refused` event.
 3. The user authorises with `slop-bot tell <agent|ticket> --merge [text]`, or
-   with a tell whose whole text is `merge`. The grant goes in `state.db`
+   with a tell whose whole text is `merge` to an agent in `waiting_merge`.
+   To an agent with an open question, `merge` is an answer, not an
+   authorisation. The grant goes in `state.db`
    (`merge_grants`), so it survives a restart. It belongs to the ticket, so a
    resumed agent keeps it. It is cleared when the ticket ends (done or
-   cancelled), and the guard ignores a grant on an ended ticket. A grant isn't
+   cancelled, by anyone, with or without a running agent), and the guard
+   ignores a grant on an ended ticket. An ended ticket can't be granted one.
+   A grant isn't
    used up by one merge, because merging can take several commands.
 4. **Fail safe:** when the daemon can't be asked (it is stopped, the socket is
    gone, or the token is unknown), the hook classifies the command itself. It
@@ -32,7 +36,10 @@ The hook never approves anything those rules would have asked about.
 `attach` hands the session over with the same flags, so a person attached
 to an agent is held to the guard too, because the session still carries the
 agent's token. To merge from there, run `slop-bot tell <agent> --merge`
-first.
+first. After `attach --no-resume` the session is the person's, but it keeps
+the hook and a token that no longer names a live agent. The hook then can't
+ask the daemon and refuses merges, and `tell --merge` has no agent to
+authorise. Merge from another shell.
 
 ## What counts as a merge
 
@@ -42,15 +49,21 @@ command in it: lists, pipelines, subshells, `$(...)`, `if` bodies, wrappers
 and `eval`. Quotes and backslashes are resolved, so `"gh" pr mer\ge` is
 caught. The merges it finds are:
 
-- `gh pr merge` (with `--auto` too) and `glab mr merge`
-- `gh api`:
-  - the REST merge endpoints (`pulls/<n>/merge`, `repos/<o>/<r>/merges`) with
-    any method but GET or HEAD
+- `gh pr merge` (with `--auto` too) and `glab mr merge`, with `-R` before or
+  after the group
+- `gh api` and `glab api`:
+  - the REST merge endpoints (GitHub's `pulls/<n>/merge` and
+    `repos/<o>/<r>/merges`, GitLab's `merge_requests/<n>/merge`) with any
+    method but GET or HEAD
   - GraphQL merge mutations (`mergePullRequest`, `enablePullRequestAutoMerge`,
-    `enqueuePullRequest`, `mergeBranch`), and `gh api graphql --input`, whose
-    query it can't see
-- `curl` (or `wget`, `http`, `xh`) aimed at those endpoints, or carrying those
-  mutations
+    `enqueuePullRequest`, `mergeBranch`). `gh api graphql --input`, and
+    `-F query=@file`, are treated as merges because the guard can't see the
+    query
+- `curl` (or `wget`, `http`, `xh`) aimed at those endpoints, a quoted URL with
+  variables in it included, or carrying those mutations
+- an agent authorising itself: `slop-bot tell ... --merge`, or a bare
+  `merge`, from the agent's shell. With the token stripped (`env -u
+  SLOP_BOT_AGENT_TOKEN`), that call would reach the daemon as the user
 - `git push` that writes to a default branch. The default branches are
   `main`, `master` and whatever `refs/remotes/<remote>/HEAD` names. The push
   is a merge in any of these cases:
@@ -61,16 +74,24 @@ caught. The merges it finds are:
   - a bare `git push` (or `git push <remote>` or `git push <remote> HEAD`)
     whose push destination (`@{push}`) or current branch is a default branch.
     The branch is looked up in the directory the command runs in, following
-    `cd` and `git -C`
+    `cd` and `git -C`. After a `git checkout` or `git switch` earlier on the
+    line, or a computed `cd`/`git -C`/`--git-dir`, the branch the hook sees
+    isn't the one pushed. Then a bare push is refused as unknown, and `HEAD`
+    is taken to be a default branch
+  - `:` or `+:` (every matching branch), and `heads/main` for
+    `refs/heads/main`
   - a destination it can't read (`git push origin $BRANCH`). The exception is
     `$(git branch --show-current)` and its equivalents, which resolve to the
     current branch
-- an MCP tool whose name matches `mcp__*merge*` (for example GitHub's
-  `merge_pull_request`)
-- a command it can't take apart that mentions `merge` or `push`. That covers a
-  parse failure, a script fed to a shell's stdin (`echo ... | bash`, a
-  heredoc), a computed command name (`$GH pr merge`), and shells nested more
-  than four deep
+- an MCP tool whose own name is a merging verb: `merge_pull_request`,
+  `merge_merge_request`, `accept_merge_request`, `enable_*auto_merge`,
+  `enqueue_pull_request`, `merge_branch`. Tools that read or open a merge
+  request (`get_merge_request`, `create_merge_request`) aren't merges
+- a command it can't take apart, when the whole line mentions `merge` or
+  `push`. That covers a parse failure, a script fed to a shell's stdin
+  (`echo ... | bash`, a heredoc), a computed command name, subcommand or
+  `bash -c` script (`$GH pr merge`, `ACTION=push; git $ACTION ...`), and
+  shells nested more than four deep
 
 These aren't merges: `--dry-run`, tags (`--tags`, `tag v1`, `refs/tags/...`),
 the words in arguments (`echo "gh pr merge"`, `gh pr create --title "merge
@@ -92,12 +113,14 @@ a shell can always reach a merge that the classifier can't see:
   query read from a variable.
 - Other remotes and forges: a push to a URL remote whose default isn't `main`
   or `master`, a default branch with another name, forge CLIs other than `gh`
-  and `glab`, and an API call without `curl` or `gh`.
-- `cd` tracking is in source order, and doesn't model a subshell's scope or a
-  failed `cd`.
-- Stripping the token (`env -u SLOP_BOT_AGENT_TOKEN ...`) only affects the
-  agent's own slop-bot calls. The hook runs from the harness, outside the
-  agent's command, with the harness's own environment.
+  and `glab`, other forges' API endpoints, and an API call through a client
+  other than `curl`, `wget`, `http`, `xh`, `gh` or `glab`.
+- `cd` and checkout tracking is in source order, and doesn't model a
+  subshell's scope or a command that fails.
+- A token stripped in a way the classifier doesn't see (a script, an alias)
+  lets an agent's `slop-bot tell --merge` reach the daemon as the user. The
+  hook itself runs from the harness, outside the agent's command, with the
+  harness's own environment.
 - Claude Code settings that turn hooks off, `disableAllHooks` or a managed
   `allowManagedHooksOnly`, turn the guard off too. The user's own settings
   still apply under `--settings`.

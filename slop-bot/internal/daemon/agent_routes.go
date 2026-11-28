@@ -64,7 +64,7 @@ func (ar *agentRoutes) tell(w http.ResponseWriter, r *http.Request) {
 		fail(w, errors.Join(errBadRequest, errors.New("--interrupt can't be combined with --all: a broadcast never interrupts")))
 		return
 	}
-	if in.Merge || (by.IsUser() && !in.All && agents.SaysMerge(in.Text)) {
+	if in.Merge || (by.IsUser() && !in.All && ar.d.agents.IsMergeGoAhead(r.Context(), in.To, in.Text)) {
 		text, err := ar.authoriseMerge(r, &in)
 		if err != nil {
 			agentFail(w, err)

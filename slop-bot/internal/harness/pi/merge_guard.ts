@@ -19,6 +19,10 @@ function runHook(payload: string): Promise<HookRun> {
 		const child = execFile(argv[0], argv.slice(1), { timeout: 30_000, maxBuffer: 1 << 20 }, (error, stdout) => {
 			resolve({ stdout: String(stdout), error: error ?? undefined });
 		});
+		// A hook that exits without reading its input would otherwise
+		// crash pi with an unhandled EPIPE; the callback above reports
+		// how it ended.
+		child.stdin?.on("error", () => {});
 		child.stdin?.end(payload);
 	});
 }

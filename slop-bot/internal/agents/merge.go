@@ -24,6 +24,18 @@ func SaysMerge(text string) bool {
 	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(text), ".!"), "merge")
 }
 
+// IsMergeGoAhead reports whether a user's tell of text to `to` is the bare
+// go-ahead: just "merge", to an agent waiting on one (waiting_merge). To an
+// agent with a question open, "merge" is its answer (say, to "rebase or
+// merge main in?"), not an authorisation.
+func (m *Manager) IsMergeGoAhead(ctx context.Context, to, text string) bool {
+	if !SaysMerge(text) {
+		return false
+	}
+	a, err := m.resolveAgent(ctx, to)
+	return err == nil && a.State == state.StateWaitingMerge
+}
+
 // AuthoriseMerge records the user's go-ahead to merge the work of to (an
 // agent, or a ticket with a live agent), which the merge guard then lets
 // through. It is the ticket's until the ticket ends. Only the user may give

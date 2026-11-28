@@ -16,22 +16,33 @@ func (s *scan) git(args []word) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if !a.ok {
-			s.opaque(printed(a.node), "git's subcommand is computed")
+			if strings.HasPrefix(literalPrefix(a.node), "-") {
+				s.dirUnknown = true // --git-dir="$G", --work-tree="$W"
+				continue
+			}
+			s.opaque("git's subcommand is computed")
 			return
 		}
 		switch {
 		case a.val == "-C":
-			if i+1 >= len(args) || !args[i+1].ok {
+			if i+1 >= len(args) {
 				return
 			}
-			dir = joinDir(dir, args[i+1].val)
+			if args[i+1].ok {
+				dir = joinDir(dir, args[i+1].val)
+			} else {
+				s.dirUnknown = true
+			}
 			i++
 		case slices.Contains(gitValueOptions, a.val):
 			i++
 		case strings.HasPrefix(a.val, "-"):
 		default:
-			if a.val == "push" {
+			switch a.val {
+			case "push":
 				s.push(dir, args[i+1:])
+			case "checkout", "switch":
+				s.switched = true
 			}
 			return
 		}
@@ -66,9 +77,29 @@ func (s *scan) push(dir string, args []word) {
 	if a.tags || a.del {
 		return // tags only; or a delete naming nothing, which git refuses
 	}
+	if s.unsure() {
+		s.find(KindPushUnknown, "a bare git push after a checkout or a computed cd, whose branch the guard can't see: name it")
+		return
+	}
 	if dst := p.pushTarget(); dst != "" && p.protected(dst) {
 		s.find(KindPushDefault, "git push from "+dst+", which pushes to the default branch "+dst)
 	}
+}
+
+// unsure reports whether the branch the hook sees may not be the one the
+// command pushes from.
+func (s *scan) unsure() bool { return s.switched || s.dirUnknown }
+
+// literalPrefix is the literal text a word starts with, before anything
+// computed.
+func literalPrefix(w *syntax.Word) string {
+	if w == nil || len(w.Parts) == 0 {
+		return ""
+	}
+	if lit, ok := w.Parts[0].(*syntax.Lit); ok {
+		return lit.Value
+	}
+	return ""
 }
 
 // pushArgs is a `git push` command line, taken apart.
@@ -146,6 +177,10 @@ func (p *pushCheck) refspecs(refspecs []word, del bool) {
 			i++ // `tag <name>`
 			continue
 		}
+		if strings.TrimPrefix(v, "+") == ":" {
+			p.s.find(KindPushDefault, "git push "+v+" pushes every matching branch, the default one included")
+			return
+		}
 		if dst := p.destination(v, del); dst != "" && p.protected(dst) {
 			p.s.find(KindPushDefault, "git push to the default branch "+dst)
 			return
@@ -175,8 +210,12 @@ func (p *pushCheck) destination(v string, del bool) string {
 		dst = src
 	}
 	if dst == "HEAD" || dst == "@" {
+		if p.s.unsure() {
+			return "*" // after a checkout, HEAD may be the default branch
+		}
 		dst = p.currentBranch()
 	}
+	dst = strings.TrimPrefix(dst, "heads/") // git resolves heads/main as refs/heads/main
 	if strings.HasPrefix(dst, "refs/") && !strings.HasPrefix(dst, "refs/heads/") {
 		return "" // a tag, a note, ...
 	}

@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 var errNoRepo = errors.New("mergeguard: no repository to ask")
@@ -20,19 +22,20 @@ var ghAPIValueOptions = []string{"-H", "--header", "-q", "--jq", "-t", "--templa
 var (
 	// restMerge matches the REST endpoints that merge: a pull request's
 	// merge, and the merge-a-branch endpoint.
-	restMerge = regexp.MustCompile(`(?i)(^|/)(pulls/[^/?]+/merge|repos/[^/?]+/[^/?]+/merges)/?(\?|$)`)
+	// GitLab's merge-request merge is there too.
+	restMerge = regexp.MustCompile(`(?i)(^|/)(pulls/[^/?]+/merge|repos/[^/?]+/[^/?]+/merges|merge_requests/[^/?]+/merge)/?(\?|$)`)
 	// graphQLMerge matches the GraphQL mutations that merge, or queue or
 	// arm a merge.
 	graphQLMerge = regexp.MustCompile(`(?i)\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch)\b`)
 )
 
 func (s *scan) gh(args []word) {
-	i := firstPositional(args, nil)
+	i := firstPositional(args, ghPRValueOptions)
 	if i < 0 {
 		return
 	}
 	if !args[i].ok {
-		s.opaque(printed(args[i].node), "gh's command is computed")
+		s.opaque("gh's command is computed")
 		return
 	}
 	rest := args[i+1:]
@@ -43,7 +46,7 @@ func (s *scan) gh(args []word) {
 			return
 		}
 		if !rest[j].ok {
-			s.opaque(printed(rest[j].node), "gh pr's subcommand is computed")
+			s.opaque("gh pr's subcommand is computed")
 			return
 		}
 		if rest[j].val == "merge" {
@@ -55,8 +58,18 @@ func (s *scan) gh(args []word) {
 }
 
 func (s *scan) glab(args []word) {
-	if len(args) >= 2 && args[0].val == "mr" && args[1].val == "merge" {
-		s.find(KindPRMerge, "glab mr merge")
+	i := firstPositional(args, ghPRValueOptions)
+	if i < 0 {
+		return
+	}
+	rest := args[i+1:]
+	switch args[i].val {
+	case "mr":
+		if j := firstPositional(rest, ghPRValueOptions); j >= 0 && rest[j].val == "merge" {
+			s.find(KindPRMerge, "glab mr merge")
+		}
+	case "api":
+		s.ghAPI(rest) // the same shape as gh api
 	}
 }
 
@@ -83,7 +96,7 @@ func (s *scan) ghAPI(args []word) {
 		return
 	}
 	if !a.endpoint.ok {
-		s.opaque(printed(a.endpoint.node), "gh api's endpoint is computed")
+		s.opaque("gh api's endpoint is computed")
 		return
 	}
 	ep := a.endpoint.val
@@ -94,6 +107,10 @@ func (s *scan) ghAPI(args []word) {
 			return
 		}
 		for _, f := range a.fields {
+			if strings.Contains(f.text(), "=@") {
+				s.find(KindAPIMerge, "gh api graphql with the query read from a file, which may merge")
+				return
+			}
 			if graphQLMerge.MatchString(f.text()) {
 				s.find(KindAPIMerge, "gh api graphql with a merge mutation")
 				return
@@ -104,12 +121,31 @@ func (s *scan) ghAPI(args []word) {
 	}
 }
 
-// text is the word's value, or its source when it has none to read.
+// text is the word's value; for a computed word, its literal parts with
+// quotes resolved and a placeholder for each expansion, so
+// "https://.../pulls/$N/merge" still reads as the URL it is.
 func (w *word) text() string {
 	if w.ok {
 		return w.val
 	}
-	return printed(w.node)
+	var b strings.Builder
+	var add func(parts []syntax.WordPart)
+	add = func(parts []syntax.WordPart) {
+		for _, part := range parts {
+			switch p := part.(type) {
+			case *syntax.Lit:
+				b.WriteString(p.Value)
+			case *syntax.SglQuoted:
+				b.WriteString(p.Value)
+			case *syntax.DblQuoted:
+				add(p.Parts)
+			default:
+				b.WriteString("X")
+			}
+		}
+	}
+	add(w.node.Parts)
+	return b.String()
 }
 
 // ghAPIArgs is a `gh api` command line, taken apart.
@@ -157,6 +193,10 @@ func (g *ghAPIArgs) option(a word, next *word) bool {
 		return false
 	case name == "-f" || name == "-F" || name == "--field" || name == "--raw-field":
 		g.fields = append(g.fields, value)
+	case strings.HasPrefix(a.val, "-f") || strings.HasPrefix(a.val, "-F"):
+		// An attached value: -fquery='mutation { ... }'.
+		g.fields = append(g.fields, word{val: a.val[2:], ok: true, node: a.node})
+		return false
 	case slices.Contains(ghAPIValueOptions, name):
 		g.input = g.input || name == "--input"
 	default:

@@ -86,10 +86,30 @@ func TestABareMergeTellAuthorises(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, e.preTool(s, "gh pr merge"), "a message that mentions merging isn't the go-ahead")
 
+	// A bare "merge" is the go-ahead only to an agent waiting on one.
+	e.agent(s, "ready-to-merge")
+	e.do(s, fake.CmdTurnEnd)
+	e.await("agent.state", toState("waiting_merge"))
 	e.h.ok(t, "tell", tk.ID, "Merge.")
 	_, err = s.Expect(e.ctx(), fake.RepUser)
 	require.NoError(t, err)
 	assert.Empty(t, e.preTool(s, "gh pr merge"))
+}
+
+func TestMergeAsAnAnswerIsntAGoAhead(t *testing.T) {
+	t.Parallel()
+	e := newE2E(t)
+	s, tk := e.started()
+	e.agent(s, "ask", "Rebase on main, or merge main in?", "--option", "rebase", "--option", "merge")
+	e.do(s, fake.CmdTurnEnd)
+	e.await("agent.state", toState("waiting_user"))
+	e.h.ok(t, "tell", tk.ID, "merge")
+	answer, err := s.Expect(e.ctx(), fake.RepUser)
+	require.NoError(t, err)
+	assert.Contains(t, answer.Text, "merge")
+	assert.NotContains(t, answer.Text, "authorised to merge", "the answer is delivered as it was given")
+	e.do(s, fake.CmdTurnStart)
+	assert.NotEmpty(t, e.preTool(s, "gh pr merge"), "and it authorises nothing")
 }
 
 func TestTheMergeGuardLetsAnAutoMergeTicketMerge(t *testing.T) {

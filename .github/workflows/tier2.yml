@@ -14,6 +14,12 @@ on:
       - slop-bot/internal/scriptedmodel/**
       - slop-bot/internal/ident/**
       - slop-bot/internal/version/**
+      # The merge guard's tests run the real hook, through the CLI; these
+      # are the parts of it the guard is made of (the CLI's other
+      # dependencies are covered by the unit and e2e suites).
+      - slop-bot/internal/mergeguard/**
+      - slop-bot/internal/cli/hook.go
+      - slop-bot/internal/api/guard.go
       - slop-bot/go.mod
       - slop-bot/go.sum
       - go-clock/**

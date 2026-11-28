@@ -39,6 +39,8 @@ const (
 	KindPushUnknown Kind = "push_unknown"
 	// KindTool is a non-shell tool named as a merge (an MCP server's).
 	KindTool Kind = "merge_tool"
+	// KindSelfAuthorise is an agent's own `slop-bot tell --merge`.
+	KindSelfAuthorise Kind = "self_authorise"
 	// KindOpaque is a command the classifier can't take apart (a parse
 	// failure, a script fed to a shell's stdin) that mentions a merge or a
 	// push.
@@ -79,9 +81,12 @@ func NewClassifier(git Git) *Classifier { return &Classifier{git: git} }
 // shellTools are the tool names harnesses give their shell.
 var shellTools = []string{"bash", "shell", "exec_command", "local_shell"}
 
-// mergeTool matches an MCP tool that merges: GitHub's MCP server's
-// merge_pull_request, say. Its arguments aren't looked at.
-var mergeTool = regexp.MustCompile(`(?i)^mcp__.*merge`)
+// mergeTool matches an MCP tool whose own name (the part after the server)
+// is a merging verb: GitHub's merge_pull_request, GitLab's
+// merge_merge_request or accept_merge_request, an auto-merge switch. A tool
+// that only reads or opens a merge request (get_merge_request,
+// create_merge_request) isn't one. Its arguments aren't looked at.
+var mergeTool = regexp.MustCompile(`(?i)^mcp__.+__(merge_(pull_request|merge_request|branch|pr|mr)|accept_merge_request|enable_.*auto_?merge|enqueue_pull_request)s?$`)
 
 // Classify returns the merge call is, or nil when it isn't one.
 func (c *Classifier) Classify(ctx context.Context, call *Call) *Finding {
@@ -112,11 +117,17 @@ var mentions = regexp.MustCompile(`(?i)\b(merge|push)`)
 // scan is one classification: it walks the parsed command in source order,
 // tracking `cd`, and stops at the first merge.
 type scan struct {
-	c     *Classifier
-	ctx   context.Context
-	dir   string
-	src   string
-	found *Finding
+	c   *Classifier
+	ctx context.Context
+	dir string
+	// dirUnknown is set once a computed `cd` or `git -C` leaves the
+	// directory unknown: the current branch can't be read there.
+	dirUnknown bool
+	// switched is set once the command checks out another branch before
+	// its push: the branch the hook sees isn't the one pushed.
+	switched bool
+	src      string
+	found    *Finding
 }
 
 func (s *scan) find(kind Kind, detail string) {
@@ -125,21 +136,24 @@ func (s *scan) find(kind Kind, detail string) {
 	}
 }
 
-// opaque falls back to mentions for text the scan can't take apart.
-func (s *scan) opaque(text, why string) {
-	if mentions.MatchString(text) {
+// opaque falls back to mentions when the scan can't take a command apart.
+// It looks at the whole command line, not just the computed word: in
+// `ACTION=push; git $ACTION origin main` the word is innocent, the line
+// isn't.
+func (s *scan) opaque(why string) {
+	if mentions.MatchString(s.src) {
 		s.find(KindOpaque, why+", and it mentions a merge or a push")
 	}
 }
 
 func (s *scan) script(src string, depth int) {
 	if depth > maxDepth {
-		s.opaque(src, "the command nests shells too deeply to follow")
+		s.opaque("the command nests shells too deeply to follow")
 		return
 	}
 	f, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(src), "")
 	if err != nil {
-		s.opaque(src, "the command doesn't parse")
+		s.opaque("the command doesn't parse")
 		return
 	}
 	syntax.Walk(f, func(n syntax.Node) bool {
@@ -237,7 +251,7 @@ func (s *scan) call(call *syntax.CallExpr, depth int) {
 		return
 	}
 	if !argv[0].ok {
-		s.opaque(printed(call), "the command it runs is computed")
+		s.opaque("the command it runs is computed")
 		return
 	}
 	args := argv[1:]
@@ -255,6 +269,8 @@ func (s *scan) call(call *syntax.CallExpr, depth int) {
 		s.gh(args)
 	case "glab":
 		s.glab(args)
+	case "slop-bot":
+		s.slopBot(args)
 	case "curl", "wget", "http", "https", "xh":
 		s.httpClient(name, args)
 	case "eval":
@@ -271,7 +287,7 @@ func (s *scan) eval(call *syntax.CallExpr, args []word, depth int) {
 	parts := make([]string, 0, len(args))
 	for _, a := range args {
 		if !a.ok {
-			s.opaque(printed(call), "eval runs a computed command")
+			s.opaque("eval runs a computed command")
 			return
 		}
 		parts = append(parts, a.val)
@@ -282,6 +298,7 @@ func (s *scan) eval(call *syntax.CallExpr, args []word, depth int) {
 func (s *scan) cd(args []word) {
 	for _, a := range args {
 		if !a.ok {
+			s.dirUnknown = true
 			return
 		}
 		if strings.HasPrefix(a.val, "-") && a.val != "-" {
@@ -334,12 +351,12 @@ func (s *scan) shell(args []word, depth int) {
 	switch {
 	case cflag && i < len(args):
 		if !args[i].ok {
-			s.opaque(printed(args[i].node), "the script given to the shell is computed")
+			s.opaque("the script given to the shell is computed")
 			return
 		}
 		s.script(args[i].val, depth+1)
 	case i >= len(args):
-		s.opaque(s.src, "it feeds a script to a shell's stdin")
+		s.opaque("it feeds a script to a shell's stdin")
 	}
 }
 
@@ -369,8 +386,10 @@ var wrappers = map[string]wrapper{
 	"stdbuf":   {values: []string{"-i", "-o", "-e"}},
 	"chronic":  {},
 	"unbuffer": {},
-	"xargs": {values: []string{"-I", "-i", "-n", "--max-args", "-P", "--max-procs", "-d", "--delimiter", "-a", "--arg-file",
-		"-L", "--max-lines", "-s", "--max-chars", "-E", "-e", "--eof", "--replace"}},
+	// -i, -e, --replace, --eof and --max-lines take their value only when
+	// it's attached, so they aren't listed.
+	"xargs": {values: []string{"-I", "-n", "--max-args", "-P", "--max-procs", "-d", "--delimiter", "-a", "--arg-file",
+		"-L", "-s", "--max-chars", "-E"}},
 }
 
 // unwrap strips wrappers (`env FOO=1 sudo -u me git push`) down to the
@@ -398,7 +417,11 @@ func unwrap(argv []word) []word {
 // options and assignments.
 func (w *wrapper) skip(argv []word) int {
 	i := 1
-	for i < len(argv) && argv[i].ok {
+	for i < len(argv) && (argv[i].ok || w.assignments && computedAssignment(argv[i].node)) {
+		if !argv[i].ok {
+			i++ // NAME="$X": still an assignment
+			continue
+		}
 		a := argv[i].val
 		switch {
 		case a == "--":
@@ -413,4 +436,46 @@ func (w *wrapper) skip(argv []word) int {
 		i++
 	}
 	return i
+}
+
+// computedAssignment reports whether w is NAME=<something computed>, as
+// in `env GIT_SSH_COMMAND="ssh -i $KEY" git push`.
+func computedAssignment(w *syntax.Word) bool {
+	if w == nil || len(w.Parts) == 0 {
+		return false
+	}
+	lit, ok := w.Parts[0].(*syntax.Lit)
+	if !ok {
+		return false
+	}
+	name, _, found := strings.Cut(lit.Value, "=")
+	return found && assignName.MatchString(name)
+}
+
+var assignName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// slopBot refuses the agent authorising its own merge: `slop-bot tell
+// <agent> --merge`, or a bare "merge", run from the agent's shell with the
+// token stripped (`env -u SLOP_BOT_AGENT_TOKEN ...`), reaches the daemon as
+// the user. The token is advisory, but this one is cheap to close.
+func (s *scan) slopBot(args []word) {
+	i := firstPositional(args, []string{"--config"})
+	if i < 0 || args[i].val != "tell" {
+		return
+	}
+	rest := args[i+1:]
+	for _, a := range rest {
+		if !a.ok || a.val == "--merge" || strings.HasPrefix(a.val, "--merge=") {
+			s.find(KindSelfAuthorise, "slop-bot tell --merge from an agent's shell")
+			return
+		}
+	}
+	if len(rest) > 0 && saysMerge(rest[len(rest)-1].val) {
+		s.find(KindSelfAuthorise, "slop-bot tell <agent> merge from an agent's shell")
+	}
+}
+
+// saysMerge is agents.SaysMerge: a whole message of just "merge".
+func saysMerge(text string) bool {
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(text), ".!"), "merge")
 }

@@ -37,7 +37,7 @@ func (a *app) tellCmd() *cobra.Command {
 		Short: "Message an agent, every agent (--all), or the user",
 		Long: "Message an agent (by id, or by its ticket's id), every working agent with --all, " +
 			"or the user. A user's message to an agent waiting on an ask is its answer. " +
-			"The user's --merge (or a message of just \"merge\") authorises the agent to merge " +
+			"The user's --merge (or just \"merge\" to an agent in waiting_merge) authorises the agent to merge " +
 			"its ticket's work, which a ticket without AutoMerge needs.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			switch {
