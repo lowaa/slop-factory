@@ -140,6 +140,14 @@ type Agents struct {
 type Retention struct {
 	Transcripts Duration `yaml:"transcripts"`
 	Events      Duration `yaml:"events"`
+	// StateChanges is how long agents' state history is kept.
+	StateChanges Duration `yaml:"state_changes"`
+	// Messages is how long a delivered or read message is kept. Queued
+	// messages and open asks are kept however old.
+	Messages Duration `yaml:"messages"`
+	// Agents is how long an ended agent's record is kept. One released to
+	// a person is kept for good: it keeps new agents off their ticket.
+	Agents Duration `yaml:"agents"`
 }
 
 // Duration is a time.Duration written as "15m", "24h".
@@ -269,6 +277,17 @@ func (c *Config) defaultDurations() {
 	if c.Retention.Events == 0 {
 		c.Retention.Events = Duration(30 * 24 * time.Hour)
 	}
+	if c.Retention.StateChanges == 0 {
+		c.Retention.StateChanges = Duration(30 * 24 * time.Hour)
+	}
+	if c.Retention.Messages == 0 {
+		c.Retention.Messages = Duration(30 * 24 * time.Hour)
+	}
+	if c.Retention.Agents == 0 {
+		// Longer than a transcript is kept, so a retained transcript can
+		// still be found by its ticket's id (LatestForTicket).
+		c.Retention.Agents = max(Duration(90*24*time.Hour), c.Retention.Transcripts)
+	}
 }
 
 func (c *Config) resolvePaths(dir, home string) error {
@@ -377,8 +396,16 @@ func (c *Config) validateLimits(v *validation) {
 	if c.Autonomy.TicketsPerAgent < 1 {
 		v.add("autonomy.tickets_per_agent: must be at least 1")
 	}
-	if c.Retention.Transcripts < 0 || c.Retention.Events < 0 {
-		v.add("retention: transcripts and events must be positive durations")
+	for _, r := range []struct {
+		name string
+		d    Duration
+	}{
+		{"transcripts", c.Retention.Transcripts}, {"events", c.Retention.Events},
+		{"state_changes", c.Retention.StateChanges}, {"messages", c.Retention.Messages}, {"agents", c.Retention.Agents},
+	} {
+		if r.d < 0 {
+			v.add("retention.%s: %s isn't a positive duration", r.name, r.d.D())
+		}
 	}
 	// Heartbeats come every third of the lease; much shorter and a busy
 	// daemon would hand back attaches whose CLI is fine.

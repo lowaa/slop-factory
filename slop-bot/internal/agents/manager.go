@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 	"time"
 
@@ -86,9 +85,13 @@ type Manager struct {
 	mu      sync.Mutex
 	runners map[ident.AgentID]*runner
 	// wantSlot are idle agents with a message to deliver and no free slot,
-	// in the order they started waiting: an answered agent goes ahead of
-	// new work.
-	wantSlot []ident.AgentID
+	// live or parked, in the order they started waiting: an answered agent
+	// goes ahead of new work. state.db's queue keeps the same order, so a
+	// restart serves it unchanged (slotqueue.go).
+	wantSlot []slotWait
+	// parked are live agents stopped to free a process past max_live, to be
+	// resumed by id when they next have work (parking.go).
+	parked map[ident.AgentID]*parkedAgent
 	// starting are tickets whose agent is being started or resumed off the
 	// scheduler goroutine, with the pool it starts in: each holds a slot and
 	// a live place until its start settles, so starts in flight can't
@@ -153,6 +156,7 @@ func New(opts *Options) (*Manager, error) {
 		starting:     map[ident.TicketID]state.Pool{},
 		settledCh:    map[ident.TicketID]chan struct{}{},
 		recoverAfter: map[ident.TicketID]*runner{},
+		parked:       map[ident.AgentID]*parkedAgent{},
 		streams:      map[ident.AgentID]int{},
 		limits:       newLimits(),
 		guardTold:    map[string]time.Time{},
@@ -165,17 +169,21 @@ func New(opts *Options) (*Manager, error) {
 	}, nil
 }
 
-// Start resumes live agents, each on its own goroutine, and starts the
-// scheduler.
+// Start resumes live agents, each on its own goroutine (a parked one stays
+// parked until it has work), and starts the scheduler.
 func (m *Manager) Start(ctx context.Context) error {
 	if err := m.loadLimits(ctx); err != nil {
+		return err
+	}
+	// Before any resume: a resuming agent takes its place in the queue.
+	if err := m.loadQueue(ctx); err != nil {
 		return err
 	}
 	if err := m.resumeAll(ctx); err != nil {
 		return err
 	}
-	go m.schedule() // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
-	go m.sweeper()  // #nosec G118 -- like the scheduler, it runs until Stop
+	go m.schedule()                                      // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
+	go m.sweeper(m.opts.Clock.NewTicker(m.sweepEvery())) // #nosec G118 -- like the scheduler, it runs until Stop
 	m.Kick()
 	return nil
 }
@@ -252,8 +260,30 @@ func (m *Manager) goStartLocked(ticket ident.TicketID, pool state.Pool, admit bo
 	if m.stopping {
 		return false
 	}
-	if _, busy := m.starting[ticket]; busy || (admit && !m.admitsLocked(pool)) {
+	if _, busy := m.starting[ticket]; busy {
 		return false
+	}
+	if admit {
+		ok, victim := m.admitLocked(pool)
+		if !ok {
+			return false
+		}
+		if victim != nil {
+			// Parked first, on this start's goroutine, so the live
+			// processes never exceed max_live.
+			parked := m.parkLocked(victim)
+			if parked == nil {
+				return false // it stopped being parkable: the next pass looks again
+			}
+			then := start
+			start = func(ctx context.Context) {
+				// No room after all: the ticket is still eligible, and the
+				// next pass tries again.
+				if m.park(ctx, victim, parked) {
+					then(ctx)
+				}
+			}
+		}
 	}
 	m.holdStartLocked(ticket, pool)
 	m.starts.Go(func() {
@@ -340,8 +370,9 @@ func (m *Manager) runner(id ident.AgentID) (*runner, bool) {
 func (m *Manager) forget(id ident.AgentID) {
 	m.mu.Lock()
 	delete(m.runners, id)
+	delete(m.parked, id)
 	// A gone agent mustn't hold its pool's queue.
-	m.wantSlot = slices.DeleteFunc(m.wantSlot, func(w ident.AgentID) bool { return w == id })
+	m.dequeueLocked(id)
 	m.mu.Unlock()
 	m.Kick()
 }

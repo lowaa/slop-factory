@@ -286,6 +286,7 @@ func (ar *agentRoutes) status(w http.ResponseWriter, r *http.Request) {
 		out.Agents = append(out.Agents, api.AgentStatus{
 			ID: string(a.ID), Ticket: string(a.Ticket), Title: title, TicketStatus: ticketStatus, Blockers: blockers, State: string(a.State), Since: a.StateSince,
 			Harness: a.Harness, Model: a.Model, Effort: a.Effort, Pool: string(a.Pool), Note: a.ProgressNote, Nudges: a.Nudges,
+			ParkedAt: a.ParkedAt,
 		})
 	}
 	control.WriteJSON(w, http.StatusOK, out)

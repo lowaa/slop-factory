@@ -36,6 +36,7 @@ type AgentWriter interface {
 	SetConversation(ctx context.Context, id ident.AgentID, conversation, dir string) error
 	SetProgressNote(ctx context.Context, id ident.AgentID, note string) error
 	SetDeclared(ctx context.Context, id ident.AgentID, declared, summary string) error
+	SetParked(ctx context.Context, id ident.AgentID, parked bool) error
 	AddNudge(ctx context.Context, id ident.AgentID) (int, error)
 	ResetNudges(ctx context.Context, id ident.AgentID) error
 }
@@ -84,6 +85,8 @@ type AskStore interface {
 	Answer(ctx context.Context, n *NewMessage) (*Message, int64, error)
 	OpenAsks(ctx context.Context) ([]*Ask, error)
 	OpenAsksFrom(ctx context.Context, agent ident.AgentID) ([]*Ask, error)
+	AsksToRemind(ctx context.Context, before time.Time) ([]*Ask, error)
+	Remind(ctx context.Context, askID int64, reminder *NewMessage) (bool, error)
 }
 
 // MessageHistory is `inbox --log` and the loop guard's counts.
@@ -118,11 +121,11 @@ type EventLog interface {
 	EventFollower
 }
 
-// QueueStore is the scheduler's waiting tickets.
+// QueueStore is the scheduler's agents waiting for a slot, by ticket. New
+// work isn't queued: the scheduler takes it from the ticket list, oldest
+// first, which already survives a restart.
 type QueueStore interface {
-	PushBack(ctx context.Context, pool Pool, ticket ident.TicketID) error
 	PushFront(ctx context.Context, pool Pool, ticket ident.TicketID) error
-	Pop(ctx context.Context, pool Pool) (ident.TicketID, bool, error)
 	List(ctx context.Context, pool Pool) ([]QueuedTicket, error)
 	Remove(ctx context.Context, ticket ident.TicketID) (bool, error)
 }

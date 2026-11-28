@@ -158,3 +158,26 @@ func TestPruneEndedAgentsKeepsLiveOnesAndOnesWithWorktrees(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, r.Agents)
 }
+
+// A person's take-over is what keeps new agents off its ticket, so its
+// record outlives retention; an agent slop-bot gave up on blocks nothing.
+func TestPruneEndedAgentsKeepsOnesReleasedToAPerson(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	f.createAgent(t, "taken-over", "1")
+	f.createAgent(t, "given-up", "2")
+	f.setState(t, "taken-over", state.StateReleased)
+	_, err := f.Agents.SetState(ctx, &state.Transition{Agent: "given-up", To: state.StateReleased, GivenUp: true})
+	require.NoError(t, err)
+	f.clock.Advance(365 * 24 * time.Hour)
+
+	r, err := f.Pruner.Prune(ctx, &state.PruneCutoffs{EndedAgents: f.clock.Now()})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, r.Agents)
+	released, err := f.Agents.ReleasedForTicket(ctx, "1")
+	require.NoError(t, err)
+	assert.True(t, released, "the take-over still blocks a respawn")
+	_, err = f.Agents.Get(ctx, "given-up")
+	assert.ErrorIs(t, err, state.ErrNotFound)
+}

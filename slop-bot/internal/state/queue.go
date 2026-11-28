@@ -39,19 +39,13 @@ type queueRow struct {
 	EnqueuedAt int64  `bun:"enqueued_at"`
 }
 
-// Queue holds the eligible tickets waiting for a slot, per pool, in order.
-// A ticket waits in at most one place.
+// Queue holds the tickets whose agents wait for a slot, per pool, in order,
+// so a restart serves them in the same order. A ticket waits in at most one
+// place. The scheduler queues only to the front lane; the back lane, for
+// new work, is kept for the tests of the lane order (export_test.go).
 type Queue struct {
 	db    *sqlitex.DB
 	clock clock.Clock
-}
-
-// PushBack queues ticket behind everything waiting in pool: new work. A
-// ticket already waiting in pool keeps its place, so re-reconciling an
-// eligible ticket doesn't lose it its turn; one waiting in the other pool
-// moves.
-func (q *Queue) PushBack(ctx context.Context, pool Pool, ticket ident.TicketID) error {
-	return q.push(ctx, pool, ticket, laneBack)
 }
 
 // PushFront queues ticket ahead of pool's new work, behind tickets pushed
@@ -62,23 +56,8 @@ func (q *Queue) PushFront(ctx context.Context, pool Pool, ticket ident.TicketID)
 	return q.push(ctx, pool, ticket, laneFront)
 }
 
-// Pop takes the ticket at the front of pool. ok is false when pool is
-// empty.
-func (q *Queue) Pop(ctx context.Context, pool Pool) (ticket ident.TicketID, ok bool, err error) {
-	var id string
-	err = q.db.NewRaw(`DELETE FROM queue WHERE ticket_id = (
-			SELECT ticket_id FROM queue WHERE pool = ? ORDER BY lane, position LIMIT 1
-		) RETURNING ticket_id`, string(pool)).Scan(ctx, &id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("state: popping the %s queue: %w", pool, err)
-	}
-	return ident.TicketID(id), true, nil
-}
-
-// List returns pool's waiting tickets, in the order Pop takes them.
+// List returns pool's waiting tickets, in the order they are served: the
+// front lane first, then first come first served.
 func (q *Queue) List(ctx context.Context, pool Pool) ([]QueuedTicket, error) {
 	var rows []queueRow
 	if err := q.db.NewSelect().Model(&rows).Where("pool = ?", string(pool)).Order("lane", "position").Scan(ctx); err != nil {

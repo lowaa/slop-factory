@@ -73,6 +73,7 @@ func (m *Manager) sync(ctx context.Context, ticket ident.TicketID) {
 	}
 	// An agent being started or recovered is synced once that settles.
 	if !running {
+		m.syncParked(ctx, a, t)
 		return
 	}
 	m.syncBlocked(ctx, r, a, t)
@@ -184,13 +185,20 @@ func (m *Manager) evaluate(ctx context.Context) {
 		m.mu.Unlock()
 		return
 	}
-	waiting := append([]ident.AgentID(nil), m.wantSlot...)
+	waiting := make([]ident.AgentID, len(m.wantSlot))
+	for i, w := range m.wantSlot {
+		waiting[i] = w.agent
+	}
 	m.mu.Unlock()
-	// Agents with an answer to act on go ahead of new work.
+	// Agents with an answer to act on go ahead of new work, parked ones
+	// too.
 	for _, id := range waiting {
 		if r, ok := m.runner(id); ok {
 			m.deliverPending(ctx, r)
+			continue
 		}
+		m.unparkWhenServed(id)
+		m.dropStray(id)
 	}
 	for _, t := range m.eligible(ctx) {
 		pool := state.PoolNormal
@@ -259,26 +267,27 @@ func (m *Manager) admits(pool state.Pool) bool {
 	return m.admitsLocked(pool)
 }
 
-// admitsLocked reports whether new work may start in pool now: no agent in
-// it is queued for a slot (new work never jumps one, even when a slot has
-// freed since the queue was served), it has a free slot, and max_live has
-// room. Call it holding mu.
+// admitsLocked reports whether new work may start in pool now (see
+// admitLocked): past max_live, only if an idle agent can be parked for it.
+// Call it holding mu.
 func (m *Manager) admitsLocked(pool state.Pool) bool {
-	return !m.queuedLocked(pool) && m.slotFreeLocked(pool, "") &&
-		len(m.runners)+len(m.starting) < m.opts.Config.Concurrency.MaxLive
+	ok, _ := m.admitLocked(pool)
+	return ok
 }
 
 // slotFreeLocked reports whether pool has room for one more agent in a
-// turn, not counting except (an agent asking for a slot for itself). An
-// agent being started holds a slot. Call it holding mu.
-func (m *Manager) slotFreeLocked(pool state.Pool, except ident.AgentID) bool {
+// turn, not counting except (an agent asking for a slot for itself), nor
+// the start of exceptTicket (that agent's own resume, which holds a slot
+// until it settles). An agent being started holds a slot. Call it holding
+// mu.
+func (m *Manager) slotFreeLocked(pool state.Pool, except ident.AgentID, exceptTicket ident.TicketID) bool {
 	limit := m.opts.Config.Concurrency.MaxActive
 	if pool == state.PoolUrgent {
 		limit = m.opts.Config.Concurrency.Urgent.MaxActive
 	}
 	n := 0
-	for _, p := range m.starting {
-		if p == pool {
+	for ticket, p := range m.starting {
+		if p == pool && (exceptTicket == "" || ticket != exceptTicket) {
 			n++
 		}
 	}
@@ -293,27 +302,20 @@ func (m *Manager) slotFreeLocked(pool state.Pool, except ident.AgentID) bool {
 // takeSlot claims a slot for an idle agent about to take a turn, as one
 // step under mu, so two takers can't both claim the last slot. Agents
 // queued for a slot are served in order, ahead of new work: one that isn't
-// at the front waits even when a slot is free, and joins the queue.
+// at the front waits even when a slot is free, and joins the queue. So
+// does one being parked, which is resumed for its turn.
 func (m *Manager) takeSlot(r *runner) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	ahead := false
-	for _, id := range m.wantSlot {
-		if id == r.id {
-			break
-		}
-		if other, ok := m.runners[id]; ok && other.pool == r.pool {
-			ahead = true
-			break
-		}
-	}
+	ahead := m.aheadLocked(r.pool, r.id)
 	r.mu.Lock()
 	// An agent handed back from an attach brings the slot it held.
 	held := r.holdsSlot
 	r.holdsSlot = false
+	parking := r.parking
 	r.mu.Unlock()
-	if held || (!ahead && m.slotFreeLocked(r.pool, r.id)) {
-		m.wantSlot = slices.DeleteFunc(m.wantSlot, func(id ident.AgentID) bool { return id == r.id })
+	if !parking && (held || (!ahead && m.slotFreeLocked(r.pool, r.id, r.ticket))) {
+		m.dequeueLocked(r.id)
 		r.mu.Lock()
 		// Counted as active from now, so a second taker sees the slot gone
 		// before the harness reports the turn.
@@ -321,9 +323,7 @@ func (m *Manager) takeSlot(r *runner) bool {
 		r.mu.Unlock()
 		return true
 	}
-	if !slices.Contains(m.wantSlot, r.id) {
-		m.wantSlot = append(m.wantSlot, r.id)
-	}
+	m.queueLocked(slotWait{agent: r.id, ticket: r.ticket, pool: r.pool})
 	return false
 }
 
@@ -341,18 +341,7 @@ func (m *Manager) releaseSlot(r *runner) {
 func (m *Manager) unqueue(id ident.AgentID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.wantSlot = slices.DeleteFunc(m.wantSlot, func(w ident.AgentID) bool { return w == id })
-}
-
-// queuedLocked reports whether an agent in pool is waiting for a slot.
-// Call it holding mu.
-func (m *Manager) queuedLocked(pool state.Pool) bool {
-	for _, id := range m.wantSlot {
-		if r, ok := m.runners[id]; ok && r.pool == pool {
-			return true
-		}
-	}
-	return false
+	m.dequeueLocked(id)
 }
 
 func (m *Manager) autonomy(ctx context.Context) bool {

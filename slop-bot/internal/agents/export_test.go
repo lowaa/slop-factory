@@ -13,6 +13,12 @@ import (
 // sweeper's tick to know it has run.
 func (m *Manager) SweepLeases(ctx context.Context) { m.sweepLeases(ctx) }
 
+// RemindAsks runs one ask-reminder sweep now, as SweepLeases does.
+func (m *Manager) RemindAsks(ctx context.Context) { m.remindAsks(ctx) }
+
+// IsParked reports whether the agent is parked to free a process.
+func (m *Manager) IsParked(id ident.AgentID) bool { return m.isParked(id) }
+
 // HeldRetry is heldRetry, for a test to move the clock by.
 const HeldRetry = heldRetry
 

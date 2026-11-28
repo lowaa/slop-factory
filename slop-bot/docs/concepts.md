@@ -67,7 +67,8 @@ is told; `slop-bot worktrees` lists them, and `worktrees clean` removes them). A
 so a new agent isn't started into the same failure. A harness that fails to
 start is treated the same way. `slop-bot ticket set <id> --status preparing`
 puts a parked ticket back in line. On a daemon restart, live agents are
-resumed by their conversation id; a TUI agent's (agy's) session outlives the
+resumed by their conversation id, except those parked to free a process
+(see [slots](#slots)), which wait for work; a TUI agent's (agy's) session outlives the
 daemon instead, and is taken back as it runs. `slop-bot uninstall` ends
 those sessions.
 
@@ -78,7 +79,7 @@ CLI commands:
 
 | Declaration | Effect |
 | --- | --- |
-| `ask` | files a question for the user and returns at once; the agent carries on with what doesn't depend on the answer. When the turn ends, the agent is `waiting_user`. A user `tell` to an agent with open asks is the answer, mid-turn included. Broadcasts and slop-bot's own notices never answer. |
+| `ask` | files a question for the user and returns at once; the agent carries on with what doesn't depend on the answer. When the turn ends, the agent is `waiting_user`. A user `tell` to an agent with open asks is the answer, mid-turn included. Broadcasts and slop-bot's own notices never answer. An ask still open `agents.ask_reminder_after` (default 24h) after it was asked brings you one reminder in your inbox. |
 | `discuss` | for a risky, costly-to-undo decision: moves the ticket to `discussion`, writes the options and recommendation as a ticket comment, tells the user. The agent is `discussion` at turn end. `discussions resolve <ticket> <text>` moves the ticket back to `open` and tells the agent. |
 | `ready-to-merge` | on a ticket without `AutoMerge`: comments (with the PR URL, if given), tells the user, and the agent is `waiting_merge`. Merge when the user tells the agent to. Refused if the ticket has `AutoMerge`. |
 | `done --summary` | the ticket's goal is met, not merely merged: there may be checks or a deploy to verify first. The agent finishes when the turn ends; the summary goes on the ticket as a comment, the ticket becomes `done`, the transcript is kept, and worktrees are cleaned up. |
@@ -126,19 +127,31 @@ Two limits bound how many agents run. Both are counted per daemon.
   urgent tickets, so a red main branch never queues behind normal work.
 - `concurrency.max_live` (default the larger of 3 times `max_active` and
   `max_active` plus `urgent.max_active`) caps live harness
-  processes, working or waiting. At the cap, no new agent starts.
+  processes, working or waiting. At the cap, a start that needs a process
+  stops the agent that has waited longest, between turns, on a person
+  (`waiting_user`, `discussion`, `waiting_merge`, or `idle` after an
+  interrupt) or on its ticket's blockers (`idle`). It is **parked**: it keeps
+  its state, and its messages queue as usual. The first message for it, or a
+  change to its ticket it must hear of (its blockers, a new repo), queues it
+  for a slot, and it is resumed by its conversation id when it gets one,
+  parking another if need be. A restart leaves a parked agent parked.
+  `slop-bot status` shows it as `<state> (parked)` (`parked_at` in
+  `--json`). A TUI session is never parked while a person is in it, or once
+  joined, or adopted after a restart: stopping it would end their session. An
+  agent in a turn, starting, attached, finishing, `stalled`, or with a
+  message waiting for a slot is parked only for a parked agent ahead of it
+  in the queue (it keeps its place). When no agent can be parked, the start
+  waits.
 
 An agent that has an answer or message to act on is served before new
-tickets. New work never jumps an agent already queued for a slot.
+tickets, parked or not, first come first served per pool. New work never
+jumps an agent already queued for a slot. The queue's order is kept in
+`state.db`, so a restart serves it in the same order.
 
 An urgent ticket is one the user marked `--urgent`, or an agent did, when
 `agents_may_set_urgent` is true, with a required `--reason` that goes on the
 ticket as a comment; the user isn't told separately. The briefing tells
 agents to use it only for something breaking the pipeline.
-
-The design also stops the longest-waiting agent to free a live place when
-`max_live` is reached, resuming it later by id. This build only refuses new
-starts at the cap.
 
 ## The autonomous loop and its budget
 
@@ -175,6 +188,10 @@ own TUI, resuming the same conversation, in your terminal. The TUI gets a
 fresh agent token, so `ask` and `done` work from inside it.
 
 - one attach per agent. A second is told who holds it.
+- a parked agent (see [slots](#slots)) has no session to take over:
+  `attach` queues it to be resumed, without a message (a `tell` to an
+  agent with open asks would answer them), and asks you to attach again in a
+  moment.
 - the attach holds a **lease**, renewed by the CLI's heartbeat. If the
   heartbeat stops for `agents.attach_lease` (default 30s), the agent is
   handed back without the CLI. After a daemon restart the CLI has that long
@@ -210,11 +227,16 @@ Retention sweeps run on a timer:
 - retained transcripts are deleted `retention.transcripts` after their agent
   ends (default 30 days)
 - events older than `retention.events` are deleted (default 30 days)
+- agents' state history older than `retention.state_changes` (default 30
+  days)
+- messages delivered or read more than `retention.messages` ago (default
+  30 days); queued messages are kept
+- ended agents, with their history, `retention.agents` after they ended
+  (default 90 days)
 
-The state database also has pruning for old state changes, read messages and
-ended agents; the daemon's sweep currently applies only the event cutoff.
 An open `ask` is never pruned, and neither is an agent that still has
-worktrees recorded.
+worktrees recorded, nor one released to a person with `attach --no-resume`:
+its record is what keeps a new agent off the ticket the person took over.
 
 ## Plan-limit holds
 

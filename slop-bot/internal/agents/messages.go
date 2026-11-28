@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -84,6 +85,9 @@ func (m *Manager) tell(ctx context.Context, req *tellReq) (*state.Message, error
 			return msg, nil
 		}
 		m.deliverNow(ctx, r)
+	} else {
+		// A parked agent is resumed to read it.
+		m.wakeParked(a.ID)
 	}
 	return msg, nil
 }
@@ -141,13 +145,15 @@ func (m *Manager) tellTheUser(ctx context.Context, from ident.Principal, text st
 // no one's question.
 func (m *Manager) TellAll(ctx context.Context, from ident.Principal, text string) (int, error) {
 	m.mu.Lock()
-	ids := make([]ident.AgentID, 0, len(m.runners))
+	ids := make([]ident.AgentID, 0, len(m.runners)+len(m.parked))
 	for id := range m.runners {
-		if from.IsUser() || id != from.Agent {
-			ids = append(ids, id)
-		}
+		ids = append(ids, id)
+	}
+	for id := range m.parked {
+		ids = append(ids, id)
 	}
 	m.mu.Unlock()
+	ids = slices.DeleteFunc(ids, func(id ident.AgentID) bool { return !from.IsUser() && id == from.Agent })
 	n := 0
 	for _, id := range ids {
 		if _, err := m.tell(ctx, &tellReq{from: from, to: string(id), text: text}); err != nil {

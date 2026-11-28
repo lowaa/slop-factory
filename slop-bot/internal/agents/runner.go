@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -42,8 +43,11 @@ type runner struct {
 	conv harness.Conversation
 	caps harness.Capabilities
 
-	mu      sync.Mutex
-	st      state.AgentState
+	mu sync.Mutex
+	st state.AgentState
+	// since is when the agent entered st: who has waited longest, for
+	// parking.
+	since   time.Time
 	inTurn  bool
 	decl    declared
 	summary string
@@ -68,6 +72,17 @@ type runner struct {
 	// holdsSlot carries an attached agent's slot into its first turn after
 	// the hand-back, so it can't lose it to new work in between.
 	holdsSlot bool
+	// parking is the agent being stopped to free a process: it takes no
+	// slot, and a message for it queues it to be resumed.
+	parking bool
+	// settling is a turn's end being acted on.
+	settling bool
+	// adoptedSession is a TUI session that outlived a daemon restart and was
+	// taken back as it ran: a person may be in it, so it is never parked.
+	adoptedSession bool
+	// personIn is a person found in its TUI session when a park tried to
+	// stop it: it isn't parked again until its next turn.
+	personIn bool
 	// joinable says a person attaches by joining conv's session (a TUI),
 	// which runs on through the attach instead of stopping.
 	joinable bool
@@ -133,6 +148,9 @@ func (r *runner) setState(ctx context.Context, to state.AgentState, reason strin
 	r.mu.Lock()
 	from := r.st
 	r.st = to
+	if from != to {
+		r.since = r.m.opts.Clock.Now()
+	}
 	r.mu.Unlock()
 	if from == to {
 		return
@@ -216,7 +234,7 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 	switch ev.Kind {
 	case harness.TurnStarted:
 		r.mu.Lock()
-		r.inTurn = true
+		r.inTurn, r.personIn = true, false
 		r.mu.Unlock()
 		// A person's turn in a joined session leaves the agent attached.
 		if r.state() != state.StateAttached {
@@ -228,9 +246,15 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		}
 	case harness.TurnEnded:
 		r.mu.Lock()
-		r.inTurn = false
+		// Settling until turnEnded returns: what it does next (a delivery,
+		// a nudge) isn't visible until then, so it mustn't be parked.
+		r.inTurn, r.settling = false, true
 		r.mu.Unlock()
 		r.turnEnded(ctx, ev)
+		r.mu.Lock()
+		r.settling = false
+		r.mu.Unlock()
+		r.m.Kick()
 	case harness.Exited:
 		r.exitedWith(ctx, ev)
 	}

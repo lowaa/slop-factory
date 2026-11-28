@@ -284,7 +284,7 @@ func (f *follower) reread(ctx context.Context) error {
 // (harness.*): what the agent's states and messages do to it.
 var watchable = map[string]bool{
 	agents.EventState: true, agents.EventFinished: true, agents.EventDelivered: true,
-	agents.EventNudged: true, agents.EventResumed: true, "agent.asked": true, agents.EventReleased: true,
+	agents.EventNudged: true, agents.EventResumed: true, agents.EventParked: true, "agent.asked": true, agents.EventReleased: true,
 }
 
 // watch streams an agent's conversation events, live, from now, until it
