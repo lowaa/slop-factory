@@ -584,6 +584,12 @@ func TestUnimplementedHarness(t *testing.T) {
 	res := f.result(f.run(), "harness agy", "implemented")
 	assert.Equal(t, doctor.Warn, res.Level, "only agy's tickets are parked")
 	assert.Contains(t, res.Detail, "can't run agy under the tui driver")
+	f.cmds.Remove("agy")
+	for _, res := range f.run().Results {
+		if res.Group == "harness agy" {
+			assert.Equal(t, "implemented", res.Name, "nothing else is probed: a missing agy fails nothing")
+		}
+	}
 
 	f.config("default_harness: agy\nharnesses: {agy: {}}\n")
 	assert.Equal(t, doctor.Fail, f.result(f.run(), "harness agy", "implemented").Level,

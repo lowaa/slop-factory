@@ -96,6 +96,9 @@ func (d *Doctor) checkHarness(ctx context.Context, name string, cfg *config.Harn
 			level, fix = Fail, "set default_harness to a harness this build runs (claude-code, codex, pi)"
 		}
 		h.add("implemented", level, fmt.Sprintf("this build of slop-bot can't run %s under the %s driver yet", name, cfg.Driver), fix)
+		// Its binary and sign-in can't matter to this build: probing them
+		// would fail doctor, and so install, over a harness nothing runs.
+		return
 	}
 	bin, err := d.opts.Commands.LookPath(p.binary)
 	if err != nil {

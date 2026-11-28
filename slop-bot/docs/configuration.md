@@ -128,7 +128,7 @@ honoured when set to an absolute path; otherwise the default applies.
 | --- | --- | --- |
 | Config: `slop-bot-config.yaml`, `briefing.md` | `~/.config/slop-bot/` | `XDG_CONFIG_HOME` |
 | Data: `tickets.db` (the local tickets) | `~/.local/share/slop-bot/` | `XDG_DATA_HOME` |
-| State: `state.db`, `agents/<id>/` (rendered briefings), `transcripts/`, `logs/` | `~/.local/state/slop-bot/` | `XDG_STATE_HOME` |
+| State: `state.db`, `agents/<id>/` (rendered briefings), `transcripts/`, `logs/` (macOS; under systemd the logs go to the journal, `journalctl --user -u slop-bot.service`) | `~/.local/state/slop-bot/` | `XDG_STATE_HOME` |
 | Cache | `~/.cache/slop-bot/` | `XDG_CACHE_HOME` |
 | Runtime: `slop-bot.sock`, `daemon.lock` | `$XDG_RUNTIME_DIR/slop-bot/` | `XDG_RUNTIME_DIR` |
 

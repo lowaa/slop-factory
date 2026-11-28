@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 )
 
 func (a *app) pathsCmd() *cobra.Command {
@@ -32,7 +33,7 @@ func (a *app) pathsCmd() *cobra.Command {
 				{"local tickets db", p.TicketsDB(), ""},
 				{"state dir", p.State.Path, origin(p.State)},
 				{"state db", p.StateDB(), ""},
-				{"logs", p.LogDir(), ""},
+				{"service logs", service.LogsAt(a.deps.Env.GOOS, p.LogDir()), ""},
 				{"cache dir", p.Cache.Path, origin(p.Cache)},
 				{"runtime dir", p.Runtime.Path, origin(p.Runtime)},
 				{"control socket", p.Socket(), ""},

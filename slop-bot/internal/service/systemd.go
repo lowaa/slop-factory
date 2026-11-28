@@ -12,6 +12,16 @@ import (
 // unitName is the systemd user unit.
 const unitName = "slop-bot.service"
 
+// LogsAt is where the installed service's daemon logs go on goos: the
+// launchd plist sends them to logDir, and the systemd unit leaves them to
+// the journal.
+func LogsAt(goos, logDir string) string {
+	if goos == "darwin" {
+		return logDir
+	}
+	return "journalctl --user -u " + unitName
+}
+
 // systemd is the Linux Manager: a user unit driven by `systemctl --user`.
 type systemd struct {
 	set *settings

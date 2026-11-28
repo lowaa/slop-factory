@@ -172,7 +172,7 @@ func (s *installSummary) write(out *errWriter, goos string) {
 		briefing,
 		{"tickets db", s.p.TicketsDB()},
 		{"state db", s.p.StateDB()},
-		{"logs", s.p.LogDir()},
+		{"logs", service.LogsAt(goos, s.p.LogDir())},
 		s.socketRow(),
 		{"workspace_dir", s.cfg.WorkspaceDir, "worktrees; set in the config"},
 		{"service", s.installed.UnitPath, "runs: " + strings.Join(append([]string{s.installed.Binary}, s.installed.Args...), " ")},
