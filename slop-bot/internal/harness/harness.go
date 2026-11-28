@@ -53,8 +53,12 @@ type Conversation interface {
 	AttachPlan(ctx context.Context) (*AttachPlan, error)
 	// Undelivered, once Events has closed (with Exited, or after a
 	// Lasting's Close), are the messages Send took that never reached the
-	// harness: held for a hook, a turn's end, or a turn to steer into. The
-	// caller queues them again, or they are lost with the session.
+	// harness: held for a hook, a turn's end, or a turn to steer into, or
+	// still in the driver's write queue, not yet written whole to the
+	// harness's input, when it went. One may be reported that the harness
+	// did read (a later message's line still queued), never the reverse:
+	// delivering twice beats losing a message. The caller queues them
+	// again, or they are lost with the session.
 	Undelivered() []*Message
 }
 
