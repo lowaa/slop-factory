@@ -1,5 +1,7 @@
 # <file> <symbol> #<ticket that wires it>
 # Delete the line when that ticket merges.
+# Test support, imported only by tests, so no main will reach it: raise on #36
+# whether test-support packages belong here or in a deadcode filter.
 internal/briefing/ package #36
 internal/control/auth.go NewToken #36
 internal/control/auth.go PrincipalFrom #36
@@ -53,3 +55,6 @@ internal/service/servicetest/ package #36
 internal/sqlitex/ package #36
 internal/sqlitex/sqlitextest/ package #36
 internal/state/ package #36
+internal/tickets/ package #36
+internal/tickets/conformance/ package #36
+internal/tickets/local/ package #36
