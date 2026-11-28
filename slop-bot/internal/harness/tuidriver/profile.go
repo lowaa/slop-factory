@@ -94,7 +94,10 @@ type HookCall struct {
 	// ConversationID is the harness's id, where the payload has one.
 	ConversationID string
 	// Events are what the hook says happened. Ready means the session can
-	// take a message; TurnStarted and TurnEnded bracket a turn.
+	// take a message; TurnStarted and TurnEnded bracket a turn. Until Ready,
+	// only Ready counts: work before it is the harness's own start-up (agy
+	// names a new conversation only once it has run a prompt, so its profile
+	// launches with one), and no part of the conversation the core drives.
 	Events []harness.Event
 	// Submitted means the harness took a prompt: the confirmation a pasted
 	// pointer waits for.

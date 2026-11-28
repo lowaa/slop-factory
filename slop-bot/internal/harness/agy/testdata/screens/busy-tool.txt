@@ -1,0 +1,26 @@
+      ▄▀▀▄
+     ▀▀▀▀▀▀
+    ▀▀▀▀▀▀▀▀
+   ▄▀▀    ▀▀▄
+  ▄▀▀      ▀▀▄
+
+  Antigravity CLI 1.5.19
+  user@example.com (Antigravity Starter Quota)
+  Gemini 4 Hydrogen (High)
+  /home/user/slop-bot/workspace/t7-repo
+
+────────────────────────────────────────────────────────────
+> Reply with just: ready
+
+  ready
+
+────────────────────────────────────────────────────────────
+> Run exactly the shell command 'sleep 9732' with run_command and wait for it.
+
+○ Thought for 2.7s (Command constraints dictate that execution duration exceeds the maximum wait threshold, forcing...)
+○ Running (sleep 9732) (ctrl+o to expand)
+⡿  Running command... 1s
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+esc to cancel                                                                            auto · Gemini 4 Hydrogen · high

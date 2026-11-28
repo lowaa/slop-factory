@@ -1,0 +1,24 @@
+{
+  "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/d013e0e5-55a8-4f9f-b5e5-b04270cabbff",
+  "conversationId": "d013e0e5-55a8-4f9f-b5e5-b04270cabbff",
+  "cwd": "/home/user/slop-bot/workspace/t7-repo",
+  "error": "",
+  "hookEventName": "PostToolUse",
+  "lastUserInput": "Run exactly the shell command 'sleep 12; echo done' with run_command and WaitMsBeforeAsync 60000, wait for it, then reply with just: SLEPT",
+  "modelName": "gemini-4-hydrogen-high",
+  "stepIdx": 5,
+  "toolCall": {
+    "args": {
+      "CommandLine": "sleep 12; echo done",
+      "WaitMsBeforeAsync": 60000,
+      "toolSummary": "Run sleep and echo command"
+    },
+    "id": "call_12404947274011831769",
+    "name": "run_command"
+  },
+  "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/d013e0e5-55a8-4f9f-b5e5-b04270cabbff/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/home/user/slop-bot/workspace/t7-repo",
+    "/home/user/slop-bot/workspace/t7-repo.slop-bot-agy"
+  ]
+}
