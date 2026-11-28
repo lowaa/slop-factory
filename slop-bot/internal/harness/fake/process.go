@@ -13,9 +13,20 @@ import (
 	"sync"
 )
 
-// Main is the fake harness process. It returns the exit code.
+// Main is the fake harness process. It returns the exit code. Its modes:
+//
+//	fakeharness [--resume <id>]          the rpc protocol on stdin/stdout
+//	fakeharness --tui [--resume <id>]    a TUI on the terminal
+//	fakeharness --hook-relay <socket> <session> <event>
+//	                                     a hook, relayed to a HookHub
 func Main(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) string) int {
-	f := &proc{out: json.NewEncoder(stdout), getenv: getenv}
+	if len(args) > 0 && args[0] == "--hook-relay" {
+		return relayHook(args[1:], stdin, stdout)
+	}
+	tui := len(args) > 0 && args[0] == "--tui"
+	if tui {
+		args = args[1:]
+	}
 	id, resumed := getenv(EnvID), false
 	if len(args) == 2 && args[0] == "--resume" {
 		id, resumed = args[1], true
@@ -23,7 +34,7 @@ func Main(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) 
 	if id == "" {
 		id = "fake-conversation"
 	}
-	f.id = id
+	rep := &reporter{}
 	var cmds <-chan Command
 	if sock := getenv(EnvControl); sock != "" {
 		conn, err := net.Dial("unix", sock)
@@ -32,20 +43,66 @@ func Main(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) 
 			return 70
 		}
 		defer func() { _ = conn.Close() }()
-		f.ctl = json.NewEncoder(conn)
+		rep.enc = json.NewEncoder(conn)
 		cmds = readCommands(conn)
 	}
+	if tui {
+		return runTUI(&tuiOptions{id: id, resumed: resumed, stdin: stdin, stdout: stdout, getenv: getenv, rep: rep, cmds: cmds})
+	}
+	f := &proc{out: json.NewEncoder(stdout), rep: rep, id: id}
 	msgs := readStdin(stdin)
-	f.report(Report{Rep: RepStarted, ID: id, Resumed: resumed})
+	rep.report(Report{Rep: RepStarted, ID: id, Resumed: resumed})
 	return f.loop(msgs, cmds)
 }
 
+// reporter sends reports to the controller, when there is one.
+type reporter struct {
+	mu  sync.Mutex
+	enc *json.Encoder
+}
+
+func (r *reporter) report(rep Report) {
+	if r.enc == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_ = r.enc.Encode(rep)
+}
+
+func (r *reporter) ack(cmd string) { r.report(Report{Rep: RepAck, Ack: cmd}) }
+
+func (r *reporter) controlled() bool { return r.enc != nil }
+
+// run runs a command as an agent's tool call would, and reports its result.
+func (r *reporter) run(argv []string) {
+	if len(argv) == 0 {
+		r.report(Report{Rep: RepRan, Err: "no argv"})
+		return
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...) // #nosec G204 -- the test scripts this command
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		r.report(Report{Rep: RepRan, Err: err.Error()})
+		return
+	}
+	r.report(Report{Rep: RepRan, Code: code, Stdout: stdout.String(), Stderr: stderr.String()})
+}
+
+func unknownCommand(r *reporter, cmd string) {
+	r.report(Report{Rep: RepAck, Ack: cmd, Err: "unknown command " + strconv.Quote(cmd)})
+}
+
 type proc struct {
-	mu     sync.Mutex
-	out    *json.Encoder
-	ctl    *json.Encoder
-	getenv func(string) string
-	id     string
+	mu  sync.Mutex
+	out *json.Encoder
+	rep *reporter
+	id  string
 
 	inTurn           bool
 	ignoreInterrupts bool
@@ -58,7 +115,7 @@ func (f *proc) loop(msgs <-chan *inMsg, cmds <-chan Command) int {
 		case m, ok := <-msgs:
 			if !ok {
 				msgs = nil
-				f.report(Report{Rep: RepStdinClosed})
+				f.rep.report(Report{Rep: RepStdinClosed})
 				if !f.ignoreEOF {
 					return 0
 				}
@@ -82,14 +139,14 @@ func (f *proc) handle(m *inMsg, autonomous bool) {
 	case "hello":
 		f.write(outMsg{Ev: "hello", ID: f.id})
 	case "user":
-		f.report(Report{Rep: RepUser, Text: m.Text, From: m.From, MidTurn: f.inTurn})
+		f.rep.report(Report{Rep: RepUser, Text: m.Text, From: m.From, MidTurn: f.inTurn})
 		if autonomous {
 			f.write(outMsg{Ev: "turn_start"})
 			f.write(outMsg{Ev: "text", Text: "echo: " + m.Text})
 			f.write(outMsg{Ev: "turn_end", Outcome: "completed"})
 		}
 	case "interrupt":
-		f.report(Report{Rep: RepInterrupt})
+		f.rep.report(Report{Rep: RepInterrupt})
 		if f.inTurn && !f.ignoreInterrupts {
 			f.inTurn = false
 			f.write(outMsg{Ev: "turn_end", Outcome: "interrupted"})
@@ -106,11 +163,7 @@ func (f *proc) command(c *Command) (int, bool) {
 		f.write(outMsg{Ev: "turn_start"})
 	case CmdTurnEnd:
 		f.inTurn = false
-		outcome := c.Outcome
-		if outcome == "" {
-			outcome = "completed"
-		}
-		f.write(outMsg{Ev: "turn_end", Outcome: outcome})
+		f.write(outMsg{Ev: "turn_end", Outcome: outcomeOr(c.Outcome)})
 	case CmdToolStart:
 		f.write(outMsg{Ev: "tool_start", Tool: c.Tool})
 	case CmdToolEnd:
@@ -120,56 +173,34 @@ func (f *proc) command(c *Command) (int, bool) {
 	case CmdUsage:
 		f.write(outMsg{Ev: "usage", Input: 100, Output: 10})
 	case CmdRun:
-		f.run(c.Argv)
+		f.rep.run(c.Argv)
+		return 0, false
 	case CmdIgnoreInterrupts:
 		f.ignoreInterrupts = c.On
 	case CmdIgnoreEOF:
 		f.ignoreEOF = c.On
 	case CmdExit:
-		f.report(Report{Rep: RepAck, Ack: c.Cmd})
+		f.rep.ack(c.Cmd)
 		return c.Code, true
 	default:
-		f.report(Report{Rep: RepAck, Ack: c.Cmd, Err: "unknown command " + strconv.Quote(c.Cmd)})
+		unknownCommand(f.rep, c.Cmd)
 		return 0, false
 	}
-	if c.Cmd != CmdRun {
-		f.report(Report{Rep: RepAck, Ack: c.Cmd})
-	}
+	f.rep.ack(c.Cmd)
 	return 0, false
 }
 
-func (f *proc) run(argv []string) {
-	if len(argv) == 0 {
-		f.report(Report{Rep: RepRan, Err: "no argv"})
-		return
+func outcomeOr(outcome string) string {
+	if outcome == "" {
+		return "completed"
 	}
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...) // #nosec G204 -- the test scripts this command
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	code := 0
-	if ee, ok := err.(*exec.ExitError); ok {
-		code = ee.ExitCode()
-	} else if err != nil {
-		f.report(Report{Rep: RepRan, Err: err.Error()})
-		return
-	}
-	f.report(Report{Rep: RepRan, Code: code, Stdout: stdout.String(), Stderr: stderr.String()})
+	return outcome
 }
 
 func (f *proc) write(m outMsg) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	_ = f.out.Encode(m)
-}
-
-func (f *proc) report(r Report) {
-	if f.ctl == nil {
-		return
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	_ = f.ctl.Encode(r)
 }
 
 func readStdin(r io.Reader) <-chan *inMsg {

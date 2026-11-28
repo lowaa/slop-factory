@@ -1,5 +1,6 @@
 // Package fake is a scriptable stand-in harness for slop-bot's own tests.
-// It speaks a minimal programmatic protocol over stdin and stdout, and a
+// It speaks a minimal programmatic protocol over stdin and stdout (fake/rpc),
+// or runs as a TUI in a terminal and reports through hooks (fake/tui), and a
 // test drives what it does through a Controller. It decides nothing: it
 // does what the test says and reports what it received, so a test can
 // assert on slop-bot's behaviour, not a model's.
@@ -38,8 +39,10 @@ type Command struct {
 	Argv []string `json:"argv,omitempty"`
 	// Code for exit.
 	Code int `json:"code,omitempty"`
-	// On for ignore_interrupts and ignore_eof.
+	// On for ignore_interrupts, ignore_eof and quiet_cancel.
 	On bool `json:"on,omitempty"`
+	// Count for drop_submits.
+	Count int `json:"count,omitempty"`
 }
 
 // Commands.
@@ -54,6 +57,15 @@ const (
 	CmdExit             = "exit"
 	CmdIgnoreInterrupts = "ignore_interrupts"
 	CmdIgnoreEOF        = "ignore_eof"
+	// CmdStep (TUI mode) runs the step hook, before a model call: where a
+	// TUI harness takes injected messages mid-turn (agy's PreInvocation).
+	CmdStep = "step"
+	// CmdDropSubmits (TUI mode) ignores the next Count submit keys, as a
+	// harness still handling a paste swallows an Enter.
+	CmdDropSubmits = "drop_submits"
+	// CmdQuietCancel (TUI mode) makes a cancel run no hook, as agy's
+	// doesn't: only the screen shows it.
+	CmdQuietCancel = "quiet_cancel"
 )
 
 // Report is what the fake tells the test.
@@ -63,18 +75,26 @@ type Report struct {
 	ID string `json:"id,omitempty"`
 	// Resumed is set on started when the fake was asked to resume ID.
 	Resumed bool `json:"resumed,omitempty"`
-	// Text and From of a received user message; MidTurn says it came while
-	// a turn ran.
+	// Text and From of a received user message, or a paste's text; MidTurn
+	// says it came while a turn ran.
 	Text    string `json:"text,omitempty"`
 	From    string `json:"from,omitempty"`
 	MidTurn bool   `json:"mid_turn,omitempty"`
+	// Via is how a user message arrived in TUI mode: ViaKeys or ViaHook.
+	Via string `json:"via,omitempty"`
+	// Key is a key report's key; Dropped says the fake ignored it.
+	Key     string `json:"key,omitempty"`
+	Dropped bool   `json:"dropped,omitempty"`
+	// Event and Reply are a hook's event and the reply it read back.
+	Event string `json:"event,omitempty"`
+	Reply string `json:"reply,omitempty"`
 	// Code, Stdout and Stderr of a run.
 	Code   int    `json:"code,omitempty"`
 	Stdout string `json:"stdout,omitempty"`
 	Stderr string `json:"stderr,omitempty"`
 	// Ack echoes the command a report acknowledges.
 	Ack string `json:"ack,omitempty"`
-	// Err is set when a command failed.
+	// Err is set when a command or hook failed.
 	Err string `json:"err,omitempty"`
 }
 
@@ -86,7 +106,57 @@ const (
 	RepStdinClosed = "stdin_closed"
 	RepRan         = "ran"
 	RepAck         = "ack"
+	// TUI mode: what the terminal delivered, each hook's reply, and a quit.
+	RepPaste = "paste"
+	RepKey   = "key"
+	RepHook  = "hook"
+	RepQuit  = "quit"
 )
+
+// How a user message arrived, in TUI mode.
+const (
+	ViaKeys = "keys"
+	ViaHook = "hook"
+)
+
+// Hook events the TUI mode runs, through EnvHookCmd.
+const (
+	HookSessionStart = "session_start"
+	HookPromptSubmit = "prompt_submit"
+	HookTurnStart    = "turn_start"
+	HookTurnEnd      = "turn_end"
+	HookToolStart    = "tool_start"
+	HookToolEnd      = "tool_end"
+	HookText         = "text"
+	HookUsage        = "usage"
+	HookStep         = "step"
+)
+
+// HookPayload is what the TUI mode passes a hook on stdin.
+type HookPayload struct {
+	ConversationID string `json:"conversation_id"`
+	Resumed        bool   `json:"resumed,omitempty"`
+	Prompt         string `json:"prompt,omitempty"`
+	Tool           string `json:"tool,omitempty"`
+	Text           string `json:"text,omitempty"`
+	Outcome        string `json:"outcome,omitempty"`
+	Input          int64  `json:"input,omitempty"`
+	Output         int64  `json:"output,omitempty"`
+}
+
+// HookReply is what a hook answers on stdout. Inject puts messages in front
+// of the model (on step and turn_end); on turn_end, Continue keeps the turn
+// going.
+type HookReply struct {
+	Inject   []InjectedMessage `json:"inject,omitempty"`
+	Continue bool              `json:"continue,omitempty"`
+}
+
+// InjectedMessage is one message a hook reply injects.
+type InjectedMessage struct {
+	From string `json:"from,omitempty"`
+	Text string `json:"text"`
+}
 
 // Environment variables the fake reads.
 const (
@@ -95,4 +165,8 @@ const (
 	EnvControl = "SLOP_BOT_FAKE_CONTROL"
 	// EnvID fixes the id of a new conversation.
 	EnvID = "SLOP_BOT_FAKE_ID"
+	// EnvHookCmd is the TUI mode's hook command, a JSON argv. The fake
+	// appends the event name, passes a HookPayload on stdin and reads a
+	// HookReply from stdout. It stands in for `slop-bot hook <event>`.
+	EnvHookCmd = "SLOP_BOT_FAKE_HOOK_CMD"
 )

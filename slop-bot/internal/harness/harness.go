@@ -8,6 +8,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
@@ -31,19 +32,36 @@ type Conversation interface {
 	Ref() ConversationRef
 	// Send delivers a user message: steered into the running turn where the
 	// driver can, otherwise at the next turn boundary. A message sent while
-	// idle starts a turn.
+	// idle starts a turn. A TUI driver may return ErrAttached (nothing was
+	// sent: send it later) or ErrUnsubmitted (part of it was typed: don't
+	// send it again).
 	Send(ctx context.Context, msg *Message) error
 	// Interrupt stops the running turn; the session stays usable.
 	Interrupt(ctx context.Context) error
 	// Events is the structured stream: turns, tools, text, usage, exit.
-	// It closes after the session has exited.
+	// It closes after the session has exited, with Exited last; or, with no
+	// Exited, when its owner lets go of a session that lives on (a TUI
+	// driver's Close, at daemon shutdown, for a later Adopt).
 	Events() <-chan Event
 	// Stop ends the session. Without force it waits for the running turn to
-	// settle first. It returns once the session is gone and resumable.
+	// settle first. It returns once the session is gone and resumable, or,
+	// without force, ErrAttached from a TUI driver that won't type its quit
+	// into a session a person is attached to: the session runs on, and the
+	// caller forces or waits.
 	Stop(ctx context.Context, force bool) error
 	// AttachPlan says how a person takes this conversation over.
 	AttachPlan(ctx context.Context) (*AttachPlan, error)
 }
+
+var (
+	// ErrAttached means a person is attached to a TUI session, so the driver
+	// won't type into it. Nothing was typed.
+	ErrAttached = errors.New("harness: a person is attached to the session")
+	// ErrUnsubmitted means typing began, then stopped short of submitting
+	// (a person attached, or the harness never confirmed): the text may sit
+	// in the prompt, so sending again would type it twice.
+	ErrUnsubmitted = errors.New("harness: typed into the prompt but not submitted")
+)
 
 // Capabilities are what a harness's driver can do, so the core picks the best
 // path per harness instead of special-casing names.
@@ -138,7 +156,7 @@ const (
 	UsageReport EventKind = "usage"
 	// LimitReport carries how much of the plan's allowance is left.
 	LimitReport EventKind = "limit"
-	// Exited is always the last event: the process is gone.
+	// Exited is the last event when the process is gone (see Events).
 	Exited EventKind = "exited"
 )
 
