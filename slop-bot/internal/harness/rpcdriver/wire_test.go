@@ -54,6 +54,41 @@ func TestSendDoesNotWaitForTheHarnessToRead(t *testing.T) {
 	require.NoError(t, c.Stop(ctx, true))
 }
 
+// A message Send queued but the harness never got (it died with the line
+// still waiting for its stdin) is Undelivered: the caller has it marked
+// delivered, and queues it again. One written whole is not.
+func TestAMessageStillQueuedAtTheExitIsUndelivered(t *testing.T) {
+	t.Parallel()
+	sh, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	c, err := Start(context.Background(), &Options{
+		Harness: "test", Driver: "test", Codec: lineCodec{},
+		// It reads one line, then stops reading.
+		Spec:   &harness.LaunchSpec{Path: sh, Args: []string{"-c", `echo ready; read first; echo got; exec sleep 1000`}, Env: []string{"PATH=" + os.Getenv("PATH")}, Dir: t.TempDir()},
+		Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}, KillGrace: time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { c.proc.Kill() })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	read := &harness.Message{Text: "first", IDs: []int64{1}}
+	require.NoError(t, c.Send(ctx, read))
+	// Far past a pipe's buffer: it can't all be written to a harness that
+	// has stopped reading.
+	lost := &harness.Message{Text: strings.Repeat("x", 1<<20), IDs: []int64{2}}
+	require.NoError(t, c.Send(ctx, lost))
+	require.NoError(t, c.Stop(ctx, true))
+	for range c.Events() {
+	}
+
+	var ids []int64
+	for _, m := range c.Undelivered() {
+		ids = append(ids, m.IDs...)
+	}
+	assert.Equal(t, []int64{2}, ids)
+}
+
 func TestAQueuedWireWritesInOrderThenClosesOnClose(t *testing.T) {
 	t.Parallel()
 	r, wc := io.Pipe()

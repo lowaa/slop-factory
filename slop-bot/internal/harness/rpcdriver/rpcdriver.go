@@ -60,6 +60,10 @@ type Wire struct {
 	queue  [][]byte
 	closed bool
 	err    error
+	// queued counts the lines WriteLine took, and written those written to
+	// the pipe whole: a Send's message is out once written reaches the
+	// count its lines were queued at (sent).
+	queued, written uint64
 }
 
 // NewWire wraps w, writing in WriteLine itself. Codec tests use it to
@@ -86,6 +90,8 @@ func (w *Wire) WriteLine(b []byte) error {
 		if _, err := w.w.Write(line); err != nil {
 			return fmt.Errorf("rpcdriver: writing to the harness: %w", err)
 		}
+		w.queued++
+		w.written++
 		return nil
 	case w.err != nil:
 		return w.err
@@ -95,8 +101,23 @@ func (w *Wire) WriteLine(b []byte) error {
 		return errWireFull
 	}
 	w.queue = append(w.queue, line)
+	w.queued++
 	w.cond.Signal()
 	return nil
+}
+
+// mark is how many lines have been queued so far.
+func (w *Wire) mark() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.queued
+}
+
+// out says the lines queued up to mark have all been written.
+func (w *Wire) out(mark uint64) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.written >= mark
 }
 
 func (w *Wire) write() {
@@ -122,6 +143,9 @@ func (w *Wire) write() {
 			_ = w.c.Close()
 			return
 		}
+		w.mu.Lock()
+		w.written++
+		w.mu.Unlock()
 	}
 }
 
@@ -248,6 +272,9 @@ type Conversation struct {
 	// from it; dispatch reads the rest, so no line can fall between them.
 	lines  chan stdoutLine
 	exited chan struct{}
+	// inflight are the messages Send took whose lines may not have been
+	// written yet (sent).
+	inflight []sentMessage
 }
 
 // Start launches the process and runs the codec's handshake.
@@ -472,7 +499,31 @@ func (c *Conversation) Send(ctx context.Context, msg *harness.Message) error {
 		}
 		return err
 	}
+	c.sent(msg)
 	return nil
+}
+
+// sentMessage is a message Send took, and the Wire's mark once its lines
+// were queued.
+type sentMessage struct {
+	msg  *harness.Message
+	mark uint64
+}
+
+// sent notes msg as taken but perhaps not yet written: Send returns once
+// its lines are queued, and the caller marks it delivered, so one the
+// harness exits before reading is Undelivered.
+func (c *Conversation) sent(msg *harness.Message) {
+	mark := c.wire.mark()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	kept := c.inflight[:0]
+	for _, s := range c.inflight {
+		if !c.wire.out(s.mark) {
+			kept = append(kept, s)
+		}
+	}
+	c.inflight = append(kept, sentMessage{msg: msg, mark: mark})
 }
 
 // Interrupt implements harness.Conversation.
@@ -532,12 +583,25 @@ func (c *Conversation) kill(ctx context.Context) error {
 	return nil
 }
 
-// Undelivered implements harness.Conversation: what the codec still holds.
+// Undelivered implements harness.Conversation: what the codec still holds,
+// and what Send queued that never reached the harness's stdin whole.
 func (c *Conversation) Undelivered() []*harness.Message {
+	var out []*harness.Message
 	if h, ok := c.opts.Codec.(Holder); ok {
-		return h.Undelivered()
+		out = h.Undelivered()
 	}
-	return nil
+	held := map[*harness.Message]bool{}
+	for _, m := range out {
+		held[m] = true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range c.inflight {
+		if !held[s.msg] && !c.wire.out(s.mark) {
+			out = append(out, s.msg)
+		}
+	}
+	return out
 }
 
 // Exited is closed once the process has gone and Events has closed.
