@@ -38,7 +38,7 @@ Durations are Go duration strings: `15m`, `24h`, `720h`.
 | `repos[].path` | path | none | The repo's checkout on this machine. Required. |
 | `repos[].git_remote` | string | none | Accepted and kept, but nothing reads it yet (reserved for multi-machine use). |
 | `concurrency.max_active` | int | `4` | Agents in a turn at once, in the normal pool. At least 1. |
-| `concurrency.max_live` | int | `3 * max_active` | Cap on live harness processes, working or waiting. Must be at least `max_active + urgent.max_active`. |
+| `concurrency.max_live` | int | the larger of `3 * max_active` and `max_active + urgent.max_active` | Cap on live harness processes, working or waiting. Must be at least `max_active + urgent.max_active`. |
 | `concurrency.urgent.max_active` | int | `1` | Agents in a turn at once, in the urgent pool. At least 1. |
 | `autonomy.enabled` | bool | `false` | Whether tickets that agents file are worked without a person. `slop-bot autonomy on\|off` overrides it at runtime and persists. |
 | `autonomy.tickets_per_agent` | int | `10` | Budget of outstanding agent-filed tickets, per agent slot (`max_active + urgent.max_active`). At least 1. |
@@ -49,6 +49,7 @@ Durations are Go duration strings: `15m`, `24h`, `720h`.
 | `harnesses.<name>.limit_threshold` | number | `95` | Percent of the plan's allowance at which no new agent starts on this harness until the window resets. Above 0, up to 100. See [plan-limit holds](concepts.md#plan-limit-holds). |
 | `agents.nudges` | int | `3` | How many times an agent that stops without a reason is nudged before it is stalled. At least 1. |
 | `agents.stall_after` | duration | `15m` | How long a working agent may go without an event before it is stalled. |
+| `agents.attach_lease` | duration | `30s` | How long an attach outlives its CLI's last heartbeat. Past it, the agent is handed back. Across a daemon restart, the attached CLI has this long to reconnect. At least 1s. See [attach](concepts.md#attach-and-hand-back). |
 | `agents.ask_reminder_after` | duration | `24h` | Parsed and validated, but no code acts on it in this build: there is no ask reminder yet. |
 | `retention.transcripts` | duration | `720h` (30 days) | How long a retained transcript is kept after its agent ends. |
 | `retention.events` | duration | `720h` (30 days) | How long the event log keeps events. |

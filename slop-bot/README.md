@@ -50,9 +50,10 @@ slop-bot tell <agent> "yes, use A" # a user tell is the answer to an open ask
 
 `slop-bot doctor` re-checks the machine at any time, and changes nothing.
 
-`slop-bot attach` (taking over an agent's session by hand) is designed, and
-described in [concepts](docs/concepts.md#attach-and-hand-back), but this
-build has no `attach` command yet.
+`slop-bot attach <agent|ticket>` takes an agent's session over in its
+harness's own TUI, in your terminal; quitting the TUI hands the agent back.
+`slop-bot detach` hands it back from another terminal. See
+[concepts](docs/concepts.md#attach-and-hand-back).
 
 ## Documentation
 

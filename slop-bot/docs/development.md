@@ -52,7 +52,8 @@ The harness-to-driver registry is `builders` in `internal/daemon/harnesses.go`.
 
 ## The scripts
 
-All run from `slop-bot/` and are what CI runs. Before pushing, per the repo's
+All run from `slop-bot/`. CI runs `test.sh` and `quality.sh`, and
+`tier2.sh` in its own workflow; `scan.sh` is run locally. Before pushing, per the repo's
 `CLAUDE.md`, run `dev-tools/lint/lint.sh --changed` from the repo root, then
 `test.sh`, `scan.sh` and `quality.sh`.
 
