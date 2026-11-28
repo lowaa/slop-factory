@@ -171,6 +171,13 @@ func TestTellToAnUnknownTargetFails(t *testing.T) {
 	f := newFixture(t, "")
 	_, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), "nobody", "hi", false)
 	assert.ErrorIs(t, err, agents.ErrUnknownTarget)
+
+	// A lookup that failed is that failure, not a target that isn't there.
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = f.mgr.Tell(cancelled, ident.UserPrincipal(), "nobody", "hi", false)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NotErrorIs(t, err, agents.ErrUnknownTarget)
 }
 
 func TestTheLoopGuardStopsAnAgentFloodingAnother(t *testing.T) {
