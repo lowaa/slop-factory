@@ -34,6 +34,11 @@ Agents are refused, even on an agent command, from:
 - `tell --interrupt`, `tell --merge` and `inbox --log`
 - changing a ticket that isn't theirs, or moving one out of `discussion`
 - cancelling a ticket that is neither their own nor one they filed
+- reading `asks` and `discussions`: other agents' questions and tickets
+
+An agent following `events` (as `inbox --follow` does) sees its own events
+whole, other agents' lifecycle and messaging events without their payloads,
+and nothing else of theirs: not their conversations or merge refusals.
 
 ## User commands
 

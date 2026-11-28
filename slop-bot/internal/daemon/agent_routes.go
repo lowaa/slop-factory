@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/agents"
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
@@ -162,7 +161,12 @@ func (ar *agentRoutes) ask(w http.ResponseWriter, r *http.Request) {
 	control.WriteJSON(w, http.StatusOK, api.Ask{ID: a.ID, Agent: string(a.From), Question: a.Body, Options: a.Options, Recommend: a.Recommendation, CreatedAt: a.CreatedAt})
 }
 
+// asks are every agent's open questions: the user's to answer, and not
+// one agent's to read another's.
 func (ar *agentRoutes) asks(w http.ResponseWriter, r *http.Request) {
+	if !requireUser(w, r, "asks") {
+		return
+	}
 	open, err := ar.d.state.Messages.OpenAsks(r.Context())
 	if err != nil {
 		agentFail(w, err)
@@ -189,6 +193,9 @@ func (ar *agentRoutes) discuss(w http.ResponseWriter, r *http.Request) {
 
 // discussions is the review stream: tickets in discussion.
 func (ar *agentRoutes) discussions(w http.ResponseWriter, r *http.Request) {
+	if !requireUser(w, r, "discussions") {
+		return
+	}
 	ts, err := ar.d.tickets.List(r.Context(), &tickets.Query{Statuses: []tickets.Status{tickets.StatusDiscussion}})
 	if err != nil {
 		agentFail(w, err)
@@ -320,7 +327,7 @@ func (ar *agentRoutes) events(w http.ResponseWriter, r *http.Request) {
 		}
 		for i := range evs {
 			after = evs[i].Seq
-			if visibleTo(by, &evs[i]) && out.event(&evs[i]) != nil {
+			if e, ok := visibleTo(by, &evs[i]); ok && out.event(e) != nil {
 				return
 			}
 		}
@@ -331,11 +338,31 @@ func (ar *agentRoutes) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// visibleTo hides other agents' conversation events from an agent: they
-// carry its text and tools, and one agent has no need to read another's
-// reasoning (`watch` and `transcript` are the user's).
-func visibleTo(by ident.Principal, e *state.Event) bool {
-	return by.IsUser() || !strings.HasPrefix(string(e.Type), agents.EventHarness) || e.Agent == by.Agent
+// agentVisible are the events an agent sees of other agents': that they
+// happened, without their payloads, which carry what the other agent asked,
+// was told or said. An agent follows the log for its own inbox (`inbox
+// --follow`), and has no need to read another's conversation (`watch` and
+// `transcript` are the user's). Anything not listed, an event type added
+// later included, it doesn't see at all.
+var agentVisible = map[string]bool{
+	agents.EventSpawned: true, agents.EventResumed: true, agents.EventState: true, agents.EventFinished: true,
+	agents.EventReleased: true, agents.EventParked: true, agents.EventNudged: true,
+	agents.EventQueued: true, agents.EventDelivered: true, agents.EventUserTold: true, "agent.asked": true,
+	agents.EventAttached: true, agents.EventHandedBack: true,
+}
+
+// visibleTo is e as by may see it, and whether it may see it at all: the
+// user sees everything, and an agent its own events whole.
+func visibleTo(by ident.Principal, e *state.Event) (*state.Event, bool) {
+	if by.IsUser() || (e.Agent != "" && e.Agent == by.Agent) {
+		return e, true
+	}
+	if !agentVisible[string(e.Type)] {
+		return nil, false
+	}
+	redacted := *e
+	redacted.Payload = nil
+	return &redacted, true
 }
 
 // autonomy is whether agent-filed tickets are worked without a person: the
