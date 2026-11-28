@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
+	"github.com/lowaa/slop-factory/slop-bot/internal/testexec"
 )
 
 // git unregisters a worktree even when it couldn't delete all its files; the
@@ -148,7 +149,7 @@ func TestAFailingCheckoutHookStillReportsWhatWasMade(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	ctx := context.Background()
 	hook := filepath.Join(f.repos["b"], ".git", "hooks", "post-checkout")
-	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o700)) // #nosec G306 -- a hook must be executable
+	testexec.WriteScript(t, hook, "#!/bin/sh\nexit 1\n")
 
 	wts, err := f.m.Create(ctx, "45", []string{"a", "b"}, "b")
 	require.Error(t, err)
