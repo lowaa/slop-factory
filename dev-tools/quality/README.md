@@ -105,7 +105,8 @@ never counted it; it fails one only once a lucky run has written it into
 the baseline. So a project whose coverage timing moves writes
 `quality_baseline/coverage_runs`, a number of runs (after any `#` comment
 lines saying why), and its `--prune` and `--rebaseline` run the suite that
-many times and count a block as covered only if every run covers it. A check
+many times, each with `-count=1` (a cached result would replay the first
+run), and count a block as covered only if every run covers it. A check
 stays one run, with the same tolerance: a run that misses only what timing
 gives still meets a baseline that never counted it, and one that loses what
 every run covered fails as before. The baseline drops only by what the runs
