@@ -143,6 +143,20 @@ func (m *Manager) park(ctx context.Context, r *runner, p *parkedAgent) {
 	m.event(keep, EventParked, r.id, r.ticket, map[string]string{"state": string(r.state())})
 }
 
+// adoptParked takes on an agent that was parked when the daemon last
+// stopped: it stays stopped, and is resumed when it next has work, as if
+// the daemon had never stopped.
+func (m *Manager) adoptParked(ctx context.Context, a *state.Agent) {
+	m.mu.Lock()
+	m.parked[a.ID] = newParked(a)
+	m.mu.Unlock()
+	// A message whose queue place was lost (the daemon died between the
+	// two writes) still wakes it.
+	if pending, err := m.opts.State.Messages.Pending(ctx, state.AgentParty(a.ID)); err == nil && len(pending) > 0 {
+		m.wakeParked(a.ID)
+	}
+}
+
 // wakeParked queues a parked agent for a slot, to be resumed: something came for
 // it. It reports whether id is parked.
 func (m *Manager) wakeParked(id ident.AgentID) bool {

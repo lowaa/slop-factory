@@ -411,11 +411,7 @@ func (m *Manager) resumeAll(ctx context.Context) error {
 		case a.ConversationID == "":
 			m.endRecord(ctx, a, state.StateReleased, "it never started a conversation to resume")
 		case a.ParkedAt != nil:
-			// Left stopped: it is resumed when it next has work, as if the
-			// daemon had never stopped.
-			m.mu.Lock()
-			m.parked[a.ID] = newParked(a)
-			m.mu.Unlock()
+			m.adoptParked(ctx, a)
 		case a.State == state.StateCrashed || a.State == state.StateExited:
 			m.goStart(a.Ticket, a.Pool, false, func(ctx context.Context) { m.recover(ctx, a.ID) })
 		default:

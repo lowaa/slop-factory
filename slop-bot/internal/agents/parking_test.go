@@ -163,6 +163,38 @@ func TestARestartLeavesAParkedAgentParked(t *testing.T) {
 	assert.False(t, m.IsParked(a1.Agent))
 }
 
+// A message left for a parked agent with no queue place (the daemon died
+// between the two writes) still wakes it after a restart.
+func TestAParkedAgentsMessageWithoutAQueuePlaceWakesItAfterARestart(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, twoLive)
+	s1, a1 := f.waitingAgent("first", nil)
+	f.clock.Advance(time.Minute)
+	_, _ = f.waitingAgent("second", nil)
+	f.file("third", nil)
+	f.await(agents.EventParked, of(a1.Agent))
+	s3 := f.session()
+	f.user(s3)
+	f.clock.Advance(time.Minute)
+	a3 := f.agentFor(f.ticketTitled("third"))
+	f.turn(s3, func() { f.ask(ident.AgentPrincipal(a3.ID, a3.Ticket)) })
+	f.await(agents.EventState, func(e *state.Event) bool { return e.Agent == a3.ID && toState(state.StateWaitingUser)(e) })
+
+	f.restartWith(func() {
+		_, err := f.state.Messages.Enqueue(context.Background(), &state.NewMessage{
+			From: state.UserParty, To: state.AgentParty(a1.Agent), Kind: state.KindTell, Body: "lost its place",
+		})
+		require.NoError(t, err)
+	})
+	for range 3 {
+		if s := f.session(); s.ID == s1.ID {
+			assert.Contains(t, f.user(s).Text, "lost its place")
+			return
+		}
+	}
+	t.Fatal("the parked agent was never resumed")
+}
+
 func (f *fixture) ticketTitled(title string) ident.TicketID {
 	f.t.Helper()
 	ts, err := f.tickets.List(context.Background(), &tickets.Query{})
