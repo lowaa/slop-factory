@@ -33,6 +33,11 @@ func TestDatabaseFailuresAreWrappedWithTheirOperation(t *testing.T) {
 			wantMsg: "state: reading setting",
 		},
 		{
+			name:    "listing messages",
+			call:    func(ctx context.Context, f *fixture) error { _, err := f.Messages.Pending(ctx, state.UserParty); return err },
+			wantMsg: "state: listing messages",
+		},
+		{
 			name:    "revoking a merge grant",
 			call:    func(ctx context.Context, f *fixture) error { return f.MergeGrants.Revoke(ctx, "7") },
 			wantMsg: "state: revoking ticket 7's merge grant",
