@@ -113,7 +113,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [supervisor, token]
+        # The supervisor's suite no longer runs: slop-haus is defunct, being
+        # replaced by slop-bot, and its timing-sensitive process tests flake.
+        suite: [token]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
