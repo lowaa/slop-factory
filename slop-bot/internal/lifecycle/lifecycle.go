@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
+
+	"github.com/lowaa/slop-factory/go-clock"
 )
 
 // Component is anything the daemon owns that holds resources: a store, a
@@ -29,6 +32,20 @@ type Group struct {
 	components []Component
 	started    []Component
 	logger     *slog.Logger
+	// exitWait bounds the wait for components that outlived their Stop,
+	// on clock; 0 waits as long as they take.
+	exitWait time.Duration
+	clock    clock.Clock
+}
+
+// BoundExits bounds Stop's wait for components that outlived their own
+// Stop: all of them together get wait, from the first such wait, on clk.
+// Past it Stop carries on, closing what they use: a service manager kills
+// the daemon at a deadline derived from this, and being killed mid-close
+// is worse.
+func (g *Group) BoundExits(wait time.Duration, clk clock.Clock) *Group {
+	g.exitWait, g.clock = wait, clk
+	return g
 }
 
 // NewGroup makes a group; components start in the order given.
@@ -57,13 +74,23 @@ func (g *Group) Start(ctx context.Context) error {
 // closing them under it is worse than a slow shutdown.
 func (g *Group) Stop(ctx context.Context) error {
 	var errs []error
+	// One deadline for every exit wait, set at the first (see BoundExits):
+	// a context's Done, which every wait sees once it has passed.
+	var deadline <-chan struct{}
 	for i := len(g.started) - 1; i >= 0; i-- {
 		c := g.started[i]
 		g.logger.Debug("stopping", "component", c.Name())
 		if err := c.Stop(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("stopping %s: %w", c.Name(), err))
 			if e, ok := c.(Exiter); ok {
-				g.awaitExit(c.Name(), e)
+				if deadline == nil && g.exitWait > 0 {
+					exitCtx, cancel := clock.WithDeadline(context.Background(), g.clock, g.clock.Now().Add(g.exitWait))
+					defer cancel()
+					deadline = exitCtx.Done()
+				}
+				if err := g.awaitExit(c.Name(), e, deadline); err != nil {
+					errs = append(errs, err)
+				}
 			}
 		}
 	}
@@ -71,14 +98,21 @@ func (g *Group) Stop(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (g *Group) awaitExit(name string, e Exiter) {
+// awaitExit waits for e to exit, or for deadline (nil: none).
+func (g *Group) awaitExit(name string, e Exiter, deadline <-chan struct{}) error {
 	select {
 	case <-e.Exited():
-		return
+		return nil
 	default:
 	}
 	g.logger.Warn("lifecycle: waiting for a component that outlived its stop, before stopping what it uses", "component", name)
-	<-e.Exited()
+	select {
+	case <-e.Exited():
+		return nil
+	case <-deadline:
+		g.logger.Error("lifecycle: gave up waiting for a component that outlived its stop; stopping what it uses anyway", "component", name)
+		return fmt.Errorf("lifecycle: %s still running after its stop and the exit wait", name)
+	}
 }
 
 // Func adapts a pair of functions into a Component.

@@ -21,6 +21,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/shutdown"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
@@ -323,8 +324,9 @@ func (m *Manager) graceAfter(ctx context.Context) (context.Context, context.Canc
 
 // ForceStopGrace bounds the wait for a conversation forced to stop once the
 // drain's deadline has passed, and for starts and cleanups still settling:
-// what still hasn't finished is reported, not waited on for ever.
-const ForceStopGrace = 10 * time.Second
+// what still hasn't finished is reported, not waited on for ever. It is
+// part of the daemon's stop budget (shutdown).
+const ForceStopGrace = shutdown.Grace
 
 // startTimeout is Options.StartTimeout, defaulted.
 func (m *Manager) startTimeout() time.Duration {

@@ -25,6 +25,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
 	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/shutdown"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets/local"
@@ -33,10 +34,10 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
-// StopTimeout bounds a shutdown: components get this long to finish before
-// the process exits anyway. The service unit's stop timeout is derived from
-// it, so the supervisor never kills a daemon that is still draining.
-const StopTimeout = 30 * time.Second
+// StopTimeout bounds the components' Stop (shutdown.Drain). The whole stop
+// can take shutdown.Worst, from which the service unit's stop timeout is
+// derived, so the supervisor never kills a daemon that is still draining.
+const StopTimeout = shutdown.Drain
 
 // Options are the daemon's inputs.
 type Options struct {
@@ -188,7 +189,7 @@ func New(opts *Options) (*Daemon, error) {
 		d.tuiSessions(),
 		&agentsComponent{manager: func() *agents.Manager { return d.agents }},
 		d.orphanedSessions(),
-	)
+	).BoundExits(shutdown.ExitWait, opts.Clock)
 	return d, nil
 }
 

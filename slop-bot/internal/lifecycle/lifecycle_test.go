@@ -6,9 +6,12 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lowaa/slop-factory/go-clock"
 )
 
 type recorder struct{ calls []string }
@@ -152,4 +155,28 @@ func TestFuncWithoutHooks(t *testing.T) {
 	f := &Func{N: "noop"}
 	assert.NoError(t, f.Start(context.Background()))
 	assert.NoError(t, f.Stop(context.Background()))
+}
+
+// The wait for components that outlived their Stop is bounded, all of them
+// together, ExitWait past the first: the service manager kills the daemon
+// at a deadline derived from it, and a kill mid-close is worse than closing
+// what a component still uses. What is given up on is said.
+func TestTheWaitForComponentsThatOutlivedTheirStopIsBounded(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Date(2026, 11, 29, 9, 0, 0, 0, time.UTC))
+	never := &exiter{exited: make(chan struct{})} // never exits
+	alsoNever := &exiter{exited: make(chan struct{})}
+	storeStopped := make(chan struct{})
+	store := &Func{N: "store", StopFunc: func(context.Context) error { close(storeStopped); return nil }}
+	h := &warned{Handler: slog.DiscardHandler, logged: make(chan struct{})}
+	g := NewGroup(slog.New(h), store, never, alsoNever).BoundExits(time.Minute, clk)
+	require.NoError(t, g.Start(context.Background()))
+	stopped := make(chan error, 1)
+	go func() { stopped <- g.Stop(context.Background()) }()
+	<-h.logged // waiting, with its deadline set
+	clk.Advance(time.Minute)
+	<-storeStopped
+	err := <-stopped
+	assert.ErrorContains(t, err, "gave up at its deadline")
+	assert.ErrorContains(t, err, "still running")
 }

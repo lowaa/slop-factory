@@ -37,7 +37,7 @@
 		<false/>
 	</dict>
 	<key>ExitTimeOut</key>
-	<integer>45</integer>
+	<integer>65</integer>
 	<key>StandardOutPath</key>
 	<string>/Users/a b%h$x&amp;&lt;&gt;/.local/state/slop-bot/logs/daemon.log</string>
 	<key>StandardErrorPath</key>

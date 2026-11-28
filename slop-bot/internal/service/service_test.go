@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +18,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service/servicetest"
+	"github.com/lowaa/slop-factory/slop-bot/internal/shutdown"
 )
 
 func TestNewRefusesAnUnsupportedOS(t *testing.T) {
@@ -32,9 +36,26 @@ func TestNewNeedsItsDependencies(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestTheServiceOutwaitsTheDaemonsDrain(t *testing.T) {
+// The service manager's kill comes only after the daemon's worst-case stop
+// (its drain, the drain's grace and the exit wait), as the installed unit
+// and plist say it, so a daemon still closing its stores isn't killed.
+func TestTheServiceOutwaitsTheDaemonsWholeStop(t *testing.T) {
 	t.Parallel()
-	assert.Greater(t, service.StopTimeout, daemon.StopTimeout)
+	assert.Greater(t, service.StopTimeout, shutdown.Worst)
+	assert.Equal(t, daemon.StopTimeout, shutdown.Drain, "the daemon's drain is the budget's")
+	for goos, setting := range map[string]*regexp.Regexp{
+		"linux":  regexp.MustCompile(`(?m)^TimeoutStopSec=(\d+)s$`),
+		"darwin": regexp.MustCompile(`<key>ExitTimeOut</key>\s*<integer>(\d+)</integer>`),
+	} {
+		f := newFixture(t, &fixtureOpts{goos: goos})
+		_, err := f.mgr.Install(context.Background())
+		require.NoError(t, err)
+		m := setting.FindStringSubmatch(readFile(t, f.mgr.UnitPath()))
+		require.Len(t, m, 2, "%s: the stop timeout is set", goos)
+		secs, err := strconv.Atoi(m[1])
+		require.NoError(t, err)
+		assert.Greater(t, time.Duration(secs)*time.Second, shutdown.Worst, "%s", goos)
+	}
 }
 
 func TestBinaryFinderPrefersThePATHNameForTheSameFile(t *testing.T) {

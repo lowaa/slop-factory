@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/shutdown"
 )
 
 // ErrNotInstalled means there is no unit or plist to act on.
@@ -27,14 +27,15 @@ var ErrNotInstalled = errors.New("service: slop-bot service is not installed")
 // ErrUnsupported means slop-bot has no service manager for this OS.
 var ErrUnsupported = errors.New("service: no service manager for this OS")
 
-// stopMargin is how much longer than the daemon's own drain the service
-// manager waits before it kills: the drain is bounded, but closing stores
-// and exiting after it takes a moment too.
+// stopMargin is how much longer than the daemon's worst-case stop the
+// service manager waits before it kills: the stop is bounded, but closing
+// stores and exiting after it takes a moment too.
 const stopMargin = 15 * time.Second
 
 // StopTimeout is how long the service manager waits after SIGTERM before it
-// SIGKILLs what is left.
-const StopTimeout = daemon.StopTimeout + stopMargin
+// SIGKILLs what is left: the daemon's whole stop budget (its drain, the
+// drain's grace, the exit wait), plus a margin.
+const StopTimeout = shutdown.Worst + stopMargin
 
 // Manager installs, removes and controls the slop-bot service.
 type Manager interface {
