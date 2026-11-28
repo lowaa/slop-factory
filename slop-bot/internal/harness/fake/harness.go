@@ -51,14 +51,13 @@ func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harn
 	if resume != nil {
 		args = []string{"--resume", resume.ID}
 	}
-	spec := &harness.LaunchSpec{
-		Path: h.Binary,
-		Args: args,
-		Env:  agentproc.AgentEnv(&agentproc.EnvOptions{Base: os.Environ(), APIKeyOptIn: ws.APIKeyOptIn, Set: set}),
-		Dir:  ws.Dir,
-	}
+	env := agentproc.AgentEnv(&agentproc.EnvOptions{Base: os.Environ(), APIKeyOptIn: ws.APIKeyOptIn, Set: set})
+	spec := &harness.LaunchSpec{Path: h.Binary, Args: args, Env: env, Dir: ws.Dir}
 	return rpcdriver.Start(ctx, &rpcdriver.Options{
 		Harness: Name, Driver: Driver, Codec: codec{}, Spec: spec,
 		Logger: h.Logger, Clock: h.Clock,
+		Attach: func(id string) *harness.LaunchSpec {
+			return &harness.LaunchSpec{Path: h.Binary, Args: []string{"--tui", "--resume", id}, Env: env, Dir: ws.Dir}
+		},
 	})
 }

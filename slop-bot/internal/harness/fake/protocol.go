@@ -63,8 +63,11 @@ type Report struct {
 	ID string `json:"id,omitempty"`
 	// Resumed is set on started when the fake was asked to resume ID.
 	Resumed bool `json:"resumed,omitempty"`
-	// Text and From of a received user message; MidTurn says it came while
-	// a turn ran.
+	// TUI is set on started when the fake runs as a harness's TUI, the way
+	// an attach hands a conversation to a person.
+	TUI bool `json:"tui,omitempty"`
+	// Text and From of a received user message, or Text of a line typed
+	// into the TUI; MidTurn says it came while a turn ran.
 	Text    string `json:"text,omitempty"`
 	From    string `json:"from,omitempty"`
 	MidTurn bool   `json:"mid_turn,omitempty"`
@@ -80,8 +83,10 @@ type Report struct {
 
 // Reports.
 const (
-	RepStarted     = "started"
-	RepUser        = "user"
+	RepStarted = "started"
+	RepUser    = "user"
+	// RepTyped is a line a person typed into the TUI.
+	RepTyped       = "typed"
 	RepInterrupt   = "interrupt"
 	RepStdinClosed = "stdin_closed"
 	RepRan         = "ran"
@@ -96,3 +101,7 @@ const (
 	// EnvID fixes the id of a new conversation.
 	EnvID = "SLOP_BOT_FAKE_ID"
 )
+
+// TUIExit is the line that quits the fake's TUI, as /exit quits Claude
+// Code's.
+const TUIExit = "/exit"

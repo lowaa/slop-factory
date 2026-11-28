@@ -16,6 +16,7 @@ import (
 type AgentReader interface {
 	Get(ctx context.Context, id ident.AgentID) (*Agent, error)
 	LiveForTicket(ctx context.Context, ticket ident.TicketID) (*Agent, error)
+	ReleasedForTicket(ctx context.Context, ticket ident.TicketID) (bool, error)
 	ListLive(ctx context.Context) ([]*Agent, error)
 	History(ctx context.Context, id ident.AgentID) ([]StateChange, error)
 }

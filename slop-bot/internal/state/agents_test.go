@@ -149,6 +149,23 @@ func TestATicketGetsANewAgentOnceItsLastEnded(t *testing.T) {
 	assert.Equal(t, ident.AgentID("a2"), live.ID)
 }
 
+func TestReleasedForTicketSeesOnlyARelease(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	f.createAgent(t, "a1", "1")
+	f.setState(t, "a1", state.StateDone)
+	f.createAgent(t, "a2", "2")
+	f.setState(t, "a2", state.StateReleased)
+	f.createAgent(t, "a3", "3")
+
+	for ticket, want := range map[ident.TicketID]bool{"1": false, "2": true, "3": false, "4": false} {
+		got, err := f.Agents.ReleasedForTicket(ctx, ticket)
+		require.NoError(t, err)
+		assert.Equal(t, want, got, "ticket %s", ticket)
+	}
+}
+
 func TestSetStateRecordsHistoryAndSince(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

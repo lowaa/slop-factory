@@ -297,6 +297,18 @@ func (a *Agents) LiveForTicket(ctx context.Context, ticket ident.TicketID) (*Age
 	})
 }
 
+// ReleasedForTicket reports whether the ticket's agent was released to a
+// person (`attach --no-resume`). The ticket stays assigned, so without this
+// the scheduler would start a new agent on work a person has taken over.
+func (a *Agents) ReleasedForTicket(ctx context.Context, ticket ident.TicketID) (bool, error) {
+	n, err := a.db.NewSelect().Table("agents").
+		Where("ticket_id = ?", string(ticket)).Where("state = ?", string(StateReleased)).Count(ctx)
+	if err != nil {
+		return false, fmt.Errorf("state: checking ticket %s for a released agent: %w", ticket, err)
+	}
+	return n > 0, nil
+}
+
 // ListLive returns every agent that hasn't ended, oldest first: the ones the
 // daemon resumes on start.
 func (a *Agents) ListLive(ctx context.Context) ([]*Agent, error) {

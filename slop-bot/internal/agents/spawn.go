@@ -98,12 +98,18 @@ type adoption struct {
 	conv   harness.Conversation
 	caps   harness.Capabilities
 	st     state.AgentState
+	// decl and summary carry what the agent declared from inside a TUI
+	// across the hand-back.
+	decl      declared
+	summary   string
+	holdsSlot bool
 }
 
 func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 	id := a.id
 	conv := a.conv
-	r := &runner{m: m, id: id, ticket: a.ticket, pool: a.pool, conv: conv, caps: a.caps, st: a.st, exited: make(chan struct{})}
+	r := &runner{m: m, id: id, ticket: a.ticket, pool: a.pool, conv: conv, caps: a.caps, st: a.st,
+		decl: a.decl, summary: a.summary, holdsSlot: a.holdsSlot, exited: make(chan struct{})}
 	m.mu.Lock()
 	m.runners[id] = r
 	m.mu.Unlock()
@@ -198,8 +204,11 @@ func (m *Manager) resumeAll(ctx context.Context) error {
 		return err
 	}
 	for _, a := range live {
-		if a.Mode == state.ModeAttached || a.ConversationID == "" ||
-			a.State == state.StateCrashed || a.State == state.StateExited {
+		if a.Mode == state.ModeAttached {
+			m.adoptAttached(ctx, a)
+			continue
+		}
+		if a.ConversationID == "" || a.State == state.StateCrashed || a.State == state.StateExited {
 			continue
 		}
 		if err := m.resume(ctx, a); err != nil {
@@ -210,36 +219,30 @@ func (m *Manager) resumeAll(ctx context.Context) error {
 	return nil
 }
 
+// adoptAttached takes on an agent a person had attached when the daemon
+// last stopped. It has no conversation of ours: it holds its slot and
+// takes its verbs from the TUI until its CLI reconnects and hands it back,
+// or its lease expires.
+func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
+	if a.State != state.StateAttached {
+		// The daemon stopped between taking the lease and moving the state.
+		if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: state.StateAttached, Reason: "attached at restart"}); err != nil {
+			m.opts.Logger.Warn("agents: recording an attach", "agent", a.ID, "err", err)
+		}
+	}
+	r := &runner{m: m, id: a.ID, ticket: a.Ticket, pool: a.Pool, st: state.StateAttached, exited: make(chan struct{})}
+	close(r.exited)
+	m.mu.Lock()
+	m.runners[a.ID] = r
+	m.mu.Unlock()
+}
+
 func (m *Manager) resume(ctx context.Context, a *state.Agent) error {
-	h, ok := m.opts.Harnesses.Harness(a.Harness)
-	if !ok {
-		return fmt.Errorf("harness %q isn't available", a.Harness)
-	}
-	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
+	conv, caps, err := m.startConversation(ctx, a)
 	if err != nil {
 		return err
 	}
-	// state.db holds only token hashes, so the resumed agent gets a new one.
-	token, err := control.NewToken()
-	if err != nil {
-		return err
-	}
-	if err := m.opts.State.Agents.RotateTokenHash(ctx, a.ID, control.HashToken(token)); err != nil {
-		return err
-	}
-	var wts []*worktree.Worktree
-	for _, w := range a.Worktrees {
-		wts = append(wts, &worktree.Worktree{Ticket: a.Ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary})
-	}
-	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, wts, token)
-	if err != nil {
-		return err
-	}
-	conv, err := h.Start(ctx, ws, &harness.ConversationRef{Harness: a.Harness, Driver: a.Driver, ID: a.ConversationID})
-	if err != nil {
-		return err
-	}
-	m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, pool: a.Pool, conv: conv, caps: h.Capabilities(), st: a.State})
+	m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, pool: a.Pool, conv: conv, caps: caps, st: a.State})
 	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
 	// A waiting agent stays waiting; one that was mid-work is told why its
 	// last turn may have been cut short.
@@ -258,4 +261,46 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent) error {
 		m.deliverPending(ctx, r)
 	}
 	return nil
+}
+
+// startConversation resumes a's conversation by id, with a fresh token:
+// state.db holds only token hashes, so the old one can't be handed on.
+func (m *Manager) startConversation(ctx context.Context, a *state.Agent) (harness.Conversation, harness.Capabilities, error) {
+	h, ok := m.opts.Harnesses.Harness(a.Harness)
+	if !ok {
+		return nil, harness.Capabilities{}, fmt.Errorf("harness %q isn't available", a.Harness)
+	}
+	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	token, err := m.rotateToken(ctx, a.ID)
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	var wts []*worktree.Worktree
+	for _, w := range a.Worktrees {
+		wts = append(wts, &worktree.Worktree{Ticket: a.Ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary})
+	}
+	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, wts, token)
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	conv, err := h.Start(ctx, ws, &harness.ConversationRef{Harness: a.Harness, Driver: a.Driver, ID: a.ConversationID})
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	return conv, h.Capabilities(), nil
+}
+
+// rotateToken gives the agent a new token, retiring the old one.
+func (m *Manager) rotateToken(ctx context.Context, id ident.AgentID) (string, error) {
+	token, err := control.NewToken()
+	if err != nil {
+		return "", err
+	}
+	if err := m.opts.State.Agents.RotateTokenHash(ctx, id, control.HashToken(token)); err != nil {
+		return "", err
+	}
+	return token, nil
 }

@@ -110,6 +110,10 @@ type Agents struct {
 	StallAfter Duration `yaml:"stall_after"`
 	// AskReminderAfter is when the user is reminded of an unanswered ask.
 	AskReminderAfter Duration `yaml:"ask_reminder_after"`
+	// AttachLease is how long an attach outlives its CLI's last heartbeat:
+	// across a daemon restart, the attached CLI has this long to reconnect
+	// before the agent is handed back.
+	AttachLease Duration `yaml:"attach_lease"`
 }
 
 // Retention is how long finished records are kept.
@@ -216,6 +220,9 @@ func (c *Config) defaultDurations() {
 	}
 	if c.Agents.AskReminderAfter == 0 {
 		c.Agents.AskReminderAfter = Duration(24 * time.Hour)
+	}
+	if c.Agents.AttachLease == 0 {
+		c.Agents.AttachLease = Duration(30 * time.Second)
 	}
 	if c.Retention.Transcripts == 0 {
 		c.Retention.Transcripts = Duration(30 * 24 * time.Hour)

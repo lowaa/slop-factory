@@ -25,14 +25,19 @@ const (
 	declContinue declared = "continue"
 )
 
-// runner owns one live agent's conversation.
+// runner owns one live agent's conversation. An attach stops the
+// conversation and leaves the runner in place, holding the agent's slot and
+// taking its verbs from inside the TUI; the hand-back replaces it with a
+// runner on the resumed conversation.
 type runner struct {
 	m      *Manager
 	id     ident.AgentID
 	ticket ident.TicketID
 	pool   state.Pool
-	conv   harness.Conversation
-	caps   harness.Capabilities
+	// conv is nil for an agent that was attached when the daemon started:
+	// its conversation is the person's TUI, not ours.
+	conv harness.Conversation
+	caps harness.Capabilities
 
 	mu       sync.Mutex
 	st       state.AgentState
@@ -40,16 +45,30 @@ type runner struct {
 	decl     declared
 	summary  string
 	stopping bool
+	// attaching is set while an attach stops the conversation: the turn's
+	// end mustn't start another, and the exit isn't a crash.
+	attaching bool
+	// holdsSlot carries an attached agent's slot into its first turn after
+	// the hand-back, so it can't lose it to new work in between.
+	holdsSlot bool
 	// exited is closed when the conversation's events end.
 	exited chan struct{}
 }
 
-// counts reports whether the runner is in a turn for capacity: waiting
-// agents keep their process but not a slot.
+// active reports whether the runner holds a slot: in a turn, starting, or
+// attached (a person is working it). Waiting agents keep their process but
+// not a slot.
 func (r *runner) active() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.inTurn || r.st == state.StateStarting
+	return r.inTurn || r.attaching || r.holdsSlot || r.st == state.StateStarting || r.st == state.StateAttached
+}
+
+// stopConv stops the conversation, if this runner has one.
+func (r *runner) stopConv(ctx context.Context) {
+	if r.conv != nil {
+		_ = r.conv.Stop(ctx, false)
+	}
 }
 
 func (r *runner) state() state.AgentState {
@@ -145,13 +164,14 @@ func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
 	// agent's CLI call can land before this goroutine has even seen the
 	// turn start.
 	r.mu.Lock()
-	decl, summary, stopping := r.decl, r.summary, r.stopping
+	decl, summary, stopping := r.decl, r.summary, r.stopping || r.attaching
 	if !stopping {
 		r.decl, r.summary = declNone, ""
 	}
 	r.mu.Unlock()
-	// Draining for a daemon stop: start nothing new. The agent keeps its
-	// state, so a resume knows it was mid-work and says so.
+	// Draining for a daemon stop or an attach: start nothing new. The agent
+	// keeps its state and what it declared, so a resume knows it was
+	// mid-work and says so, and an ask still stands after the hand-back.
 	if stopping && decl != declDone {
 		return
 	}
@@ -189,7 +209,7 @@ func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
 
 func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 	r.mu.Lock()
-	stopping := r.stopping
+	stopping := r.stopping || r.attaching
 	r.mu.Unlock()
 	if stopping {
 		return
@@ -213,7 +233,7 @@ func (r *runner) shutdown(ctx context.Context) {
 	r.mu.Lock()
 	r.stopping = true
 	r.mu.Unlock()
-	_ = r.conv.Stop(ctx, false)
+	r.stopConv(ctx)
 	<-r.exited
 }
 

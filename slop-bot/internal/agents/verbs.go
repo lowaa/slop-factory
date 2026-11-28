@@ -161,7 +161,7 @@ func (m *Manager) finish(ctx context.Context, r *runner, summary string) {
 		}
 	}
 	m.advanceTo(ctx, by, r.ticket, tickets.StatusDone)
-	_ = r.conv.Stop(ctx, false)
+	r.stopConv(ctx)
 	go func() {
 		<-r.exited
 		m.cleanup(context.WithoutCancel(ctx), r)

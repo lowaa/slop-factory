@@ -114,8 +114,12 @@ func (m *Manager) eligible(ctx context.Context) []*tickets.Ticket {
 		if t.Status == tickets.StatusOpen && len(t.BlockedBy) > 0 {
 			return true
 		}
-		_, err := m.opts.State.Agents.LiveForTicket(ctx, t.ID)
-		return err == nil
+		if _, err := m.opts.State.Agents.LiveForTicket(ctx, t.ID); err == nil {
+			return true
+		}
+		// A person took the ticket over with `attach --no-resume`.
+		released, err := m.opts.State.Agents.ReleasedForTicket(ctx, t.ID)
+		return err != nil || released
 	})
 }
 
@@ -153,7 +157,11 @@ func (m *Manager) takeSlot(r *runner) bool {
 		}
 	}
 	m.mu.Unlock()
-	if !ahead && m.slotFree(r.pool, r.id) {
+	r.mu.Lock()
+	held := r.holdsSlot
+	r.holdsSlot = false
+	r.mu.Unlock()
+	if held || (!ahead && m.slotFree(r.pool, r.id)) {
 		m.mu.Lock()
 		m.wantSlot = slices.DeleteFunc(m.wantSlot, func(id ident.AgentID) bool { return id == r.id })
 		m.mu.Unlock()

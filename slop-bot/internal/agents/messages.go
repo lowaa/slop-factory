@@ -69,7 +69,9 @@ func (m *Manager) Tell(ctx context.Context, from ident.Principal, to, text strin
 	}
 	m.event(ctx, EventQueued, a.ID, a.Ticket, map[string]string{"to": string(a.ID), "from": string(sender)})
 	if r, ok := m.runner(a.ID); ok {
-		if interrupt {
+		// An attached agent's conversation is the person's TUI: its messages
+		// wait for the hand-back.
+		if interrupt && r.state() != state.StateAttached {
 			if err := r.conv.Interrupt(ctx); err != nil {
 				m.opts.Logger.Warn("agents: interrupting", "agent", a.ID, "err", err)
 			}

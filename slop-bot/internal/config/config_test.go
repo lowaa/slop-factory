@@ -32,6 +32,7 @@ func TestEmptyConfigGetsEveryDefault(t *testing.T) {
 	assert.Equal(t, 3, c.Agents.Nudges)
 	assert.Equal(t, 15*time.Minute, c.Agents.StallAfter.D())
 	assert.Equal(t, 24*time.Hour, c.Agents.AskReminderAfter.D())
+	assert.Equal(t, 30*time.Second, c.Agents.AttachLease.D())
 	require.Contains(t, c.Harnesses, ClaudeCode)
 	assert.Equal(t, "stream-json", c.Harnesses[ClaudeCode].Driver)
 	assert.True(t, *c.Harnesses[ClaudeCode].Permissive)
@@ -55,7 +56,7 @@ harnesses:
   codex: {}
   agy: {driver: tui, permissive: false}
   pi:
-agents: {nudges: 5, stall_after: 30m, ask_reminder_after: 2h}
+agents: {nudges: 5, stall_after: 30m, ask_reminder_after: 2h, attach_lease: 1m}
 retention: {transcripts: 72h, events: 48h}
 `)
 	require.NoError(t, err)
@@ -70,6 +71,7 @@ retention: {transcripts: 72h, events: 48h}
 	assert.Equal(t, "rpc", c.Harnesses[Pi].Driver, "a bare harness key gets its default driver")
 	assert.False(t, *c.Harnesses[Agy].Permissive)
 	assert.Equal(t, 30*time.Minute, c.Agents.StallAfter.D())
+	assert.Equal(t, time.Minute, c.Agents.AttachLease.D())
 	assert.Equal(t, 48*time.Hour, c.Retention.Events.D())
 }
 

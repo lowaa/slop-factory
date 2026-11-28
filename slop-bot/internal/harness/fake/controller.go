@@ -101,9 +101,10 @@ type Session struct {
 	enc     *json.Encoder
 	mu      sync.Mutex
 	reports chan Report
-	// ID and Resumed come from the fake's started report.
+	// ID, Resumed and TUI come from the fake's started report.
 	ID      string
 	Resumed bool
+	TUI     bool
 }
 
 func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
@@ -119,7 +120,7 @@ func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 		}
 		if first && r.Rep == RepStarted {
 			first = false
-			s.ID, s.Resumed = r.ID, r.Resumed
+			s.ID, s.Resumed, s.TUI = r.ID, r.Resumed, r.TUI
 			select {
 			case started <- s:
 			case <-closed:

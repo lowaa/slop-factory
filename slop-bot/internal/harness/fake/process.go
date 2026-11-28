@@ -10,12 +10,17 @@ import (
 	"net"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 )
 
 // Main is the fake harness process. It returns the exit code.
 func Main(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) string) int {
 	f := &proc{out: json.NewEncoder(stdout), getenv: getenv}
+	tui := len(args) > 0 && args[0] == "--tui"
+	if tui {
+		args = args[1:]
+	}
 	id, resumed := getenv(EnvID), false
 	if len(args) == 2 && args[0] == "--resume" {
 		id, resumed = args[1], true
@@ -35,9 +40,42 @@ func Main(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) 
 		f.ctl = json.NewEncoder(conn)
 		cmds = readCommands(conn)
 	}
+	if tui {
+		f.report(Report{Rep: RepStarted, ID: id, Resumed: resumed, TUI: true})
+		return f.tui(stdin, stdout, cmds)
+	}
 	msgs := readStdin(stdin)
 	f.report(Report{Rep: RepStarted, ID: id, Resumed: resumed})
 	return f.loop(msgs, cmds)
+}
+
+// tui is the fake as a person sees a harness's TUI: it shows the
+// conversation, reports each line typed at it, and quits on TUIExit or when
+// its terminal goes away. The test can still script it, e.g. to run
+// `slop-bot done` as the agent would from inside the TUI.
+func (f *proc) tui(stdin io.Reader, stdout io.Writer, cmds <-chan Command) int {
+	_, _ = fmt.Fprintf(stdout, "fake-tui: conversation %s\r\n> ", f.id)
+	lines := readLines(stdin)
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return 0
+			}
+			f.report(Report{Rep: RepTyped, Text: line})
+			if line == TUIExit {
+				return 0
+			}
+			_, _ = fmt.Fprintf(stdout, "you said: %s\r\n> ", line)
+		case c, ok := <-cmds:
+			if !ok {
+				return 0
+			}
+			if code, exit := f.command(&c); exit {
+				return code
+			}
+		}
+	}
 }
 
 type proc struct {
@@ -183,6 +221,18 @@ func readStdin(r io.Reader) <-chan *inMsg {
 			if json.Unmarshal(sc.Bytes(), m) == nil {
 				ch <- m
 			}
+		}
+	}()
+	return ch
+}
+
+func readLines(r io.Reader) <-chan string {
+	ch := make(chan string)
+	go func() {
+		defer close(ch)
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			ch <- strings.TrimRight(sc.Text(), "\r")
 		}
 	}()
 	return ch
