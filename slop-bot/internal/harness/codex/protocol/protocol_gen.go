@@ -395,6 +395,18 @@ type ErrorNotification struct {
 	WillRetry bool      `json:"willRetry"`
 }
 
+type ExecCommandApprovalParams struct {
+	// Identifier for this specific approval callback.
+	ApprovalID string `json:"approvalId,omitempty"`
+	// Use to correlate this with [codex_protocol::protocol::ExecCommandBeginEvent] and [codex_protocol::protocol::ExecCommandEndEvent].
+	CallID         string          `json:"callId"`
+	Command        []string        `json:"command"`
+	ConversationID ThreadID        `json:"conversationId"`
+	Cwd            string          `json:"cwd"`
+	ParsedCmd      []ParsedCommand `json:"parsedCmd"`
+	Reason         string          `json:"reason,omitempty"`
+}
+
 type ExecCommandApprovalResponse struct {
 	Decision ReviewDecision `json:"decision"`
 }
@@ -679,6 +691,23 @@ type NetworkPolicyRuleAction string
 const (
 	NetworkPolicyRuleActionAllow NetworkPolicyRuleAction = "allow"
 	NetworkPolicyRuleActionDeny  NetworkPolicyRuleAction = "deny"
+)
+
+type ParsedCommand struct {
+	Cmd  string `json:"cmd"`
+	Name string `json:"name,omitempty"`
+	// (Best effort) Path to the file being read by the command. When possible, this is an absolute path, though when relative, it should be resolved against the `cwd`` that will be used to run the command to derive the absolute path.
+	Path  string `json:"path,omitempty"`
+	Query string `json:"query,omitempty"`
+	Type  string `json:"type"`
+}
+
+// ParsedCommand's `type` values.
+const (
+	ParsedCommandTypeRead      = "read"
+	ParsedCommandTypeListFiles = "list_files"
+	ParsedCommandTypeSearch    = "search"
+	ParsedCommandTypeUnknown   = "unknown"
 )
 
 type PatchChangeKind struct {
@@ -1052,6 +1081,8 @@ const (
 	ThreadHistoryModeLegacy    ThreadHistoryMode = "legacy"
 	ThreadHistoryModePaginated ThreadHistoryMode = "paginated"
 )
+
+type ThreadID string
 
 // A thread item and its recorded lifecycle times. The payload stays flat on the wire.
 type ThreadItem struct {

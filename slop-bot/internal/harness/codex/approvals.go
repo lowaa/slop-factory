@@ -26,30 +26,92 @@ type screened struct {
 	thread, turnID string
 }
 
+// unreadable is the refusal of a command approval the guard can't read.
+const unreadable = "slop-bot's merge guard couldn't read this command, so it was refused"
+
 // screen is the merge guard's verdict on a command Codex asks to run, or
 // nil when there is no guard or the request isn't a command's approval. It
 // runs on rpcdriver's goroutine, which Codex's turn waits on anyway: every
 // command is held until it is answered.
+//
+// Both of the protocol's command approvals are screened: turn/start's
+// item/commandExecution/requestApproval, and the legacy turn APIs'
+// execCommandApproval, which slop-bot's turns don't use but a permissive
+// agent would otherwise approve unscreened. Patch approvals aren't: a patch
+// only writes files, and running anything it writes takes a command, which
+// is screened (docs/merge_guard.md).
 func (c *codec) screen(m *message) *screened {
-	if c.opts.guard == nil || m.ID == nil || m.Method != protocol.MethodItemCommandExecutionRequestApproval {
+	if c.opts.guard == nil || m.ID == nil {
 		return nil
 	}
-	var p protocol.CommandExecutionRequestApprovalParams
-	if err := json.Unmarshal(m.Params, &p); err != nil {
-		// As the hook does with input it can't read: nothing to classify,
-		// and refusing every command would stop the agent over a format
-		// change.
-		c.opts.logger.Warn("codex: an unreadable command approval; not guarded", "err", err)
+	call, err := commandOf(m)
+	if err != nil {
+		// Unlike the hook, which can only fail open on input it can't
+		// read, this answer is what lets the command run: approving it
+		// unclassified would pass a merge on any format change.
+		c.opts.logger.Warn("codex: an unreadable command approval; refused", "method", m.Method, "err", err)
+		return &screened{verdict: &mergeguard.Verdict{Reason: unreadable}}
+	}
+	if call == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), guardTimeout)
 	defer cancel()
-	// Codex sends the command as one line (`/bin/bash -lc '<cmd>'`), which
-	// the classifier follows into. A writeStdin approval, should Codex send
-	// one, is classified the same way; the spike saw it send none for input
-	// typed into a running shell (docs/merge_guard.md).
-	v := c.opts.guard.Check(ctx, c.opts.by, &mergeguard.Call{Tool: shellTool, Command: p.Command, Cwd: string(p.Cwd)})
-	return &screened{verdict: v, thread: p.ThreadID, turnID: p.TurnID}
+	v := c.opts.guard.Check(ctx, c.opts.by, call.call)
+	return &screened{verdict: v, thread: call.thread, turnID: call.turnID}
+}
+
+// commandCall is the command one approval asks to run, and the turn that
+// asks.
+type commandCall struct {
+	call           *mergeguard.Call
+	thread, turnID string
+}
+
+// commandOf is the command a command approval asks to run, or nil for any
+// other message.
+func commandOf(m *message) (*commandCall, error) {
+	switch m.Method {
+	case protocol.MethodItemCommandExecutionRequestApproval:
+		var p protocol.CommandExecutionRequestApprovalParams
+		if err := decodeParams(m, &p); err != nil {
+			return nil, err
+		}
+		// Codex sends the command as one line (`/bin/bash -lc '<cmd>'`),
+		// which the classifier follows into. A writeStdin approval, should
+		// Codex send one, is classified the same way; the spike saw it send
+		// none for input typed into a running shell (docs/merge_guard.md).
+		return &commandCall{
+			call:   &mergeguard.Call{Tool: shellTool, Command: p.Command, Cwd: string(p.Cwd)},
+			thread: p.ThreadID, turnID: p.TurnID,
+		}, nil
+	case protocol.MethodExecCommandApproval:
+		var p protocol.ExecCommandApprovalParams
+		if err := decodeParams(m, &p); err != nil {
+			return nil, err
+		}
+		if len(p.Command) == 0 {
+			return nil, fmt.Errorf("decoding %s: no command", m.Method)
+		}
+		// The legacy request names no turn, so a refusal is never steered;
+		// its denial carries the reason instead (answer).
+		return &commandCall{
+			call:   &mergeguard.Call{Tool: shellTool, Command: mergeguard.ShellLine(p.Command), Cwd: p.Cwd},
+			thread: string(p.ConversationID),
+		}, nil
+	}
+	return nil, nil
+}
+
+// decodeParams decodes m's params into p; absent params are an error.
+func decodeParams(m *message, p any) error {
+	if len(m.Params) == 0 || string(m.Params) == "null" {
+		return fmt.Errorf("decoding %s: no params", m.Method)
+	}
+	if err := json.Unmarshal(m.Params, p); err != nil {
+		return fmt.Errorf("decoding %s: %w", m.Method, err)
+	}
+	return nil
 }
 
 // shellTool is Codex's shell tool, as the classifier knows it.
@@ -66,6 +128,10 @@ const shellTool = "exec_command"
 // never escalated by a request that slipped through. mu is held.
 func (c *codec) answer(w *rpcdriver.Wire, m *message, s *screened) error {
 	if s != nil && !s.verdict.Allow {
+		if m.Method == protocol.MethodExecCommandApproval {
+			// The legacy denial carries its reason to the model.
+			return c.reply(w, m, &protocol.ExecCommandApprovalResponse{Decision: deniedDecision(s.verdict.Reason)})
+		}
 		if err := c.reply(w, m, &protocol.CommandExecutionRequestApprovalResponse{Decision: protocol.CommandExecutionApprovalDecisionDecline}); err != nil {
 			return err
 		}
@@ -161,9 +227,9 @@ func decline(m *message) (any, error) {
 	case protocol.MethodItemFileChangeRequestApproval:
 		return &protocol.FileChangeRequestApprovalResponse{Decision: protocol.FileChangeApprovalDecisionDecline}, nil
 	case protocol.MethodApplyPatchApproval:
-		return &protocol.ApplyPatchApprovalResponse{Decision: deniedDecision()}, nil
+		return &protocol.ApplyPatchApprovalResponse{Decision: deniedDecision(rejection)}, nil
 	case protocol.MethodExecCommandApproval:
-		return &protocol.ExecCommandApprovalResponse{Decision: deniedDecision()}, nil
+		return &protocol.ExecCommandApprovalResponse{Decision: deniedDecision(rejection)}, nil
 	case protocol.MethodItemPermissionsRequestApproval:
 		// Nothing granted.
 		return &protocol.PermissionsRequestApprovalResponse{Scope: protocol.PermissionGrantScopeTurn}, nil
@@ -177,6 +243,6 @@ func decline(m *message) (any, error) {
 
 // deniedDecision is ReviewDecision's denial, an object variant the
 // generated `any` has no constant for.
-func deniedDecision() any {
-	return map[string]any{"denied": map[string]string{"rejection": rejection}}
+func deniedDecision(reason string) any {
+	return map[string]any{"denied": map[string]string{"rejection": reason}}
 }

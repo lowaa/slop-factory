@@ -92,6 +92,14 @@ func command(input json.RawMessage) string {
 	if json.Unmarshal(in.Command, &argv) != nil {
 		return ""
 	}
+	return ShellLine(argv)
+}
+
+// ShellLine is argv as the shell line that runs it, quoted so the
+// classifier reads each argument as the one word it is: a harness that
+// sends `["bash","-lc","gh pr merge 1"]` is classified as the shell it
+// starts.
+func ShellLine(argv []string) string {
 	quoted := make([]string, 0, len(argv))
 	for _, a := range argv {
 		q, err := syntax.Quote(a, syntax.LangBash)

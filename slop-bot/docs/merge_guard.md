@@ -167,7 +167,12 @@ no reason (the model reads only `rejected by user`), the guard's reason is
 steered into the running turn with `turn/steer`. Outside that turn the command
 is only declined: the reason goes only into the turn that asked, so it
 never reaches another thread (a sub-agent's) or starts a turn after an
-interrupt. Patches, permission requests and MCP elicitations are approved,
+interrupt. The legacy turn APIs' `execCommandApproval`, which slop-bot's
+`turn/start` turns don't use, is screened the same way (its argv quoted
+into one line); its denial carries the guard's reason itself, and it names
+no turn to steer. A command approval the codec can't read (missing params, a
+field of the wrong type) is declined: unlike the hook, the answer here is
+what lets the command run, so it fails closed. Patches, permission requests and MCP elicitations are approved,
 because the agent is permissive, as they always were when one slipped
 through; under `untrusted` they may now arrive routinely, which is unspiked
 (the scripted model's Codex is offered neither `apply_patch` nor MCP tools). Only plain
@@ -231,6 +236,14 @@ request, the steered reason. What was measured:
   decision="allow")` in `$CODEX_HOME/rules/` made Codex run `gh pr merge 12`
   without asking (spike). slop-bot runs on the user's Codex home (`trust.go`),
   so their allow rules apply.
+- **Patches.** `item/fileChange/requestApproval` and `applyPatchApproval`
+  aren't screened. A patch only writes files and runs nothing, so it can't
+  merge by itself; whatever it writes (a script, a git hook, an alias in
+  `.git/config`) takes a later command to run, and that command is screened.
+  The classifier only reads that command, though, so a merge hidden inside
+  something a patch wrote isn't recognised. That is the same limit as a
+  shell's `echo ... > x.sh; ./x.sh`: the guard stops obvious merges, it
+  isn't a sandbox.
 - **MCP tools.** Codex's MCP tool calls aren't command approvals, so the
   classifier's merging-verb rule for MCP tools doesn't reach them. Not
   spiked: the scripted model's Codex gets no MCP tools.

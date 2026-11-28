@@ -108,7 +108,7 @@ func TestTheGuardIsAskedAboutCommandsOnly(t *testing.T) {
 	t.Parallel()
 	g := &fakeGuard{verdicts: []*mergeguard.Verdict{{Reason: refusal}}}
 	f := guardedFixture(t, g)
-	for _, m := range []string{protocol.MethodItemFileChangeRequestApproval, protocol.MethodItemPermissionsRequestApproval, protocol.MethodMcpServerElicitationRequest} {
+	for _, m := range []string{protocol.MethodItemFileChangeRequestApproval, protocol.MethodApplyPatchApproval, protocol.MethodItemPermissionsRequestApproval, protocol.MethodMcpServerElicitationRequest} {
 		_, err := f.c.Decode([]byte(`{"id":5,"method":"`+m+`","params":{"permissions":{}}}`), f.w)
 		require.NoError(t, err)
 	}
@@ -117,16 +117,49 @@ func TestTheGuardIsAskedAboutCommandsOnly(t *testing.T) {
 	assert.Empty(t, g.calls, "a patch, a permission or a notification isn't a command to run")
 }
 
-// TestAnUnreadableApprovalIsAnsweredUnguarded follows the hook: with no
-// command to classify, refusing would stop the agent over a format change.
-func TestAnUnreadableApprovalIsAnsweredUnguarded(t *testing.T) {
+// TestAnUnreadableApprovalIsDeclined: the guard can't classify a command
+// it can't read, and approving it would run that command unscreened, so a
+// guarded agent fails closed.
+func TestAnUnreadableApprovalIsDeclined(t *testing.T) {
 	t.Parallel()
-	g := &fakeGuard{verdicts: []*mergeguard.Verdict{{Reason: refusal}}}
+	declined := `{"decision":"decline"}`
+	denied := `{"decision":{"denied":{"rejection":"` + unreadable + `"}}}`
+	for name, tc := range map[string]struct{ line, want string }{
+		"a command that isn't a string": {`{"id":9,"method":"` + protocol.MethodItemCommandExecutionRequestApproval + `","params":{"command":7}}`, declined},
+		"no params":                     {`{"id":9,"method":"` + protocol.MethodItemCommandExecutionRequestApproval + `"}`, declined},
+		"a legacy argv that isn't one":  {`{"id":9,"method":"` + protocol.MethodExecCommandApproval + `","params":{"command":"gh pr merge"}}`, denied},
+		"a legacy request, no params":   {`{"id":9,"method":"` + protocol.MethodExecCommandApproval + `","params":null}`, denied},
+		"a legacy request, no command":  {`{"id":9,"method":"` + protocol.MethodExecCommandApproval + `","params":{"command":[]}}`, denied},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := &fakeGuard{}
+			f := guardedFixture(t, g)
+			_, err := f.c.Decode([]byte(tc.line), f.w)
+			require.NoError(t, err)
+			assert.Empty(t, g.calls, "nothing to classify")
+			assert.JSONEq(t, tc.want, f.answers()["9"])
+		})
+	}
+}
+
+// TestALegacyCommandApprovalIsGuarded: execCommandApproval is the protocol's
+// other command approval (the legacy turn APIs'). It carries argv, which is
+// put to the guard as the shell line it would be.
+func TestALegacyCommandApprovalIsGuarded(t *testing.T) {
+	t.Parallel()
+	g := &fakeGuard{verdicts: []*mergeguard.Verdict{{Reason: refusal}, {Allow: true}}}
 	f := guardedFixture(t, g)
-	_, err := f.c.Decode([]byte(`{"id":9,"method":"`+protocol.MethodItemCommandExecutionRequestApproval+`","params":{"command":7}}`), f.w)
+	_, err := f.c.Decode([]byte(`{"id":3,"method":"execCommandApproval","params":{"callId":"c","conversationId":"`+thread+
+		`","cwd":"/ws/sub","parsedCmd":[],"command":["/bin/bash","-lc","gh pr merge 12 --squash"]}}`), f.w)
 	require.NoError(t, err)
-	assert.Empty(t, g.calls)
-	assert.Equal(t, `{"decision":"accept"}`, f.answers()["9"])
+	_, err = f.c.Decode([]byte(`{"id":4,"method":"execCommandApproval","params":{"callId":"d","conversationId":"`+thread+
+		`","cwd":"/ws","parsedCmd":[],"command":["ls"]}}`), f.w)
+	require.NoError(t, err)
+	require.Len(t, g.calls, 2)
+	assert.Equal(t, &mergeguard.Call{Tool: shellTool, Command: "/bin/bash -lc 'gh pr merge 12 --squash'", Cwd: "/ws/sub"}, g.calls[0])
+	assert.JSONEq(t, `{"decision":{"denied":{"rejection":"`+refusal+`"}}}`, f.answers()["3"], "the legacy denial carries the reason")
+	assert.Equal(t, `{"decision":"approved"}`, f.answers()["4"])
 }
 
 // approvalLine is a command approval Codex would send for thread and turn.

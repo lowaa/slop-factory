@@ -41,6 +41,7 @@ var roots = []string{
 	"PermissionsRequestApprovalParams",
 	// the command the merge guard classifies
 	"CommandExecutionRequestApprovalParams",
+	"ExecCommandApprovalParams",
 	"CommandExecutionRequestApprovalResponse",
 	"FileChangeRequestApprovalResponse",
 	"PermissionsRequestApprovalResponse",
