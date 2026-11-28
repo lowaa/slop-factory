@@ -1,7 +1,6 @@
 package agy
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agy/agytest"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake/faketest"
@@ -136,13 +136,13 @@ func newLiveSubject(t *testing.T) *conformance.Subject {
 		ids := p.ids
 		p.mu.Unlock()
 		for _, id := range ids {
-			if err := forgetConversation(home, id); err != nil {
+			if err := agytest.ForgetConversation(home, id); err != nil {
 				t.Errorf("removing agy's records of %s: %v", id, err)
 			}
 		}
 		// By folder, not id: it catches a conversation whose start failed
 		// after agy had named it.
-		if err := dropHistory(filepath.Join(home, ".gemini", "antigravity-cli", "history.jsonl"), dir); err != nil {
+		if err := agytest.DropHistory(home, dir); err != nil {
 			t.Errorf("removing the test's prompts from agy's history: %v", err)
 		}
 		_ = p.h.ForgetWorkspace(ws)
@@ -268,56 +268,4 @@ func (p *livePuppet) Crash(ctx context.Context) error {
 		return err
 	}
 	return syscall.Kill(pid, syscall.SIGKILL)
-}
-
-// forgetConversation removes what agy keeps of a conversation under home,
-// so the user's `agy --continue` and conversation list aren't left with the
-// test's.
-func forgetConversation(home, id string) error {
-	root := filepath.Join(home, ".gemini", "antigravity-cli")
-	errs := []error{os.RemoveAll(filepath.Join(root, "brain", id))}
-	for _, f := range []string{
-		filepath.Join("conversations", id+".db"), filepath.Join("conversations", id+".db-wal"),
-		filepath.Join("conversations", id+".db-shm"), filepath.Join("annotations", id+".pbtxt"),
-	} {
-		if err := os.Remove(filepath.Join(root, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// dropHistory removes the prompts typed in workspace from agy's prompt
-// history, keeping every other line as it was. A prompt agy records as it
-// dies, after this ran, stays.
-func dropHistory(path, workspace string) error {
-	fi, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	data, err := os.ReadFile(path) // #nosec G304 -- agy's own history
-	if err != nil {
-		return err
-	}
-	var kept bytes.Buffer
-	for _, line := range bytes.SplitAfter(data, []byte("\n")) {
-		var h struct {
-			Workspace string `json:"workspace"`
-		}
-		if json.Unmarshal(bytes.TrimSpace(line), &h) == nil && h.Workspace == workspace {
-			continue
-		}
-		kept.Write(line)
-	}
-	if kept.Len() == len(data) {
-		return nil
-	}
-	tmp := path + ".slop-bot-tmp"
-	if err := os.WriteFile(tmp, kept.Bytes(), fi.Mode().Perm()); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }

@@ -323,6 +323,8 @@ func (m *Manager) redeliverLater(r *runner) {
 		select {
 		case <-r.exited:
 			gone = true
+		case <-m.stop:
+			gone = true
 		default:
 		}
 		if !gone {
@@ -365,13 +367,14 @@ func (m *Manager) Pointer(msgs []*harness.Message) string {
 	if err := m.opts.State.Messages.MarkPointed(context.Background(), ids); err != nil {
 		m.opts.Logger.Warn("agents: keeping pointed-at messages in the inbox", "err", err)
 	}
-	what := "new messages"
-	if len(ids) == 1 {
-		what = "a new message"
-	} else if len(ids) > 1 {
+	what, them := "new messages", "them"
+	switch {
+	case len(ids) == 1:
+		what, them = "a new message", "it"
+	case len(ids) > 1:
 		what = fmt.Sprintf("%d new messages", len(ids))
 	}
-	return fmt.Sprintf("[slop-bot] You have %s: run `%s inbox` to read them, then carry on.", what, m.opts.CLI)
+	return fmt.Sprintf("[slop-bot] You have %s: run `%s inbox` to read %s, then carry on.", what, m.opts.CLI, them)
 }
 
 // render turns messages into what the agent reads, each saying who sent it,

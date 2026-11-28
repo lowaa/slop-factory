@@ -248,5 +248,3 @@ func TestAHookForAnotherAgentsSessionIsRefused(t *testing.T) {
 		&api.HookTUI{Session: e.session(agent), Event: fake.HookStep, Payload: []byte("{}")}, &out)
 	require.Error(t, err)
 }
-
-

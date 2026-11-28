@@ -67,4 +67,3 @@ func (h *Harness) logger() *slog.Logger {
 	}
 	return h.Logger
 }
-

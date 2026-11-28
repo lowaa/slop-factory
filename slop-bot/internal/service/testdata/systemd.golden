@@ -22,7 +22,10 @@ RuntimeDirectoryPreserve=yes
 Restart=on-failure
 RestartSec=5s
 # SIGTERM goes to the daemon alone, so it can stop its agents in order; only
-# what is still running after the timeout is SIGKILLed.
+# what is still running after the timeout is SIGKILLed. The tmux server the
+# TUI agents run in isn't in this unit: the daemon starts it in a scope of
+# its own (slop-bot-tmux-slop-bot.scope), so their sessions outlive a
+# restart and are taken back by the next daemon.
 KillMode=mixed
 TimeoutStopSec=45s
 
