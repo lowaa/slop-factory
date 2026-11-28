@@ -21,3 +21,11 @@ func TestAnOversizedResultStillEndsTheTurn(t *testing.T) {
 	assert.Equal(t, harness.TurnEnded, ended.Kind)
 	assert.Equal(t, harness.TurnCompleted, ended.Outcome)
 }
+
+// An oversized record with no field whole before the cut says nothing.
+func TestAnOversizedRecordWithNothingWholeSaysNothing(t *testing.T) {
+	t.Parallel()
+	evs, err := (&codec{}).Oversized([]byte(`{"type":"resu`), nil)
+	require.NoError(t, err)
+	assert.Empty(t, evs)
+}
