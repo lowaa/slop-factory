@@ -93,7 +93,9 @@ func (m *Manager) ResolveDiscussion(ctx context.Context, p ident.Principal, tick
 	if err != nil {
 		return nil // no agent: the ticket is open, and the scheduler will start one
 	}
-	_, err = m.Tell(ctx, p, string(a.ID), "Your discussion is resolved: "+resolution, false)
+	// The user's word, but on the discussion only: it mustn't close an
+	// unrelated question the agent is waiting on.
+	_, err = m.tell(ctx, &tellReq{from: p, to: string(a.ID), text: "Your discussion is resolved: " + resolution})
 	return err
 }
 

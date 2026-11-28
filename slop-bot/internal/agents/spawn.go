@@ -56,6 +56,11 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 			// What Create made before failing is nobody's yet: clean it up
 			// rather than leave it for a cleanup that has no record of it.
 			m.reportCleanup(ctx, "", t.ID, m.opts.Worktrees.Cleanup(context.WithoutCancel(ctx), t.ID, wts))
+			if m.base.Err() != nil {
+				// Cut short by the daemon stopping, not a ticket that can't
+				// run: the next start tries again.
+				return fmt.Errorf("agents: creating worktrees for ticket %s: %w", t.ID, err)
+			}
 			return m.misconfigure(ctx, t, fmt.Errorf("creating worktrees: %w", err))
 		}
 	}

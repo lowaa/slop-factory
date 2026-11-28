@@ -197,6 +197,25 @@ func TestATicketCancelledWhileTheDaemonWasDownEndsItsAgent(t *testing.T) {
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
 }
 
+// A daemon stopping while a new agent's worktrees are made is no fault of
+// the ticket's: it is left to start again, not parked as misconfigured.
+func TestStoppingMidWorktreeCreationDoesntParkTheTicket(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	entered := make(chan struct{})
+	f.wts.mu.Lock()
+	f.wts.beforeCreate = func(ctx context.Context) error {
+		close(entered)
+		<-ctx.Done() // a git call that hangs until the stop
+		return ctx.Err()
+	}
+	f.wts.mu.Unlock()
+	tk := f.file("t", nil)
+	<-entered
+	require.NoError(t, f.mgr.Stop(f.ctx()))
+	assert.Equal(t, tickets.StatusPreparing, f.ticket(tk.ID).Status)
+}
+
 func TestAHungStartHoldsUpNeitherOtherTicketsNorStop(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "")

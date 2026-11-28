@@ -163,9 +163,19 @@ type recordingWorktrees struct {
 	// leftover, when set, is reported alongside each removal, as the real
 	// manager does for branches it couldn't delete.
 	leftover error
+	// beforeCreate, when set, runs before each Create; an error fails it.
+	beforeCreate func(ctx context.Context) error
 }
 
-func (w *recordingWorktrees) Create(_ context.Context, ticket ident.TicketID, repos []string, primary string) ([]*worktree.Worktree, error) {
+func (w *recordingWorktrees) Create(ctx context.Context, ticket ident.TicketID, repos []string, primary string) ([]*worktree.Worktree, error) {
+	w.mu.Lock()
+	before := w.beforeCreate
+	w.mu.Unlock()
+	if before != nil {
+		if err := before(ctx); err != nil {
+			return nil, err
+		}
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.created = append(w.created, ticket)
