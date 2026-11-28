@@ -204,6 +204,13 @@ func prefixFields(prefix []byte) map[string]json.RawMessage {
 	return fields
 }
 
+// Holder is a codec that holds messages Send took until the harness can
+// take them (a turn to steer into, a busy harness), for the conversation's
+// Undelivered.
+type Holder interface {
+	Undelivered() []*harness.Message
+}
+
 // DefaultKillGrace is Options.KillGrace's default.
 const DefaultKillGrace = 5 * time.Second
 
@@ -522,6 +529,14 @@ func (c *Conversation) kill(ctx context.Context) error {
 	}
 	c.proc.Kill()
 	<-c.exited
+	return nil
+}
+
+// Undelivered implements harness.Conversation: what the codec still holds.
+func (c *Conversation) Undelivered() []*harness.Message {
+	if h, ok := c.opts.Codec.(Holder); ok {
+		return h.Undelivered()
+	}
 	return nil
 }
 

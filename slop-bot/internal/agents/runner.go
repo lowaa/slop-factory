@@ -378,6 +378,8 @@ func (r *runner) settle(ctx context.Context, decl declared, ev *harness.Event) {
 }
 
 func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
+	// Whatever ends here, the messages the session held are the next one's.
+	r.requeue(ctx, r.conv.Undelivered())
 	r.mu.Lock()
 	stopping := r.stopping || r.attaching
 	// Not if a hand-back has claimed the session (joined): it is no longer
@@ -423,7 +425,7 @@ func (r *runner) shutdown(ctx context.Context) {
 		case <-r.exited:
 		default:
 			_ = lasting.Close()
-			r.requeue(ctx, lasting.Held())
+			r.requeue(ctx, r.conv.Undelivered())
 		}
 		<-r.exited
 		return
@@ -432,9 +434,13 @@ func (r *runner) shutdown(ctx context.Context) {
 	<-r.exited
 }
 
-// requeue queues again the messages a let-go conversation held, which were
-// marked delivered when it took them, so the next daemon delivers them.
+// requeue queues again the messages an ended or let-go conversation held,
+// which were marked delivered when it took them, so the next session
+// delivers them.
 func (r *runner) requeue(ctx context.Context, held []*harness.Message) {
+	if len(held) == 0 {
+		return
+	}
 	var ids []int64
 	for _, msg := range held {
 		ids = append(ids, msg.IDs...)

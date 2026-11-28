@@ -45,9 +45,11 @@ type codec struct {
 	// while compacting), so a message Send accepted isn't silently dropped
 	// while pi runs. They go again when the compaction ends, when the run
 	// settles (keeping the turn open), or after an interrupt, ahead of the
-	// next Send. They live only here: state.db has marked them delivered, so
-	// a pi that exits first loses them.
-	held []string
+	// next Send. state.db has marked them delivered, so a pi that exits
+	// first leaves them Undelivered, for the core to queue again. Taking
+	// them and writing them is one step under mu, so a Send and a resend
+	// can't reorder them.
+	held []*harness.Message
 
 	// The rest is touched only by Decode, which rpcdriver calls from a single
 	// goroutine.
@@ -73,7 +75,7 @@ func newCodec(id string, resumed bool, log *slog.Logger) *codec {
 
 // pending is a prompt awaiting pi's response.
 type pending struct {
-	text string
+	msg *harness.Message
 	// bridging marks a held message resent at a settle.
 	bridging bool
 	// opened marks a message sent while rpcdriver had no turn open, so its
@@ -86,6 +88,13 @@ type bridge struct {
 	end         []harness.Event
 	outstanding int
 	taken       bool
+}
+
+// Undelivered implements rpcdriver.Holder: the held messages.
+func (c *codec) Undelivered() []*harness.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*harness.Message(nil), c.held...)
 }
 
 func (c *codec) nextID() string { return "slop-bot-" + strconv.FormatInt(c.request.Add(1), 10) }
@@ -178,49 +187,62 @@ func (c *codec) checkState(r *record) error {
 // whole run to finish, and a message should reach the agent at the next
 // model call.
 func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, mid bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Messages held over an interrupt go first, in the order they were sent.
-	for _, text := range c.takeHeld() {
-		if err := c.prompt(w, &pending{text: text, opened: !mid}); err != nil {
-			return err
-		}
+	if n, err := c.sendHeld(w, &pending{opened: !mid}); err != nil {
+		c.log.Warn("pi: sending a held message", "err", err, "unsent", n)
+		return err
 	}
-	return c.prompt(w, &pending{text: msg.Text, opened: !mid})
+	return c.prompt(w, &pending{msg: msg, opened: !mid})
 }
 
+// prompt writes one message; mu is held.
 func (c *codec) prompt(w *rpcdriver.Wire, p *pending) error {
 	id := c.nextID()
-	c.mu.Lock()
 	c.prompts[id] = p
-	c.mu.Unlock()
-	return write(w, command{ID: id, Type: "prompt", Message: p.text, StreamingBehavior: "steer"})
+	if err := write(w, command{ID: id, Type: "prompt", Message: p.msg.Text, StreamingBehavior: "steer"}); err != nil {
+		delete(c.prompts, id)
+		return err
+	}
+	return nil
 }
 
-func (c *codec) hold(text string) {
+func (c *codec) hold(msg *harness.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.held = append(c.held, text)
+	c.held = append(c.held, msg)
 }
 
-func (c *codec) takeHeld() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// sendHeld writes the held messages, each as like (bridging, opened). On a
+// failed write the rest stay held, and n says how many. mu is held.
+func (c *codec) sendHeld(w *rpcdriver.Wire, like *pending) (n int, err error) {
 	held := c.held
 	c.held = nil
-	return held
+	for i, msg := range held {
+		p := *like
+		p.msg = msg
+		if err := c.prompt(w, &p); err != nil {
+			c.held = append(held[i:], c.held...)
+			return len(held) - i, err
+		}
+	}
+	return 0, nil
 }
 
 // resendHeld sends the held messages again, returning how many it wrote. A
 // write fails only when pi is gone, and the exit will be reported, so it is
-// logged rather than costing the events decoded with it.
+// logged rather than costing the events decoded with it; what it didn't
+// write stays held, Undelivered.
 func (c *codec) resendHeld(w *rpcdriver.Wire, bridging bool) int {
-	held := c.takeHeld()
-	for i, text := range held {
-		if err := c.prompt(w, &pending{text: text, bridging: bridging}); err != nil {
-			c.log.Warn("pi: resending a held message", "err", err, "lost", len(held)-i)
-			return i
-		}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	total := len(c.held)
+	unsent, err := c.sendHeld(w, &pending{bridging: bridging})
+	if err != nil {
+		c.log.Warn("pi: resending a held message", "err", err, "unsent", unsent)
 	}
-	return len(held)
+	return total - unsent
 }
 
 // Interrupt sends abort: pi kills the running tool, ends the run with
@@ -392,12 +414,12 @@ func (c *codec) response(r *record) []harness.Event {
 	var d disposition
 	_ = json.Unmarshal(r.Data, &d) // absent on failure
 	if p.bridging {
-		return c.bridged(r, &d, p.text)
+		return c.bridged(r, &d, p.msg)
 	}
 	switch {
 	case !r.Success && (c.inTurn || c.compacting):
 		c.log.Warn("pi: a message was rejected while pi was busy; holding it to send again", "err", r.Error)
-		c.hold(p.text)
+		c.hold(p.msg)
 		if p.opened && !c.inTurn {
 			c.heldTurn = true
 		}
@@ -505,7 +527,7 @@ func (c *codec) settle(r *record, w *rpcdriver.Wire) []harness.Event {
 // bridged handles the response to a message resent at a settle. Once every
 // one has answered and none started a run, the deferred turn end goes out.
 // One pi rejects again stays held, for the next Send.
-func (c *codec) bridged(r *record, d *disposition, text string) []harness.Event {
+func (c *codec) bridged(r *record, d *disposition, msg *harness.Message) []harness.Event {
 	b := c.deferred
 	if b == nil {
 		return nil // its run has already settled the turn
@@ -514,7 +536,7 @@ func (c *codec) bridged(r *record, d *disposition, text string) []harness.Event 
 	switch {
 	case !r.Success:
 		c.log.Warn("pi: a held message was rejected again; holding it for the next message", "err", r.Error)
-		c.hold(text)
+		c.hold(msg)
 	case d.Disposition != "handled":
 		b.taken = true
 	}

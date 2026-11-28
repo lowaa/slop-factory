@@ -1061,9 +1061,9 @@ func (c *Conversation) AttachPlan(context.Context) (*harness.AttachPlan, error) 
 	return &harness.AttachPlan{Kind: harness.Join, Command: &harness.LaunchSpec{Path: argv[0], Args: argv[1:]}}, nil
 }
 
-// Held implements harness.Lasting: the messages Send took that no hook or
-// pointer has delivered yet, which a Close leaves undelivered.
-func (c *Conversation) Held() []*harness.Message {
+// Undelivered implements harness.Conversation: the messages Send took that
+// no hook or pointer has delivered yet.
+func (c *Conversation) Undelivered() []*harness.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]*harness.Message(nil), c.pending...)

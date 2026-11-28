@@ -414,6 +414,24 @@ func TestAMessageAfterAnInterruptStartsTheNextTurn(t *testing.T) {
 	assert.Equal(t, protocol.MethodTurnStart, f.p.methods()[len(f.p.sent)-1])
 }
 
+// A message queued behind an interrupt is the core's to keep if Codex exits
+// before the turn it waits for: state.db has it delivered.
+func TestAMessageQueuedBehindAnInterruptIsUndelivered(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, nil)
+	f.open()
+	f.send("sleep")
+	pl := newPlayer(t, f.p, "turn_interrupted")
+	pl.decode(f.c, f.w, itemStarted(protocol.ThreadItemTypeCommandExecution))
+	require.NoError(t, f.c.Interrupt(context.Background(), f.w))
+	queued := &harness.Message{Text: "do this instead", IDs: []int64{3}}
+	require.NoError(t, f.c.Send(context.Background(), f.w, queued, false))
+	assert.Equal(t, []*harness.Message{queued}, f.c.Undelivered())
+
+	pl.decode(f.c, f.w, method(protocol.MethodTurnCompleted))
+	assert.Empty(t, f.c.Undelivered(), "its turn/start went out")
+}
+
 func TestAnInterruptForARefusedTurnStartIsDropped(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, nil)

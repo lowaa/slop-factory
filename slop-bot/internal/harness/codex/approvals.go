@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex/protocol"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/rpcdriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
@@ -98,7 +99,7 @@ func (c *codec) explain(w *rpcdriver.Wire, s *screened) error {
 			"thread", s.thread, "turn", s.turnID)
 		return nil
 	}
-	return c.deliver(w, s.verdict.Reason)
+	return c.deliver(w, &harness.Message{Text: s.verdict.Reason})
 }
 
 // reply answers a server request with result.

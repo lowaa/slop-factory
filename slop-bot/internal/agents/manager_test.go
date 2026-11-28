@@ -80,6 +80,18 @@ type harnessHooks struct {
 	// attached makes a Stop without force refuse, as a TUI driver's does
 	// with a person in the session.
 	attached bool
+	// hold makes a Send take the message and keep it, as a codec waiting
+	// for a turn does: the conversation's Undelivered.
+	hold bool
+}
+
+func (h *harnessHooks) holds() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.hold
 }
 
 func (h *harnessHooks) onStop(agent ident.AgentID) {
@@ -152,6 +164,9 @@ type hookedConversation struct {
 	harness.Conversation
 	agent ident.AgentID
 	hooks *harnessHooks
+
+	mu   sync.Mutex
+	held []*harness.Message
 }
 
 func (c *hookedConversation) Send(ctx context.Context, msg *harness.Message) error {
@@ -160,7 +175,19 @@ func (c *hookedConversation) Send(ctx context.Context, msg *harness.Message) err
 			return err
 		}
 	}
+	if c.hooks.holds() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.held = append(c.held, msg)
+		return nil
+	}
 	return c.Conversation.Send(ctx, msg)
+}
+
+func (c *hookedConversation) Undelivered() []*harness.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append(c.held, c.Conversation.Undelivered()...)
 }
 
 func (c *hookedConversation) Stop(ctx context.Context, force bool) error {

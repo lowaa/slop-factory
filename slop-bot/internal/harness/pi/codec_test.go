@@ -367,6 +367,23 @@ func TestAPromptThatStartsNoRunStillEndsATurn(t *testing.T) {
 	})
 }
 
+// A message pi refused, held for the next Send, is the core's to keep if pi
+// exits first: state.db has it delivered.
+func TestHeldMessagesAreUndelivered(t *testing.T) {
+	t.Parallel()
+	c := testCodec()
+	var buf bytes.Buffer
+	w := rpcdriver.NewWire(&buf)
+	held := &harness.Message{Text: "hi", IDs: []int64{7}}
+	require.NoError(t, c.Send(context.Background(), w, held, false))
+	decodeAll(t, c, w, agentStart, response(lastCommand(t, &buf).ID, `"success":false,"error":"busy"`),
+		`{"type":"compaction_end","reason":"threshold","aborted":true}`, `{"type":"agent_settled","aborted":true}`)
+	assert.Equal(t, []*harness.Message{held}, c.Undelivered())
+
+	require.NoError(t, c.Send(context.Background(), w, &harness.Message{Text: "next"}, false))
+	assert.Empty(t, c.Undelivered(), "sent with the next message")
+}
+
 func TestDialogsAreCancelledAndNotificationsIgnored(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

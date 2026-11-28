@@ -71,8 +71,9 @@ type codec struct {
 	// message can't be steered and an interrupt can't name it.
 	starting bool
 	// queued are messages sent while starting, steered once the turn id is
-	// known.
-	queued []string
+	// known, or while interrupting, started as the next turn. Codex hasn't
+	// seen them: they are Undelivered if it exits first.
+	queued []*harness.Message
 	// interruptAsked is an interrupt that waits for the turn id.
 	interruptAsked bool
 	// interrupted is a turn slop-bot interrupted, whose commands are
@@ -99,9 +100,18 @@ const (
 
 type request struct {
 	kind requestKind
-	// text and turn are a steer's message and the turn it named, for when
+	// msg and turn are a steer's message and the turn it named, for when
 	// the steer is refused.
-	text, turn string
+	msg  *harness.Message
+	turn string
+}
+
+// Undelivered implements rpcdriver.Holder: the messages Send took that
+// still wait for a turn to steer into or start.
+func (c *codec) Undelivered() []*harness.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*harness.Message(nil), c.queued...)
 }
 
 func newCodec(opts *codecOptions) *codec {
@@ -239,25 +249,25 @@ func textInput(text string) []protocol.UserInput {
 func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message, _ bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.deliver(w, msg.Text)
+	return c.deliver(w, msg)
 }
 
 // deliver routes one message. mu is held.
-func (c *codec) deliver(w *rpcdriver.Wire, text string) error {
+func (c *codec) deliver(w *rpcdriver.Wire, msg *harness.Message) error {
 	switch {
 	case c.starting, c.interrupted && c.turnID != "":
 		// No turn to steer into yet, or one that is being interrupted: a
 		// steer there would be lost with it. turnCompleted starts the next
 		// turn with what waits.
-		c.queued = append(c.queued, text)
+		c.queued = append(c.queued, msg)
 		return nil
 	case c.turnID != "":
-		_, err := c.request(w, &request{kind: reqSteer, text: text, turn: c.turnID}, protocol.MethodTurnSteer, &protocol.TurnSteerParams{
-			ThreadID: c.threadID, ExpectedTurnID: c.turnID, Input: textInput(text),
+		_, err := c.request(w, &request{kind: reqSteer, msg: msg, turn: c.turnID}, protocol.MethodTurnSteer, &protocol.TurnSteerParams{
+			ThreadID: c.threadID, ExpectedTurnID: c.turnID, Input: textInput(msg.Text),
 		})
 		return err
 	}
-	return c.startTurn(w, text)
+	return c.startTurn(w, msg.Text)
 }
 
 func (c *codec) startTurn(w *rpcdriver.Wire, text string) error {
@@ -363,10 +373,10 @@ func (c *codec) response(w *rpcdriver.Wire, m *message) ([]harness.Event, error)
 func (c *codec) steerRefused(w *rpcdriver.Wire, r *request, e *rpcError) error {
 	c.opts.logger.Info("codex refused a steer; delivering it as a turn", "err", e.Message)
 	if c.turnID == r.turn {
-		c.queued = append(c.queued, r.text)
+		c.queued = append(c.queued, r.msg)
 		return nil
 	}
-	return c.deliver(w, r.text)
+	return c.deliver(w, r.msg)
 }
 
 // turnStarted handles turn/start's response: the turn's id, which the
@@ -402,8 +412,8 @@ func (c *codec) flush(w *rpcdriver.Wire) error {
 	}
 	queued := c.queued
 	c.queued = nil
-	for i, text := range queued {
-		if err := c.deliver(w, text); err != nil {
+	for i, msg := range queued {
+		if err := c.deliver(w, msg); err != nil {
 			return err
 		}
 		if c.starting {
@@ -494,9 +504,9 @@ func (c *codec) turnCompleted(w *rpcdriver.Wire, params json.RawMessage) ([]harn
 		}
 	}
 	if next {
-		text := c.queued[0]
+		msg := c.queued[0]
 		c.queued = c.queued[1:]
-		return evs, c.startTurn(w, text)
+		return evs, c.startTurn(w, msg.Text)
 	}
 	return evs, nil
 }

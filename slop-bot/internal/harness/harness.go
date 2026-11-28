@@ -51,6 +51,11 @@ type Conversation interface {
 	Stop(ctx context.Context, force bool) error
 	// AttachPlan says how a person takes this conversation over.
 	AttachPlan(ctx context.Context) (*AttachPlan, error)
+	// Undelivered, once Events has closed (with Exited, or after a
+	// Lasting's Close), are the messages Send took that never reached the
+	// harness: held for a hook, a turn's end, or a turn to steer into. The
+	// caller queues them again, or they are lost with the session.
+	Undelivered() []*Message
 }
 
 // Adopter is a harness whose sessions outlive the daemon (a TUI driver's,
@@ -67,12 +72,9 @@ type Adopter interface {
 // Lasting is a conversation whose session can outlive it (see Adopter).
 type Lasting interface {
 	// Close lets go of the session without ending it: Events closes with no
-	// Exited, and the session runs on for a later AdoptAgent.
+	// Exited, and the session runs on for a later AdoptAgent. Undelivered
+	// then says what it held.
 	Close() error
-	// Held, after Close, are the messages Send took that never reached the
-	// model (waiting for a hook or the turn's end): the caller's to queue
-	// again, or they are lost with the closed conversation.
-	Held() []*Message
 }
 
 var (
