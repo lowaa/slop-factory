@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by `slop-bot service install`. Re-run it rather than editing this
+     file: it resolves the paths and PATH below from your shell, so the daemon
+     agrees with the CLI. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{{xml .Label}}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{xml .Binary}}</string>
+		<string>daemon</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+{{- range .Env}}
+		<key>{{xml .Name}}</key>
+		<string>{{xml .Value}}</string>
+{{- end}}
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>{{xml .WorkingDir}}</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ExitTimeOut</key>
+	<integer>{{.StopSeconds}}</integer>
+	<key>StandardOutPath</key>
+	<string>{{xml .LogFile}}</string>
+	<key>StandardErrorPath</key>
+	<string>{{xml .LogFile}}</string>
+</dict>
+</plist>

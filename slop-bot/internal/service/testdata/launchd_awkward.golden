@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by `slop-bot service install`. Re-run it rather than editing this
+     file: it resolves the paths and PATH below from your shell, so the daemon
+     agrees with the CLI. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.slop-bot.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/a b%h$x&amp;&lt;&gt;/go/bin/slop-bot</string>
+		<string>daemon</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>XDG_CONFIG_HOME</key>
+		<string>/Users/a b%h$x&amp;&lt;&gt;/.config</string>
+		<key>XDG_DATA_HOME</key>
+		<string>/Users/a b%h$x&amp;&lt;&gt;/.local/share</string>
+		<key>XDG_STATE_HOME</key>
+		<string>/Users/a b%h$x&amp;&lt;&gt;/.local/state</string>
+		<key>XDG_CACHE_HOME</key>
+		<string>/Users/a b%h$x&amp;&lt;&gt;/.cache</string>
+		<key>XDG_RUNTIME_DIR</key>
+		<string>/Users/a b%h$x&amp;&lt;&gt;/tmp</string>
+		<key>PATH</key>
+		<string>/Users/a b%h$x&amp;&lt;&gt;/.local/bin:/Users/a b%h$x&amp;&lt;&gt;/go/bin:/usr/local/bin:/usr/bin:/bin:/opt/q&#34;x\y/bin</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/a b%h$x&amp;&lt;&gt;</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ExitTimeOut</key>
+	<integer>45</integer>
+	<key>StandardOutPath</key>
+	<string>/Users/a b%h$x&amp;&lt;&gt;/.local/state/slop-bot/logs/daemon.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/a b%h$x&amp;&lt;&gt;/.local/state/slop-bot/logs/daemon.log</string>
+</dict>
+</plist>

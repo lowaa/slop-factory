@@ -1,0 +1,25 @@
+# Written by `slop-bot service install`. Re-run it rather than editing this
+# file: it resolves the paths and PATH below from your shell, so the daemon
+# agrees with the CLI.
+[Unit]
+Description=slop-bot: coding agents on tickets
+
+[Service]
+Type=exec
+ExecStart={{execArg .Binary}} daemon
+WorkingDirectory={{specifiers .WorkingDir}}
+{{- range .Env}}
+Environment={{envAssign .}}
+{{- end}}
+# systemd sets XDG_RUNTIME_DIR, and creates and removes the socket directory.
+RuntimeDirectory=slop-bot
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=5s
+# SIGTERM goes to the daemon alone, so it can stop its agents in order; only
+# what is still running after the timeout is SIGKILLed.
+KillMode=mixed
+TimeoutStopSec={{.StopSeconds}}s
+
+[Install]
+WantedBy=default.target
