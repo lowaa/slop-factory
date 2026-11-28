@@ -11,6 +11,7 @@ internal/control/http.go StatusFor #36
 internal/control/server.go Server.Handle #36
 internal/daemon/daemon.go Daemon.Ready #36
 internal/harness/agentproc/env.go AgentEnv #36
+internal/harness/agentproc/env.go WorkspaceEnv #36
 internal/harness/agentproc/process.go Process.Done #36
 internal/harness/agentproc/process.go Process.Err #36
 internal/harness/agentproc/process.go Process.ExitCode #36
@@ -37,6 +38,7 @@ internal/harness/fake/harness.go Harness.Capabilities #36
 internal/harness/fake/harness.go Harness.Driver #36
 internal/harness/fake/harness.go Harness.Name #36
 internal/harness/fake/harness.go Harness.Start #36
+internal/harness/pi/ package #36
 internal/harness/rpcdriver/rpcdriver.go Conversation.AttachPlan #36
 internal/harness/rpcdriver/rpcdriver.go Conversation.Events #36
 internal/harness/rpcdriver/rpcdriver.go Conversation.Exited #36

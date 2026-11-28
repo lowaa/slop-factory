@@ -1,9 +1,12 @@
 package agentproc
 
 import (
+	"os"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 )
 
 // apiKeyVars are the variables that switch a harness from the user's
@@ -31,6 +34,24 @@ type EnvOptions struct {
 	Drop []string
 	// Set overrides or adds variables.
 	Set map[string]string
+}
+
+// WorkspaceEnv is the environment a harness gives ws's agent: base (nil
+// means os.Environ), cleaned by AgentEnv, with the harness's own settings
+// and then the workspace's Env on top, so the agent token and the like
+// always win.
+func WorkspaceEnv(base func() []string, ws *harness.Workspace, harnessSet map[string]string) []string {
+	if base == nil {
+		base = os.Environ
+	}
+	set := make(map[string]string, len(harnessSet)+len(ws.Env))
+	for k, v := range harnessSet {
+		set[k] = v
+	}
+	for k, v := range ws.Env {
+		set[k] = v
+	}
+	return AgentEnv(&EnvOptions{Base: base(), APIKeyOptIn: ws.APIKeyOptIn, Set: set})
 }
 
 // AgentEnv builds an agent's environment from the daemon's.

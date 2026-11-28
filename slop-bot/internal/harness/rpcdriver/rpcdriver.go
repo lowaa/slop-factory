@@ -135,17 +135,65 @@ func (c *Conversation) nextLine(ctx context.Context) ([]byte, error) {
 	}
 }
 
-// read owns stdout, passing each line on, until EOF.
+// read owns stdout, passing each line on, until EOF. A line over maxLine is
+// dropped and reading goes on: stopping would leave the harness running
+// with nobody reading its turn end or its exit, and the oversized lines seen
+// in practice are summaries (pi's agent_end repeats the whole run) that no
+// codec needs.
 func (c *Conversation) read() {
-	sc := bufio.NewScanner(c.proc.Stdout)
-	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
-	for sc.Scan() {
-		c.lines <- append([]byte(nil), sc.Bytes()...)
-	}
-	if err := sc.Err(); err != nil {
-		c.opts.Logger.Warn("rpcdriver: reading the harness", "harness", c.opts.Harness, "err", err)
+	r := bufio.NewReaderSize(c.proc.Stdout, 64<<10)
+	for {
+		line, err := readLine(r, maxLine)
+		if errors.Is(err, errLineTooLong) {
+			c.opts.Logger.Warn("rpcdriver: dropped an oversized line", "harness", c.opts.Harness, "max", maxLine)
+			continue
+		}
+		if len(line) > 0 {
+			c.lines <- line
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				c.opts.Logger.Warn("rpcdriver: reading the harness", "harness", c.opts.Harness, "err", err)
+			}
+			break
+		}
 	}
 	close(c.lines)
+}
+
+var errLineTooLong = errors.New("rpcdriver: line too long")
+
+// readLine returns the next line without its LF, split on LF only (a JSON
+// string may hold U+2028, which some line readers split on). A line longer
+// than max is consumed and errLineTooLong returned, so the next call starts
+// at the following line. At the end it returns any last unterminated line
+// with io.EOF.
+func readLine(r *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	tooLong := false
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !tooLong {
+			if len(line)+len(chunk) > max+1 { // +1: the LF isn't part of the line
+				tooLong, line = true, nil
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case err != nil:
+			if tooLong {
+				return nil, errLineTooLong
+			}
+			return line, err
+		case tooLong:
+			return nil, errLineTooLong
+		default:
+			return line[:len(line)-1], nil
+		}
+	}
 }
 
 // dispatch decodes every line after the handshake, then reports the exit and

@@ -18,7 +18,11 @@ type codec struct {
 	id string
 	// inTurn is touched only by Decode, which rpcdriver calls from a single
 	// goroutine.
-	inTurn  bool
+	inTurn bool
+	// metered is set when system/init says the credential is an API key:
+	// only then is total_cost_usd what is billed. On the subscription login
+	// (the default: agentproc keeps API keys out) it is an estimate.
+	metered bool
 	request atomic.Int64
 }
 
@@ -68,7 +72,9 @@ func (c *codec) Interrupt(_ context.Context, w *rpcdriver.Wire) error {
 type record struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
-	Message struct {
+	// system/init
+	APIKeySource string `json:"apiKeySource"`
+	Message      struct {
 		Content []struct {
 			Type string `json:"type"`
 			Name string `json:"name"`
@@ -110,6 +116,10 @@ func (c *codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) 
 		evs = append(evs, harness.Event{Kind: harness.TurnStarted})
 	}
 	switch r.Type {
+	case "system":
+		if r.Subtype == "init" {
+			c.metered = r.APIKeySource != "" && r.APIKeySource != "none"
+		}
 	case "assistant":
 		for _, b := range r.Message.Content {
 			switch b.Type {
@@ -138,6 +148,7 @@ func (c *codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) 
 				CacheReadTokens:  r.Usage.CacheReadInputTokens,
 				CacheWriteTokens: r.Usage.CacheCreationInputTokens,
 				CostUSD:          r.TotalCostUSD,
+				CostEstimated:    !c.metered,
 			}},
 			turnEnded(&r),
 		)

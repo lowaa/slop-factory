@@ -62,6 +62,7 @@ func TestARecordedTurn(t *testing.T) {
 	assert.Equal(t, time.Unix(1795840800, 0).UTC(), evs[2].Limit.ResetsAt)
 	assert.Equal(t, int64(79), evs[6].Usage.OutputTokens)
 	assert.InDelta(t, 0.00356304, evs[6].Usage.CostUSD, 1e-9)
+	assert.True(t, evs[6].Usage.CostEstimated, "apiKeySource none: the subscription, so the cost is an estimate")
 	assert.Equal(t, harness.TurnCompleted, evs[7].Outcome)
 }
 
@@ -103,6 +104,16 @@ func TestInitStartsOneTurnNotOnePerRecord(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 2, starts)
+}
+
+func TestAnAPIKeysCostIsNotAnEstimate(t *testing.T) {
+	t.Parallel()
+	evs := decodeAll(t, &codec{},
+		`{"type":"system","subtype":"init","apiKeySource":"ANTHROPIC_API_KEY"}`,
+		`{"type":"result","subtype":"success","total_cost_usd":0.01}`,
+	)
+	require.Equal(t, harness.UsageReport, evs[1].Kind)
+	assert.False(t, evs[1].Usage.CostEstimated)
 }
 
 func TestControlResponsesDontStartATurn(t *testing.T) {

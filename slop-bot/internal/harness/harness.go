@@ -80,7 +80,9 @@ type Workspace struct {
 	// system-prompt channel; BriefingFile holds the same text on disk.
 	Briefing     string
 	BriefingFile string
-	// Model and Effort are blank for the harness's own default.
+	// Model and Effort are blank for the implementation's default, which may
+	// be one slop-bot chooses rather than the harness's own (pi always
+	// passes a model).
 	Model  string
 	Effort string
 	// Permissive runs without permission prompts.
@@ -167,7 +169,8 @@ type Event struct {
 	Err      error
 }
 
-// Usage is token usage for a turn.
+// Usage is token usage for a turn, or for work a harness does between turns,
+// such as a compaction.
 type Usage struct {
 	InputTokens      int64
 	OutputTokens     int64
@@ -175,6 +178,10 @@ type Usage struct {
 	CacheWriteTokens int64
 	// CostUSD is the harness's own figure, where it gives one.
 	CostUSD float64
+	// CostEstimated means CostUSD is the harness's estimate from list
+	// prices, not what was billed: on a subscription login nothing is
+	// charged per token, so it must not be summed as spend.
+	CostEstimated bool
 }
 
 // Limit is the plan allowance a harness reports.
