@@ -347,9 +347,16 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 		m.opts.Logger.Warn("agents: clearing an attach's declaration", "agent", id, "err", err)
 	}
 	if decl == declDone {
-		m.event(ctx, EventHandedBack, id, r.ticket, map[string]string{"why": why, "outcome": string(Finished)})
-		m.finish(ctx, r, summary)
-		return Finished, nil
+		err := m.finish(ctx, r, summary)
+		if err == nil {
+			m.event(ctx, EventHandedBack, id, r.ticket, map[string]string{"why": why, "outcome": string(Finished)})
+			return Finished, nil
+		}
+		// The ticket couldn't be finished: the agent is resumed, and told.
+		decl, summary = declNone, ""
+		r.consume(declDone)
+		m.enqueueNotice(ctx, r, fmt.Sprintf("`done` didn't go through: %v. The ticket isn't finished: carry on, "+
+			"or say what you're waiting for.", err))
 	}
 	if decl == declNone {
 		// An ask still open from before the attach is still waiting on the
@@ -365,8 +372,11 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 	conv, caps, err := m.startConversation(ctx, a)
 	if err != nil {
 		r.setState(ctx, state.StateCrashed, "couldn't resume after an attach: "+err.Error())
-		m.tellUser(ctx, id, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after its attach: %v", id, a.Ticket, err))
+		m.tellUser(ctx, id, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after its attach: %v; slop-bot is retrying", id, a.Ticket, err))
 		m.forget(id)
+		// Like a harness that died: retried, then given up on, never left
+		// live with nothing running it.
+		m.goRecover(r)
 		return "", err
 	}
 	payload := map[string]string{"why": why, "outcome": string(Resumed)}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
+	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
 // own returns the runner for the calling agent: verbs act on the caller's
@@ -127,15 +129,44 @@ func prSuffix(pr string) string {
 	return " (" + pr + ")"
 }
 
+// ErrCantFinish is `done` refused: the ticket can't reach done from where it
+// is, so the agent hears why at once rather than being ended with the
+// ticket left behind.
+var ErrCantFinish = errors.New("agents: the ticket can't be marked done")
+
 // Done is `slop-bot done`: the agent judges the ticket's goal met. It
-// finishes when the current turn ends.
+// finishes when the current turn ends. It is refused now for a ticket that
+// couldn't get there: one in discussion (the user resolves that first), or
+// one whose work hasn't started and is blocked.
 func (m *Manager) Done(ctx context.Context, p ident.Principal, summary string) error {
 	r, err := m.own(p)
 	if err != nil {
 		return err
 	}
+	t, err := m.opts.Tickets.Get(ctx, r.ticket)
+	if err != nil {
+		return err
+	}
+	if err := canFinish(t); err != nil {
+		return err
+	}
 	m.declare(ctx, r, declDone, summary)
 	return nil
+}
+
+func canFinish(t *tickets.Ticket) error {
+	switch t.Status {
+	case tickets.StatusInProgress:
+		return nil
+	case tickets.StatusPreparing, tickets.StatusOpen:
+		if len(t.BlockedBy) > 0 {
+			return fmt.Errorf("%w: %s is blocked by %s, and its work can't start until they are done", ErrCantFinish, t.ID, refs(t.BlockedBy))
+		}
+		return nil
+	case tickets.StatusDiscussion:
+		return fmt.Errorf("%w: %s is in discussion, which only the user resolves", ErrCantFinish, t.ID)
+	}
+	return fmt.Errorf("%w: %s is %s", ErrCantFinish, t.ID, t.Status)
 }
 
 // SetNote is `slop-bot status set`, the agent's progress note.
@@ -147,103 +178,112 @@ func (m *Manager) SetNote(ctx context.Context, p ident.Principal, note string) e
 	return m.opts.State.Agents.SetProgressNote(ctx, r.id, note)
 }
 
-// finish ends an agent whose ticket is done: the summary goes on the
-// ticket, the conversation stops, and the worktrees are cleaned up, except
-// any holding work no remote has. It returns at once: stopping and cleaning
-// up run on their own goroutine, so a caller on the scheduler or the
-// runner's own loop is never held up.
-func (m *Manager) finish(ctx context.Context, r *runner, summary string) {
-	m.end(ctx, r, summary, false)
-}
-
-// cancel ends an agent whose ticket was cancelled: its turn is cut off.
-func (m *Manager) cancel(ctx context.Context, r *runner) {
-	m.end(ctx, r, "", true)
-}
-
-func (m *Manager) end(ctx context.Context, r *runner, summary string, force bool) {
-	r.mu.Lock()
-	r.stopping = true
-	r.mu.Unlock()
+// finish ends an agent whose ticket is done: the ticket is walked on to
+// done, the summary goes on it, the conversation stops, and the worktrees
+// are cleaned up, except any holding work no remote has. When the ticket
+// can't be moved to done, nothing ends and the error says why. Stopping and
+// cleaning up run on their own goroutine, so a caller on the scheduler or
+// the runner's own loop is never held up.
+func (m *Manager) finish(ctx context.Context, r *runner, summary string) error {
 	by := ident.AgentPrincipal(r.id, r.ticket)
+	r.setFinishing(true)
+	if err := m.advanceTo(ctx, by, r.ticket, tickets.StatusDone); err != nil {
+		r.setFinishing(false)
+		return err
+	}
 	if summary != "" {
 		if _, err := m.opts.Tickets.Comment(ctx, by, r.ticket, "**Done.** "+summary); err != nil {
 			m.opts.Logger.Warn("agents: posting the summary", "agent", r.id, "err", err)
 		}
 	}
-	if !force {
-		m.advanceTo(ctx, by, r.ticket, tickets.StatusDone)
+	m.end(ctx, r, false, "the ticket is done")
+	return nil
+}
+
+// end stops a running agent for good and cleans up after it, once: force
+// cuts its turn off, for a ticket that is no longer wanted.
+func (m *Manager) end(ctx context.Context, r *runner, force bool, reason string) {
+	r.mu.Lock()
+	if r.ending {
+		r.mu.Unlock()
+		return
 	}
-	go func() {
+	r.ending, r.stopping = true, true
+	r.mu.Unlock()
+	m.ends.Go(func() {
 		ctx := context.WithoutCancel(ctx)
 		r.stopConv(ctx, force)
 		<-r.exited
-		m.cleanup(ctx, r)
-		reason := "the ticket is done"
-		if force {
-			reason = "the ticket was cancelled"
-		}
+		m.cleanup(ctx, r.id, r.ticket)
 		r.setState(ctx, state.StateDone, reason)
 		m.event(ctx, EventFinished, r.id, r.ticket, nil)
 		m.forget(r.id)
-	}()
+	})
 }
 
-func (m *Manager) cleanup(ctx context.Context, r *runner) {
-	a, err := m.opts.State.Agents.Get(ctx, r.id)
+// cleanup removes an agent's recorded worktrees.
+func (m *Manager) cleanup(ctx context.Context, id ident.AgentID, ticket ident.TicketID) {
+	a, err := m.opts.State.Agents.Get(ctx, id)
 	if err != nil || len(a.Worktrees) == 0 {
 		return
 	}
-	for _, res := range m.opts.Worktrees.Cleanup(ctx, r.ticket, m.worktreesOf(a)) {
+	m.reportCleanup(ctx, id, ticket, m.opts.Worktrees.Cleanup(ctx, ticket, m.worktreesOf(a)))
+}
+
+// reportCleanup forgets the worktrees a cleanup removed, and tells the user
+// about the rest: kept for the work they hold, or failed. A removed
+// worktree can still come with an error, for branches it couldn't delete.
+func (m *Manager) reportCleanup(ctx context.Context, id ident.AgentID, ticket ident.TicketID, results []*worktree.CleanupResult) {
+	for _, res := range results {
+		if res.Removed && id != "" {
+			_ = m.opts.State.Agents.RemoveWorktree(ctx, id, res.Worktree.Repo)
+		}
 		switch {
-		case res.Removed:
-			_ = m.opts.State.Agents.RemoveWorktree(ctx, r.id, res.Worktree.Repo)
 		case res.Err != nil:
-			m.tellUser(ctx, r.id, fmt.Sprintf("couldn't clean up %s: %v", res.Worktree.Path, res.Err))
-		default:
+			m.tellUser(ctx, id, fmt.Sprintf("couldn't fully clean up %s: %v", res.Worktree.Path, res.Err))
+		case !res.Removed:
 			var why []string
 			for _, reason := range res.Reasons {
 				why = append(why, fmt.Sprintf("%s %s", reason.Kind, reason.Detail))
 			}
-			m.tellUser(ctx, r.id, fmt.Sprintf("kept %s, which holds work: %s. `slop-bot worktrees clean %s --force` once you've looked.",
-				res.Worktree.Path, strings.Join(why, "; "), r.ticket))
+			m.tellUser(ctx, id, fmt.Sprintf("kept %s (ticket %s), which holds work: %s. Once you've looked, remove it by hand: "+
+				"git -C %s worktree remove --force %s", res.Worktree.Path, ticket, strings.Join(why, "; "), res.Worktree.RepoPath, res.Worktree.Path))
 		}
 	}
 }
 
-// advanceTo walks a ticket forward to target through the statuses the
-// rules allow (preparing → open → in_progress → done), as the ticket's
-// agent: an agent can't reopen a ticket, so a move made on a stale read
-// can't undo a ticket that has meanwhile finished.
-func (m *Manager) advanceTo(ctx context.Context, by ident.Principal, id ident.TicketID, target tickets.Status) {
-	path := []tickets.Status{tickets.StatusOpen, tickets.StatusInProgress, tickets.StatusDone}
-	t, err := m.opts.Tickets.Get(ctx, id)
-	if err != nil {
-		return
-	}
-	for _, next := range path {
-		if t.Status == target || t.Status.Terminal() {
-			return
-		}
-		if next == t.Status || !tickets.CanTransition(t.Status, next) {
-			continue
-		}
-		// Each step is conditional on the status this walk saw: the read
-		// may be stale (the scheduler acts on feed events), and an
-		// unconditional write would undo a move made since, such as the
-		// agent parking the ticket in discussion.
-		st, seen := next, t.Status
-		t, err = m.opts.Tickets.Update(ctx, by, id, &tickets.TicketChange{Status: &st, IfStatus: &seen})
-		if errors.Is(err, tickets.ErrStatusChanged) {
-			m.opts.Logger.Debug("agents: a ticket moved while being walked forward; leaving it", "ticket", id, "to", next)
-			return
-		}
+// forward is the order advanceTo walks a ticket in.
+var forward = []tickets.Status{tickets.StatusPreparing, tickets.StatusOpen, tickets.StatusInProgress, tickets.StatusDone}
+
+// advanceTo walks a ticket forward to target (preparing, open, in_progress,
+// done), as the ticket's agent, and never back: from in_progress to done is
+// one step, not a detour through open, and a ticket off that path (in
+// discussion, say) isn't moved at all. It reports why the ticket didn't get
+// there; one already at or past target is no error.
+func (m *Manager) advanceTo(ctx context.Context, by ident.Principal, id ident.TicketID, target tickets.Status) error {
+	to := slices.Index(forward, target)
+	// Each step is conditional on the status this walk read, so it can't
+	// undo a move made since (the agent parking the ticket in discussion,
+	// say). A step refused that way reads again: the move may have been
+	// this same walk made by another caller, which it carries on from.
+	// Every step moves forward, so the attempts are bounded.
+	for range 2 * len(forward) {
+		t, err := m.opts.Tickets.Get(ctx, id)
 		if err != nil {
-			m.opts.Logger.Warn("agents: moving a ticket", "ticket", id, "to", next, "err", err)
-			return
+			return err
 		}
-		if next == target {
-			return
+		from := slices.Index(forward, t.Status)
+		switch {
+		case t.Status == target || (from >= 0 && from > to):
+			return nil
+		case from < 0:
+			return fmt.Errorf("%w: %s is %s", ErrCantFinish, id, t.Status)
+		}
+		st, seen := forward[from+1], t.Status
+		_, err = m.opts.Tickets.Update(ctx, by, id, &tickets.TicketChange{Status: &st, IfStatus: &seen})
+		if err != nil && !errors.Is(err, tickets.ErrStatusChanged) {
+			return fmt.Errorf("moving ticket %s to %s: %w", id, st, err)
 		}
 	}
+	return fmt.Errorf("agents: ticket %s keeps moving; it didn't reach %s", id, target)
 }

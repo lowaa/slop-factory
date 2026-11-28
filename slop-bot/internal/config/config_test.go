@@ -103,6 +103,7 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"negative limit":        {"harnesses: {claude-code: {limit_threshold: -5}}\n", "limit_threshold: -5"},
 		"negative retention":    {"retention: {transcripts: -1h}\n", "retention: transcripts and events must be positive"},
 		"tiny attach lease":     {"agents: {attach_lease: 10ms}\n", "agents.attach_lease: 10ms is below 1s"},
+		"negative stall":        {"agents: {stall_after: -1m}\n", "stall_after and ask_reminder_after must not be negative"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -124,6 +125,13 @@ func TestLoadReadsTheFile(t *testing.T) {
 
 	_, err = Load(filepath.Join(dir, "missing.yaml"), "/home/u")
 	assert.ErrorContains(t, err, "missing.yaml")
+}
+
+func TestDefaultMaxLiveCoversBothPools(t *testing.T) {
+	t.Parallel()
+	c, err := parse(t, "concurrency: {max_active: 1, urgent: {max_active: 5}}\n")
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, c.Concurrency.MaxLive, c.Slots())
 }
 
 // `--config ./cfg.yaml` must still give absolute paths: worktree paths are

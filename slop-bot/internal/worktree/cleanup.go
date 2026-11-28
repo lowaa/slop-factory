@@ -62,7 +62,8 @@ type CleanupResult struct {
 // Cleanup removes ticket's worktrees and their local slop-bot/t<ticket>/*
 // branches at the end of the ticket, keeping any that would lose work:
 //   - a worktree with uncommitted changes or untracked files;
-//   - a branch, or a detached HEAD, with commits that are on no remote
+//   - a ticket branch, the checked-out branch (whatever its name) or a
+//     detached HEAD, with commits that are on no remote
 //     (any remote-tracking ref) and not merged into the default branch;
 //   - a locked worktree.
 //
@@ -193,7 +194,7 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 }
 
 // ForceCleanup removes ticket's worktree and its branches whatever they
-// hold, for `slop-bot worktrees clean <t> --force` once the user has looked.
+// hold, for once the user has looked and decided to discard it.
 // That includes a locked one, one whose creation was interrupted, and one
 // whose .git link is gone. It still refuses a path that isn't this repo's
 // worktree, and one holding another worktree, which may not be the ticket's
@@ -394,8 +395,8 @@ func (m *Manager) unpushed(ctx context.Context, repoPath string, st *state) ([]R
 	for _, b := range st.branches {
 		tips = append(tips, tip{b.oid, "branch " + strings.TrimPrefix(b.ref, "refs/heads/")})
 	}
-	if st.reg != nil && st.present && st.reg.detached && st.reg.head != "" {
-		tips = append(tips, tip{st.reg.head, "detached HEAD " + st.reg.head})
+	if t, ok := checkedOutTip(st); ok {
+		tips = append(tips, tip(t))
 	}
 	var reasons []Reason
 	for _, t := range tips {
@@ -411,6 +412,30 @@ func (m *Manager) unpushed(ctx context.Context, repoPath string, st *state) ([]R
 		}
 	}
 	return reasons, nil
+}
+
+type headTip struct{ oid, what string }
+
+// checkedOutTip is what the worktree has checked out, if nothing in
+// st.branches already covers it: a detached HEAD, or a branch an agent named
+// itself (outside slop-bot/t<ticket>/), which Cleanup leaves in the repo but
+// whose unpushed commits the user should still hear about.
+func checkedOutTip(st *state) (headTip, bool) {
+	if st.reg == nil || !st.present || st.reg.head == "" {
+		return headTip{}, false
+	}
+	if st.reg.detached {
+		return headTip{st.reg.head, "detached HEAD " + st.reg.head}, true
+	}
+	if st.reg.branch == "" {
+		return headTip{}, false
+	}
+	for _, b := range st.branches {
+		if b.ref == "refs/heads/"+st.reg.branch {
+			return headTip{}, false
+		}
+	}
+	return headTip{st.reg.head, "branch " + st.reg.branch}, true
 }
 
 // deleteBranches deletes each branch only if it still points where inspect

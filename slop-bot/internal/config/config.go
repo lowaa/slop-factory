@@ -219,11 +219,13 @@ func (c *Config) defaultConcurrency() {
 	if c.Concurrency.MaxActive == 0 {
 		c.Concurrency.MaxActive = 4
 	}
-	if c.Concurrency.MaxLive == 0 {
-		c.Concurrency.MaxLive = 3 * c.Concurrency.MaxActive
-	}
 	if c.Concurrency.Urgent.MaxActive == 0 {
 		c.Concurrency.Urgent.MaxActive = 1
+	}
+	if c.Concurrency.MaxLive == 0 {
+		// Never below the slots validate requires, so a user who only raised
+		// urgent.max_active isn't told off about a max_live they didn't set.
+		c.Concurrency.MaxLive = max(3*c.Concurrency.MaxActive, c.Slots())
 	}
 }
 
@@ -380,6 +382,10 @@ func (c *Config) validateLimits(v *validation) {
 	}
 	if c.Agents.Nudges < 1 {
 		v.add("agents.nudges: must be at least 1")
+	}
+	// A negative one would fire the runner's timer at once, forever.
+	if c.Agents.StallAfter < 0 || c.Agents.AskReminderAfter < 0 {
+		v.add("agents: stall_after and ask_reminder_after must not be negative")
 	}
 }
 

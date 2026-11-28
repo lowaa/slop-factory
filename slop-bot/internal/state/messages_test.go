@@ -216,6 +216,8 @@ func TestLoopGuardCounts(t *testing.T) {
 	f.enqueue(t, tell("a2", "a1", "pong"))
 	f.enqueue(t, tell("a1", "a3", "elsewhere"))
 	f.enqueue(t, tell(state.UserParty, "a1", "from the user"))
+	// slop-bot's notice about a1 is not a1 talking.
+	f.enqueue(t, &state.NewMessage{From: "a1", To: "a2", Kind: state.KindSystem, Body: "notice"})
 
 	n, err := f.Messages.CountBetween(ctx, "a1", "a2", since)
 	require.NoError(t, err)

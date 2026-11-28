@@ -404,7 +404,10 @@ func TestAMessageAfterAnInterruptStartsTheNextTurn(t *testing.T) {
 	require.NoError(t, f.c.Interrupt(context.Background(), f.w))
 	f.send("do this instead")
 	assert.NotContains(t, f.p.methods(), protocol.MethodTurnSteer)
-	pl.decode(f.c, f.w, method(protocol.MethodTurnCompleted))
+	evs := pl.decode(f.c, f.w, method(protocol.MethodTurnCompleted))
+	// The driver reads a TurnEnded as "settled" and a graceful Stop then
+	// closes stdin, though the accepted message is about to start a turn.
+	assert.Empty(t, of(evs, harness.TurnEnded), "the interrupted turn's end is held back for the turn that follows")
 	var turn protocol.TurnStartParams
 	f.p.last(protocol.MethodTurnStart, &turn)
 	assert.Equal(t, "do this instead", turn.Input[0].Text)

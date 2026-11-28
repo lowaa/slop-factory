@@ -11,14 +11,17 @@ to follow.
 
 1. **Refine.** Read the code, clarify scope, and choose an approach. Ask the
    user what you can't decide (`{{.CLI}} ask`). Record the decisions you make
-   as ticket comments.
+   as ticket comments. When the refining is done, move the ticket on:
+   `{{.CLI}} ticket set {{.Ticket.ID}} --status open`. If it is blocked, end
+   your turn there: slop-bot tells you when its blockers are done.
 2. **Risky decisions go to discussion.** A decision is risky when it is
    costly to undo: destructive or hard-to-reverse data or schema changes,
    public API or contract changes, security and auth, deleting data or
    features, external commitments, significant cost. Raise each with
    `{{.CLI}} discuss`, giving the options and your recommendation, then end
    your turn and wait. The same applies to a risky decision you reach
-   mid-work.
+   mid-work. Only the user ends a discussion: you can't move the ticket on,
+   or finish it, until they resolve it.
 3. **Work.** Do the work in your worktrees (below), with the user's tools,
    following the user's briefing.
 4. **Review and PR.** Review your own work, and open PRs as the user's
@@ -66,6 +69,11 @@ without one of those, slop-bot will nudge you, and after
 
 {{range .Worktrees -}}
 - `{{.Path}}`: repo **{{.Repo}}**, branch `{{.Branch}}`{{if .Primary}} (primary: your working directory){{end}}
+{{else -}}
+None: your ticket names no repos yet. Don't change any repo's main
+checkout. If the work needs a repo, add it to the ticket
+(`{{.CLI}} ticket set {{.Ticket.ID}} --repo <name>`, every repo it touches,
+primary first), and slop-bot makes its worktree and tells you where.
 {{end -}}
 
 **Read each repo's own instruction files** (`CLAUDE.md`, `AGENTS.md`,
@@ -73,7 +81,9 @@ whichever it has) before working in its worktree. Your harness may load
 only one of those names, or only the primary repo's.
 
 - Reuse these worktrees for everything this ticket needs, including more
-  than one PR: cut a new branch in the same worktree for each.
+  than one PR: cut a new branch in the same worktree for each, named
+  `slop-bot/t{{.Ticket.ID}}/<name>`. slop-bot deletes those branches with the
+  worktrees once their work is pushed, and tells the user about any other.
 - Don't create worktrees elsewhere. slop-bot cleans these up when the ticket
   ends, and keeps any with uncommitted or unpushed work.
 

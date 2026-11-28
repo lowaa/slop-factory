@@ -136,3 +136,25 @@ func TestWritePutsTheFileOutsideTheWorktree(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
+
+func TestARepolessAgentIsToldToAddTheRepoNotEditTheMainCheckout(t *testing.T) {
+	t.Parallel()
+	d := data()
+	d.Worktrees = nil
+	out, err := Render(d, "")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Don't change any repo's main\ncheckout")
+	assert.Contains(t, out, "ticket set 42 --repo <name>")
+
+	with, err := Render(data(), "")
+	require.NoError(t, err)
+	assert.NotContains(t, with, "names no repos yet")
+}
+
+func TestTheBriefingNamesTheBranchPrefixCleanupKnows(t *testing.T) {
+	t.Parallel()
+	out, err := Render(data(), "")
+	require.NoError(t, err)
+	assert.Contains(t, out, "`slop-bot/t42/<name>`")
+	assert.Contains(t, out, "ticket set 42 --status open", "refinement ends by moving the ticket on")
+}

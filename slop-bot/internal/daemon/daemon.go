@@ -18,6 +18,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
@@ -84,6 +85,10 @@ func New(opts *Options) (*Daemon, error) {
 	d := &Daemon{opts: opts, server: control.NewServer(opts.Logger), ready: make(chan struct{})}
 	d.ticketRoutes = &ticketRoutes{cfg: opts.Config, user: user,
 		autonomy: func(ctx context.Context) bool { return d.autonomy(ctx) },
+		hasLiveAgent: func(ctx context.Context, id ident.TicketID) bool {
+			_, err := d.state.Agents.LiveForTicket(ctx, id)
+			return err == nil
+		},
 		tellUser: func(ctx context.Context, body string) { d.agents.TellUser(ctx, body) },
 	}
 	d.agentRoutes = &agentRoutes{d: d}
@@ -141,7 +146,9 @@ func New(opts *Options) (*Daemon, error) {
 		},
 		d.archiveComponent(harnesses),
 		d.retentionSweep(),
-		d.agentsComponent(harnesses, user, cliPath),
+		d.agentsBuild(harnesses, user, cliPath),
+		// The socket outlives the agents: they call done and ask while
+		// they drain, and resumed agents call it as they start.
 		&lifecycle.Func{
 			N: "control socket",
 			StartFunc: func(context.Context) error {
@@ -155,6 +162,11 @@ func New(opts *Options) (*Daemon, error) {
 			// Stopping the server closes the listener, which removes the
 			// socket file.
 			StopFunc: d.server.Stop,
+		},
+		&lifecycle.Func{
+			N:         "agents",
+			StartFunc: func(ctx context.Context) error { return d.agents.Start(ctx) },
+			StopFunc:  func(ctx context.Context) error { return d.agents.Stop(ctx) },
 		},
 	)
 	return d, nil
@@ -218,12 +230,13 @@ func (d *Daemon) sweep(ctx context.Context) error {
 	return errors.Join(d.archive.Sweep(ctx), err)
 }
 
-// agentsComponent runs the agent manager, on the ticket feed and state.db
-// the components before it opened.
-func (d *Daemon) agentsComponent(harnesses agents.Harnesses, user tickets.UserID, cliPath string) lifecycle.Component {
+// agentsBuild creates the agent manager, on the ticket feed and state.db
+// the components before it opened, so the control socket's routes have one
+// to call; the "agents" component after the socket starts it.
+func (d *Daemon) agentsBuild(harnesses agents.Harnesses, user tickets.UserID, cliPath string) lifecycle.Component {
 	opts := d.opts
 	return &lifecycle.Func{
-		N: "agents",
+		N: "agent manager",
 		StartFunc: func(ctx context.Context) error {
 			git, err := gitx.New(&gitx.Options{Bin: "git", Logger: opts.Logger})
 			if err != nil {
@@ -240,12 +253,8 @@ func (d *Daemon) agentsComponent(harnesses agents.Harnesses, user tickets.UserID
 				Harnesses: harnesses, Worktrees: wts, User: user, Logger: opts.Logger,
 				Clock: opts.Clock, CLI: cliPath, CLIReference: opts.CLIReference, Transcripts: d.transcripts,
 			})
-			if err != nil {
-				return err
-			}
-			return d.agents.Start(ctx)
+			return err
 		},
-		StopFunc: func(ctx context.Context) error { return d.agents.Stop(ctx) },
 	}
 }
 

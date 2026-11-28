@@ -94,8 +94,13 @@ type Agent struct {
 	// daemon restart.
 	Declared        string
 	DeclaredSummary string
-	Worktrees       []Worktree
-	CreatedAt       time.Time
+	// BlockedTold is whether the agent was last told its ticket is blocked.
+	BlockedTold bool
+	// Recoveries counts resumes after the harness died, since the agent last
+	// finished a turn.
+	Recoveries int
+	Worktrees  []Worktree
+	CreatedAt  time.Time
 	// EndedAt is set once the agent entered a state that Ends.
 	EndedAt *time.Time
 }
@@ -117,6 +122,9 @@ type NewAgent struct {
 	// only the hash, so a leaked file leaks no live credential.
 	TokenHash string
 	Worktrees []Worktree
+	// BlockedTold is whether the agent's first message tells it the ticket
+	// is blocked.
+	BlockedTold bool
 }
 
 // Transition is a state change SetState makes.
@@ -128,6 +136,9 @@ type Transition struct {
 	From   AgentState
 	To     AgentState
 	Reason string
+	// GivenUp marks a move to released as slop-bot giving up on the agent,
+	// not a person taking its ticket over (see ReleasedForTicket).
+	GivenUp bool
 }
 
 // StateChange is one entry in an agent's state history.
@@ -176,6 +187,8 @@ type agentRow struct {
 	NudgeCount     int    `bun:"nudge_count"`
 	Declared       string `bun:"declared"`
 	DeclaredSum    string `bun:"declared_summary"`
+	BlockedTold    bool   `bun:"blocked_told"`
+	Recoveries     int    `bun:"recoveries"`
 	TokenHash      string `bun:"token_hash"`
 	CreatedAt      int64  `bun:"created_at"`
 	EndedAt        *int64 `bun:"ended_at"`
@@ -199,6 +212,8 @@ func (r *agentRow) agent() *Agent {
 		Nudges:          r.NudgeCount,
 		Declared:        r.Declared,
 		DeclaredSummary: r.DeclaredSum,
+		BlockedTold:     r.BlockedTold,
+		Recoveries:      r.Recoveries,
 		CreatedAt:       fromMillis(r.CreatedAt),
 		EndedAt:         fromMillisPtr(r.EndedAt),
 	}
@@ -248,7 +263,7 @@ func (a *Agents) Create(ctx context.Context, n *NewAgent) (*Agent, error) {
 		Harness: n.Harness, Driver: n.Driver, Model: n.Model, Effort: n.Effort,
 		Mode: string(ModeProgrammatic), TUISession: n.TUISession,
 		Pool: string(n.Pool), State: string(n.State), StateSince: toMillis(at),
-		TokenHash: n.TokenHash, CreatedAt: toMillis(at),
+		TokenHash: n.TokenHash, CreatedAt: toMillis(at), BlockedTold: n.BlockedTold,
 	}
 	var created *Agent
 	err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -309,9 +324,11 @@ func (a *Agents) LiveForTicket(ctx context.Context, ticket ident.TicketID) (*Age
 // ReleasedForTicket reports whether the ticket's agent was released to a
 // person (`attach --no-resume`). The ticket stays assigned, so without this
 // the scheduler would start a new agent on work a person has taken over.
+// An agent slop-bot gave up on doesn't count: its ticket is the user's to
+// requeue.
 func (a *Agents) ReleasedForTicket(ctx context.Context, ticket ident.TicketID) (bool, error) {
 	n, err := a.db.NewSelect().Table("agents").
-		Where("ticket_id = ?", string(ticket)).Where("state = ?", string(StateReleased)).Count(ctx)
+		Where("ticket_id = ?", string(ticket)).Where("state = ?", string(StateReleased)).Where("given_up = 0").Count(ctx)
 	if err != nil {
 		return false, fmt.Errorf("state: checking ticket %s for a released agent: %w", ticket, err)
 	}
@@ -373,6 +390,9 @@ func (a *Agents) SetState(ctx context.Context, t *Transition) (bool, error) {
 		q := tx.NewUpdate().Table("agents").Set("state = ?", string(t.To)).Set("state_since = ?", at).Where("id = ?", string(t.Agent))
 		if t.To.Ends() {
 			q = q.Set("ended_at = ?", at)
+		}
+		if t.GivenUp && t.To == StateReleased {
+			q = q.Set("given_up = 1")
 		}
 		if _, err := q.Exec(ctx); err != nil {
 			return fmt.Errorf("state: setting agent %s to %s: %w", t.Agent, t.To, err)
@@ -460,6 +480,37 @@ func (a *Agents) AddNudge(ctx context.Context, id ident.AgentID) (int, error) {
 func (a *Agents) ResetNudges(ctx context.Context, id ident.AgentID) error {
 	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
 		return q.Set("nudge_count = 0")
+	})
+}
+
+// SetBlockedTold records what the agent was last told about its ticket's
+// blockers.
+func (a *Agents) SetBlockedTold(ctx context.Context, id ident.AgentID, blocked bool) error {
+	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
+		return q.Set("blocked_told = ?", blocked)
+	})
+}
+
+// AddRecovery counts one more resume after the harness died and returns the
+// new count, so the caller can give up on an agent that keeps dying.
+func (a *Agents) AddRecovery(ctx context.Context, id ident.AgentID) (int, error) {
+	var n int
+	err := a.db.NewRaw(
+		"UPDATE agents SET recoveries = recoveries + 1 WHERE id = ? AND ended_at IS NULL RETURNING recoveries",
+		string(id)).Scan(ctx, &n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, a.missingOrEnded(ctx, id)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("state: counting a recovery of agent %s: %w", id, err)
+	}
+	return n, nil
+}
+
+// ResetRecoveries zeroes the recovery count, once the agent finishes a turn.
+func (a *Agents) ResetRecoveries(ctx context.Context, id ident.AgentID) error {
+	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
+		return q.Set("recoveries = 0")
 	})
 }
 

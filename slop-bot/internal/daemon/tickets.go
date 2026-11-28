@@ -25,6 +25,7 @@ var ticketErrors = []control.ErrorMapping{
 	{Err: tickets.ErrInvalid, Status: http.StatusBadRequest},
 	{Err: agentspec.ErrInvalid, Status: http.StatusBadRequest},
 	{Err: errBadRequest, Status: http.StatusBadRequest},
+	{Err: errAgentLive, Status: http.StatusConflict},
 	{Err: errBudget, Status: http.StatusTooManyRequests},
 }
 
@@ -40,12 +41,18 @@ type ticketRoutes struct {
 	// autonomy reports whether agent-filed tickets are worked without a
 	// person (`slop-bot autonomy`).
 	autonomy func(context.Context) bool
+	// hasLiveAgent reports whether the ticket has an agent that hasn't ended.
+	hasLiveAgent func(context.Context, ident.TicketID) bool
 	// overBudget tells the user, once per filling-up, that agents hit the
 	// budget.
 	budgetMu   sync.Mutex
 	budgetFull bool
 	tellUser   func(context.Context, string)
 }
+
+// errAgentLive refuses a spec change the running agent would never see.
+var errAgentLive = errors.New("the ticket's agent is running and keeps the spec it started with: " +
+	"change the harness, model and effort once it has ended")
 
 // errBudget refuses an agent's ticket past the autonomy budget.
 var errBudget = errors.New("the budget of outstanding agent-filed tickets is used up: " +
@@ -203,23 +210,52 @@ func (tr *ticketRoutes) update(w http.ResponseWriter, r *http.Request) {
 		st := tickets.Status(*in.Status)
 		ch.Status = &st
 	}
+	id := ident.TicketID(r.PathValue("id"))
 	if in.Agent != nil {
-		spec := specFrom(*in.Agent)
-		if err := tr.checkSpec(spec); err != nil {
+		spec, err := tr.mergedSpec(r.Context(), id, in.Agent)
+		if err != nil {
 			fail(w, err)
 			return
 		}
-		ch.Agent = &spec
+		ch.Agent = spec
 	}
 	if in.Urgent != nil {
 		ch.Urgent = &tickets.UrgentChange{Urgent: *in.Urgent, Reason: in.UrgentReason}
 	}
-	t, err := tr.sys.Update(r.Context(), control.PrincipalFrom(r.Context()), ident.TicketID(r.PathValue("id")), ch)
+	t, err := tr.sys.Update(r.Context(), control.PrincipalFrom(r.Context()), id, ch)
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	control.WriteJSON(w, http.StatusOK, tr.view(t))
+}
+
+// mergedSpec applies the given fields onto the ticket's current spec: the
+// store replaces a spec outright, so a partial edit must be completed here.
+func (tr *ticketRoutes) mergedSpec(ctx context.Context, id ident.TicketID, in *api.AgentSpecChange) (*tickets.AgentSpec, error) {
+	cur, err := tr.sys.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// A live agent resumes from the spec saved with it, so an edit would be
+	// accepted and then ignored.
+	if tr.hasLiveAgent != nil && tr.hasLiveAgent(ctx, id) {
+		return nil, errAgentLive
+	}
+	spec := cur.Agent
+	if in.Harness != nil {
+		spec.Harness = *in.Harness
+	}
+	if in.Model != nil {
+		spec.Model = *in.Model
+	}
+	if in.Effort != nil {
+		spec.Effort = *in.Effort
+	}
+	if err := tr.checkSpec(spec); err != nil {
+		return nil, err
+	}
+	return &spec, nil
 }
 
 func (tr *ticketRoutes) assign(w http.ResponseWriter, r *http.Request) {

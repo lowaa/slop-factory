@@ -41,12 +41,24 @@ type runner struct {
 	conv harness.Conversation
 	caps harness.Capabilities
 
-	mu       sync.Mutex
-	st       state.AgentState
-	inTurn   bool
-	decl     declared
-	summary  string
+	mu      sync.Mutex
+	st      state.AgentState
+	inTurn  bool
+	decl    declared
+	summary string
+	// stopping is a stop under way: no new turn starts, and an exit is
+	// expected, not a crash.
 	stopping bool
+	// ending is the agent being finished for good, so it is ended once.
+	ending bool
+	// finishing is the agent's own done being carried out: the ticket's
+	// move to done is its, not a person's, so sync leaves it be.
+	finishing bool
+	// deliverMu makes a delivery (read the pending messages, send them,
+	// mark them delivered) one step per agent: concurrent tells, the
+	// scheduler and the runner's own loop would otherwise each send the
+	// same queued messages.
+	deliverMu sync.Mutex
 	// attaching is set while an attach stops the conversation: the turn's
 	// end mustn't start another, and the exit isn't a crash.
 	attaching bool
@@ -57,6 +69,18 @@ type runner struct {
 	holdsSlot bool
 	// exited is closed when the conversation's events end.
 	exited chan struct{}
+}
+
+func (r *runner) isEnding() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ending || r.finishing
+}
+
+func (r *runner) setFinishing(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.finishing = on
 }
 
 // active reports whether the runner holds a slot: in a turn, starting, or
@@ -113,6 +137,16 @@ func (r *runner) declare(d declared, summary string) {
 	r.decl, r.summary = d, summary
 }
 
+// consume clears the declaration a turn end acted on, unless the agent has
+// made a new one since it was read.
+func (r *runner) consume(d declared) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.decl == d {
+		r.decl, r.summary = declNone, ""
+	}
+}
+
 // run consumes the conversation's events until it exits. Stall detection
 // runs on the injected clock, re-armed by every event.
 func (r *runner) run(ctx context.Context) {
@@ -131,8 +165,8 @@ func (r *runner) run(ctx context.Context) {
 			stall = r.m.opts.Clock.After(stallAfter)
 			if r.active() && r.state() != state.StateStalled {
 				r.setState(ctx, state.StateStalled, fmt.Sprintf("no activity for %s", stallAfter))
-				r.m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) has gone quiet for %s mid-turn: `slop-bot watch %s`, or `slop-bot tell --interrupt %s ...`",
-					r.id, r.ticket, stallAfter, r.id, r.id))
+				r.m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) has gone quiet for %s mid-turn: `slop-bot events` shows its last activity, "+
+					"and `slop-bot tell --interrupt %s ...` stops the turn and steers it.", r.id, r.ticket, stallAfter, r.id))
 			}
 		}
 	}
@@ -164,6 +198,10 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		r.mu.Lock()
 		r.inTurn = false
 		r.mu.Unlock()
+		// A finished turn shows the harness works again after a recovery.
+		if err := r.m.opts.State.Agents.ResetRecoveries(ctx, r.id); err != nil {
+			r.m.opts.Logger.Debug("agents: resetting recoveries", "agent", r.id, "err", err)
+		}
 		r.turnEnded(ctx, ev)
 	case harness.Exited:
 		r.exitedWith(ctx, ev)
@@ -181,23 +219,27 @@ func (r *runner) workingState(ctx context.Context) state.AgentState {
 }
 
 func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
-	// The declaration is consumed here, not cleared when a turn starts: the
+	// The declaration is read here, not cleared when a turn starts: the
 	// agent's CLI call can land before this goroutine has even seen the
-	// turn start.
+	// turn start. It is cleared only once acted on, so messages that
+	// pre-empt it with another turn don't lose it.
 	r.mu.Lock()
 	decl, summary, stopping := r.decl, r.summary, r.stopping || r.attaching
-	if !stopping {
-		r.decl, r.summary = declNone, ""
-	}
 	r.mu.Unlock()
+	if decl == declDone {
+		err := r.m.finish(ctx, r, summary)
+		if err == nil {
+			return
+		}
+		r.consume(declDone)
+		decl = declNone
+		r.m.enqueueNotice(ctx, r, fmt.Sprintf("`done` didn't go through: %v. The ticket isn't finished: carry on, "+
+			"or say what you're waiting for.", err))
+	}
 	// Draining for a daemon stop or an attach: start nothing new. The agent
 	// keeps its state and what it declared, so a resume knows it was
 	// mid-work and says so, and an ask still stands after the hand-back.
-	if stopping && decl != declDone {
-		return
-	}
-	if decl == declDone {
-		r.m.finish(ctx, r, summary)
+	if stopping {
 		return
 	}
 	// Messages that arrived during a turn the harness couldn't steer go now,
@@ -205,24 +247,41 @@ func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
 	if r.m.deliverPending(ctx, r) {
 		return
 	}
-	switch decl {
-	case declAsk:
+	r.consume(decl)
+	r.settle(ctx, decl, ev)
+}
+
+// settle is the state a turn leaves the agent in when nothing is waiting
+// to be delivered. What it waits on is read from where that is recorded
+// (its open asks, its ticket), not only from this turn's declaration: a
+// declaration made in an earlier turn still holds, and one already
+// answered doesn't.
+func (r *runner) settle(ctx context.Context, decl declared, ev *harness.Event) {
+	asks, err := r.m.opts.State.Messages.OpenAsksFrom(ctx, r.id)
+	if err == nil && len(asks) > 0 {
 		r.setState(ctx, state.StateWaitingUser, "asked the user")
 		return
-	case declDiscuss:
+	}
+	t, err := r.m.opts.Tickets.Get(ctx, r.ticket)
+	if err == nil && t.Status == tickets.StatusDiscussion {
 		r.setState(ctx, state.StateDiscussion, "raised a discussion")
 		return
-	case declMerge:
+	}
+	if decl == declMerge {
 		r.setState(ctx, state.StateWaitingMerge, "ready to merge")
 		return
 	}
-	switch ev.Outcome {
-	case harness.TurnInterrupted:
+	switch {
+	case ev.Outcome == harness.TurnInterrupted:
 		// A person interrupted it: wait for them, don't nudge.
 		r.setState(ctx, state.StateIdle, "interrupted")
-	case harness.TurnFailed:
+	case ev.Outcome == harness.TurnFailed:
 		r.setState(ctx, state.StateStalled, "turn failed: "+ev.Text)
 		r.m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s): its turn failed: %s", r.id, r.ticket, ev.Text))
+	case err == nil && len(t.BlockedBy) > 0:
+		// Told to wait for its blockers, it does: slop-bot wakes it when
+		// they are done.
+		r.setState(ctx, state.StateIdle, "waiting on its ticket's blockers")
 	default:
 		r.m.nudge(ctx, r)
 	}
@@ -244,8 +303,9 @@ func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 	if ev.Err != nil {
 		msg += ": " + ev.Err.Error()
 	}
-	r.m.tellUser(ctx, r.id, msg)
+	r.m.tellUser(ctx, r.id, msg+"; slop-bot is resuming it")
 	r.m.forget(r.id)
+	r.m.goRecover(r)
 }
 
 // shutdown stops the conversation for a daemon stop: it finishes the turn

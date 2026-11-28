@@ -38,6 +38,19 @@ func TestPipesAndExitCode(t *testing.T) {
 	assert.Equal(t, "oops\n", p.Stderr())
 }
 
+func TestOutputWrittenBeforeExitIsStillReadableAfterIt(t *testing.T) {
+	t.Parallel()
+	// Done is awaited before any read, so the output sits unread while Wait
+	// runs; a Wait that closed the read end would lose it.
+	p, err := Start(context.Background(), sh(t, `echo first; echo last`))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Stdout.Close() })
+	<-p.Done()
+	out, err := io.ReadAll(p.Stdout)
+	require.NoError(t, err)
+	assert.Equal(t, "first\nlast\n", string(out))
+}
+
 func TestKillReachesTheWholeGroup(t *testing.T) {
 	t.Parallel()
 	// The child shell starts a grandchild and reports its pid, then both
@@ -87,6 +100,7 @@ func TestAgentEnv(t *testing.T) {
 		"PATH=/bin", "HOME=/h", "GOPATH=/go", "SSH_AUTH_SOCK=/s",
 		"ANTHROPIC_API_KEY=placeholder", "OPENAI_API_KEY=placeholder", "GEMINI_API_KEY=placeholder",
 		"CLAUDE_CODE_SESSION_ID=parent", "CLAUDECODE=1",
+		"CLAUDE_CODE_OAUTH_TOKEN=tok", "CLAUDE_CODE_USE_BEDROCK=1",
 		"SLOP_BOT_AGENT_TOKEN=someone-elses", "malformed",
 	}
 	got := AgentEnv(&EnvOptions{
@@ -96,6 +110,7 @@ func TestAgentEnv(t *testing.T) {
 	})
 	assert.Equal(t, []string{
 		"PATH=/bin", "GOPATH=/go", "SSH_AUTH_SOCK=/s",
+		"CLAUDE_CODE_OAUTH_TOKEN=tok", "CLAUDE_CODE_USE_BEDROCK=1",
 		"HOME=/override", "SLOP_BOT_AGENT_TOKEN=mine",
 	}, got, "the user's toolchain variables pass; API keys, a parent harness's variables and another token don't")
 

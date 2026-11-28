@@ -187,8 +187,16 @@ func (s *setFlags) change(f *pflag.FlagSet) (*api.TicketChange, error) {
 		ch.Status = &s.status
 	}
 	if f.Changed("harness") || f.Changed("model") || f.Changed("effort") {
-		spec := s.spec.spec()
-		ch.Agent = &spec
+		ch.Agent = &api.AgentSpecChange{}
+		if f.Changed("harness") {
+			ch.Agent.Harness = &s.spec.harness
+		}
+		if f.Changed("model") {
+			ch.Agent.Model = &s.spec.model
+		}
+		if f.Changed("effort") {
+			ch.Agent.Effort = &s.spec.effort
+		}
 	}
 	if f.Changed("auto-merge") {
 		ch.AutoMerge = &s.autoMerge

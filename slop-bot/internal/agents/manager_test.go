@@ -46,6 +46,7 @@ var t0 = time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC)
 type fakeHarness struct {
 	h     *fake.Harness
 	names []string
+	hooks *harnessHooks
 }
 
 func (f *fakeHarness) Harness(name string) (harness.AIHarness, bool) {
@@ -56,16 +57,80 @@ func (f *fakeHarness) Harness(name string) (harness.AIHarness, bool) {
 	if !slices.Contains(names, name) {
 		return nil, false
 	}
-	return &envHarness{f.h}, true
+	return &envHarness{Harness: f.h, hooks: f.hooks}, true
 }
 
-// envHarness adds the re-exec variables to every workspace.
-type envHarness struct{ *fake.Harness }
+// harnessHooks let a test break the harness where the fake can't: a start
+// that fails or hangs, a Send that fails or blocks, a driver that can't
+// steer. Unset hooks change nothing.
+type harnessHooks struct {
+	mu sync.Mutex
+	// start runs before each start (resume is nil for a new agent); an
+	// error fails it.
+	start func(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) error
+	// send runs before each Send; an error fails it, nothing sent.
+	send    func(ctx context.Context, agent ident.AgentID, msg *harness.Message) error
+	noSteer bool
+}
+
+func (h *harnessHooks) set(f func(h *harnessHooks)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	f(h)
+}
+
+func (h *harnessHooks) get() (start func(context.Context, *harness.Workspace, *harness.ConversationRef) error,
+	send func(context.Context, ident.AgentID, *harness.Message) error, noSteer bool) {
+	if h == nil {
+		return nil, nil, false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.start, h.send, h.noSteer
+}
+
+// envHarness adds the re-exec variables to every workspace, and the hooks.
+type envHarness struct {
+	*fake.Harness
+	hooks *harnessHooks
+}
+
+func (e *envHarness) Capabilities() harness.Capabilities {
+	c := e.Harness.Capabilities()
+	if _, _, noSteer := e.hooks.get(); noSteer {
+		c.MidTurnSteer = false
+	}
+	return c
+}
 
 func (e *envHarness) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
+	if start, _, _ := e.hooks.get(); start != nil {
+		if err := start(ctx, ws, resume); err != nil {
+			return nil, err
+		}
+	}
 	ws.Env[reexec] = "1"
 	ws.Env["GORACE"] = "atexit_sleep_ms=0"
-	return e.Harness.Start(ctx, ws, resume)
+	conv, err := e.Harness.Start(ctx, ws, resume)
+	if err != nil {
+		return nil, err
+	}
+	return &hookedConversation{Conversation: conv, agent: ws.Agent, hooks: e.hooks}, nil
+}
+
+type hookedConversation struct {
+	harness.Conversation
+	agent ident.AgentID
+	hooks *harnessHooks
+}
+
+func (c *hookedConversation) Send(ctx context.Context, msg *harness.Message) error {
+	if _, send, _ := c.hooks.get(); send != nil {
+		if err := send(ctx, c.agent, msg); err != nil {
+			return err
+		}
+	}
+	return c.Conversation.Send(ctx, msg)
 }
 
 // recordingWorktrees stands in for git: worktree behaviour is tested
@@ -154,6 +219,7 @@ type fixture struct {
 	// racing is the ticketing system the manager sees: tickets, with a hook
 	// that can land a write between the manager's read and its update.
 	racing  *racingTickets
+	hooks   *harnessHooks
 	clock   *clock.Fake
 	wts     *recordingWorktrees
 	cfg     *config.Config
@@ -206,7 +272,7 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	})
 	require.NoError(t, err)
 	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, racing: &racingTickets{TicketingSystem: ts}, clock: clk, cfg: cfg, paths: p,
-		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}, archive: archive, transcripts: filepath.Join(dir, "fake-transcripts")}
+		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}, hooks: &harnessHooks{}, archive: archive, transcripts: filepath.Join(dir, "fake-transcripts")}
 	require.NoError(t, os.MkdirAll(f.transcripts, 0o700))
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -216,7 +282,7 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 			}
 		}
 	})
-	f.mgr = f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: f.transcripts, Logger: quiet, Clock: clock.Real{}}, names: names})
+	f.mgr = f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: ctl.Socket(), TranscriptDir: f.transcripts, Logger: quiet, Clock: clock.Real{}}, names: names, hooks: f.hooks})
 	require.NoError(t, f.mgr.Start(ctx))
 	t.Cleanup(func() { _ = f.mgr.Stop(context.Background()) })
 	// Cleanups run last-first: closing the controller first makes every
@@ -224,6 +290,25 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	// open.
 	t.Cleanup(func() { _ = ctl.Close() })
 	return f
+}
+
+// restartWith stops the manager, which drains (end any turn in flight
+// first, or it waits), runs between while no manager runs, and starts a new
+// one over the same state.
+func (f *fixture) restartWith(between func()) *agents.Manager {
+	f.t.Helper()
+	require.NoError(f.t, f.mgr.Stop(f.ctx()))
+	if between != nil {
+		between()
+	}
+	self, err := os.Executable()
+	require.NoError(f.t, err)
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
+	require.NoError(f.t, m.Start(context.Background()))
+	f.t.Cleanup(func() { _ = m.Stop(context.Background()) })
+	f.t.Cleanup(func() { _ = f.ctl.Close() })
+	f.mgr = m
+	return m
 }
 
 func (f *fixture) newManager(h agents.Harnesses) *agents.Manager {
@@ -563,7 +648,7 @@ func TestARestartedDaemonResumesTheConversation(t *testing.T) {
 
 	self, err := os.Executable()
 	require.NoError(t, err)
-	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}})
+	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})
 	require.NoError(t, m.Start(context.Background()))
 	t.Cleanup(func() { _ = m.Stop(context.Background()) })
 	t.Cleanup(func() { _ = f.ctl.Close() })

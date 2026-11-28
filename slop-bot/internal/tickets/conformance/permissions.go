@@ -19,6 +19,27 @@ var permissionTests = []test{
 	{"Permissions/AgentOfAMissingTicket", testAgentOfAMissingTicket},
 	{"Permissions/AgentsMoveOnlyTheirOwnTicketsStatus", testAgentStatusAuthority},
 	{"Permissions/AFilingWithAutoMergeIsTheFilersNoMore", testAutoMergeLocksTheFilingsScope},
+	{"Permissions/OnlyTheUserEndsADiscussion", testOnlyTheUserEndsADiscussion},
+}
+
+// An agent raises a discussion on its own ticket, but only a person ends
+// it: the risky decision it holds is the person's to review, so no agent
+// move takes the ticket out, and none walks it on to done.
+func testOnlyTheUserEndsADiscussion(t *testing.T, nb NewBackend) {
+	f := newFixture(t, nb)
+	a := f.agent("builder-1")
+	_, err := f.setStatus(a, a.Ticket, tickets.StatusDiscussion)
+	require.NoError(t, err, "the agent raises it")
+	for _, to := range []tickets.Status{tickets.StatusPreparing, tickets.StatusOpen, tickets.StatusInProgress, tickets.StatusCancelled} {
+		_, err := f.setStatus(a, a.Ticket, to)
+		require.ErrorIs(t, err, tickets.ErrUserOnly, "the agent moving it to %s", to)
+	}
+	assert.Equal(t, tickets.StatusDiscussion, f.get(a.Ticket).Status)
+	_, err = f.setStatus(a, a.Ticket, tickets.StatusDiscussion)
+	require.NoError(t, err, "restating the status it has is no move")
+	resolved, err := f.setStatus(user, a.Ticket, tickets.StatusInProgress)
+	require.NoError(t, err, "the user resolves it")
+	assert.Equal(t, tickets.StatusInProgress, resolved.Status)
 }
 
 // The user accepts a filing and grants it AutoMerge, having read it: its
