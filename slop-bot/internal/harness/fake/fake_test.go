@@ -2,6 +2,7 @@ package fake_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -88,12 +89,22 @@ func (p *puppet) LongTool(ctx context.Context) (func(context.Context) error, err
 		started <- err
 	}()
 	return func(ctx context.Context) error {
-		if _, err := s.Do(ctx, fake.Command{Cmd: fake.CmdToolEnd, Tool: "shell"}); err != nil {
+		if err := doKeepingUser(ctx, s, fake.Command{Cmd: fake.CmdToolEnd, Tool: "shell"}); err != nil {
 			return err
 		}
-		_, err := s.Do(ctx, fake.Command{Cmd: fake.CmdTurnEnd})
-		return err
+		return doKeepingUser(ctx, s, fake.Command{Cmd: fake.CmdTurnEnd})
 	}, nil
+}
+
+// doKeepingUser runs c, keeping a mid-turn user report that arrives ahead of
+// its ack for Received, which the suite calls once the turn has ended.
+func doKeepingUser(ctx context.Context, s *fake.Session, c fake.Command) error {
+	r, err := s.Do(ctx, c)
+	if err != nil && r != nil && r.Rep == fake.RepUser {
+		pendingUser.Store(s, r)
+		_, err = s.Expect(ctx, fake.RepAck)
+	}
+	return err
 }
 
 // pendingUser holds a user report a script goroutine consumed, so Received
@@ -115,6 +126,15 @@ func (p *puppet) Received(ctx context.Context, text string, midTurn bool) error 
 func check(r *fake.Report, text string, midTurn bool) error {
 	if r.Text != text || r.MidTurn != midTurn {
 		return fmt.Errorf("received %q (mid-turn %v), want %q (mid-turn %v)", r.Text, r.MidTurn, text, midTurn)
+	}
+	return nil
+}
+
+// Remembers: the fake keeps no history, so being launched to resume the
+// conversation is all of its memory.
+func (p *puppet) Remembers(context.Context, string) error {
+	if !p.session().Resumed {
+		return errors.New("the session was not resumed")
 	}
 	return nil
 }

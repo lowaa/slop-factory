@@ -87,6 +87,22 @@ func (s *script) replace(scenario *Scenario) {
 	s.recording = Recording{}
 }
 
+// ErrNoScenario is Append's error when no scenario is loaded.
+var ErrNoScenario = errors.New("no scenario is loaded")
+
+// extend adds turns to the end of the loaded scenario, keeping the turns
+// played and the recording. The scenario is copied, not appended to in
+// place: Load keeps the caller's pointer, and a test may still read it.
+func (s *script) extend(turns []*Turn) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.scenario == nil {
+		return ErrNoScenario
+	}
+	s.scenario = &Scenario{Name: s.scenario.Name, Turns: append(slices.Clone(s.scenario.Turns), turns...)}
+	return nil
+}
+
 // answer records the request and returns its turn, nil for an auxiliary
 // request, and the gate the turn waits at. The gate is taken in the same step,
 // so a scenario replaced in between cannot hand the request a gate of the next.

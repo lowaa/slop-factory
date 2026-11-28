@@ -345,3 +345,23 @@ func TestServerListsTheDefaultModels(t *testing.T) {
 		assert.True(t, strings.Contains(body, "models/"+m), m)
 	}
 }
+
+func TestServerAppendExtendsTheLoadedScenarioAndKeepsTheRecording(t *testing.T) {
+	t.Parallel()
+	server, _ := newServer(t, nil)
+	require.ErrorIs(t, server.Append(&scriptedmodel.Turn{Text: "early"}), scriptedmodel.ErrNoScenario)
+	loaded := textTurn("first", "")
+	require.NoError(t, server.Load(loaded))
+	r := send(t, http.MethodPost, server.URL()+"/v1/messages", messagesBody(false))
+	require.Contains(t, string(r.body), "first")
+
+	require.ErrorIs(t, server.Append(&scriptedmodel.Turn{}), scriptedmodel.ErrScenario)
+	require.NoError(t, server.Append(&scriptedmodel.Turn{Text: "second"}))
+	assert.Equal(t, 1, server.Remaining())
+	assert.Len(t, loaded.Turns, 1, "the caller's scenario is not changed")
+	r = send(t, http.MethodPost, server.URL()+"/v1/messages", messagesBody(false))
+	assert.Contains(t, string(r.body), "second")
+	rec := server.Recording()
+	assert.Len(t, rec.Requests, 2, "the recording spans the append")
+	assert.Empty(t, rec.Errors)
+}

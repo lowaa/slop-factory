@@ -1,0 +1,49 @@
+name: slop-bot tier 2
+
+# slop-bot's harness adapters against the real harness CLIs, at their pinned
+# versions, with the scripted model answering for the model
+# (slop-bot/tier2.sh). It needs no secret: the harnesses get dummy keys and
+# the container has no network. Its own workflow, not a ci.yml job: it runs
+# only when an adapter, the scripted model or a pin changes, and weekly.
+on:
+  pull_request:
+    paths:
+      - slop-bot/internal/harness/**
+      - slop-bot/internal/scriptedmodel/**
+      - slop-bot/tier2/**
+      - slop-bot/tier2.sh
+      - .github/workflows/tier2.yml
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tier2-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tier2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: slop-bot/tier2.sh
+
+  # Each harness at its latest release instead of its pin: what the next bump
+  # will break, found before making it. A signal to look, not a broken main.
+  tier2-latest:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: slop-bot/tier2.sh
+        env:
+          HARNESS_LATEST: "1"

@@ -136,7 +136,8 @@ func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 }
 
 // Do sends a command and waits for the fake to acknowledge it (or, for run,
-// to report the result, which it returns).
+// to report the result, which it returns). When another report arrives
+// first, it is returned with the error.
 func (s *Session) Do(ctx context.Context, c Command) (*Report, error) {
 	s.mu.Lock()
 	err := s.enc.Encode(c)
@@ -150,7 +151,7 @@ func (s *Session) Do(ctx context.Context, c Command) (*Report, error) {
 	}
 	r, err := s.Expect(ctx, want)
 	if err != nil {
-		return nil, err
+		return r, err
 	}
 	if r.Err != "" {
 		return r, fmt.Errorf("fake: %s: %s", c.Cmd, r.Err)
