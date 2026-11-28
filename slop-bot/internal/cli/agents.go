@@ -104,20 +104,26 @@ func (a *app) printInbox(cmd *cobra.Command, path string, asJSON, sayEmpty bool)
 		return err
 	}
 	for _, m := range msgs {
-		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), m.From, m.Kind, m.Body); err != nil {
+		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), sender(&m), m.Kind, m.Body); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// sender names who a message is from: slop-bot's own system and nudge
+// messages are recorded as from the user.
+func sender(m *api.Message) string {
+	if m.Kind == "system" || m.Kind == "nudge" {
+		return "slop-bot"
+	}
+	return m.From
+}
+
 // followInbox prints new messages as they arrive. It waits on the daemon's
 // event log, from now, and re-reads the inbox when a message is queued,
 // rather than polling.
 func (a *app) followInbox(cmd *cobra.Command, asJSON bool) error {
-	if err := a.printInbox(cmd, api.PathInbox, asJSON, false); err != nil {
-		return err
-	}
 	c, err := a.client()
 	if err != nil {
 		return err
@@ -131,6 +137,11 @@ func (a *app) followInbox(cmd *cobra.Command, asJSON bool) error {
 		return err
 	}
 	defer func() { _ = body.Close() }()
+	// "now" is fixed once the stream is open, so a message queued before it
+	// is in this read and one queued after it arrives as an event.
+	if err := a.printInbox(cmd, api.PathInbox, asJSON, false); err != nil {
+		return err
+	}
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 	for sc.Scan() {
@@ -165,7 +176,7 @@ func (a *app) askCmd() *cobra.Command {
 			return a.printOK(cmd, "asked. Carry on with what doesn't depend on the answer, then end your turn: the answer arrives as a message.")
 		},
 	}
-	c.Flags().StringSliceVar(&in.Options, "option", nil, "a choice; repeat")
+	c.Flags().StringArrayVar(&in.Options, "option", nil, "a choice; repeat")
 	c.Flags().StringVar(&in.Recommend, "recommend", "", "the option you recommend")
 	return agentCmd(c)
 }
@@ -214,7 +225,7 @@ func (a *app) discussCmd() *cobra.Command {
 			return a.printOK(cmd, "raised for review. End your turn: the resolution arrives as a message.")
 		},
 	}
-	c.Flags().StringSliceVar(&in.Options, "option", nil, "an option; repeat")
+	c.Flags().StringArrayVar(&in.Options, "option", nil, "an option; repeat")
 	c.Flags().StringVar(&in.Recommend, "recommend", "", "the option you recommend")
 	return agentCmd(c)
 }
