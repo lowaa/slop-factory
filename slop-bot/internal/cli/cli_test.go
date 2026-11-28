@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 )
 
@@ -41,6 +44,14 @@ func newHarness(t *testing.T) *harness {
 			Home:   home, UID: os.Getuid(), GOOS: "linux",
 		},
 	}
+	// Never a real harness in tests: tickets these tests assign get a fake
+	// that answers on its own (no controller), unless a test sets its own.
+	self, err := os.Executable()
+	require.NoError(t, err)
+	h.deps.harnesses = daemon.Harnesses{"claude-code": &e2eHarness{
+		Harness: &fake.Harness{Binary: self, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}},
+		h:       h,
+	}}
 	return h
 }
 
@@ -105,11 +116,11 @@ func startDaemon(t *testing.T, h *harness) (stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
 	go func() { done <- Execute(ctx, &daemonDeps, []string{"--config", h.config, "daemon"}) }()
+	d := <-ready
 	select {
-	case d := <-ready:
-		<-d.Ready()
+	case <-d.Ready():
 	case code := <-done:
-		require.Failf(t, "daemon exited", "code %d: %s", code, daemonDeps.Stderr)
+		require.FailNowf(t, "daemon exited", "code %d: %s", code, daemonDeps.Stderr)
 	}
 	var once sync.Once
 	stop = func() {

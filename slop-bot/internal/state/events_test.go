@@ -255,3 +255,19 @@ func TestFollowReportsErrClosedWhenCloseLandsBeforeItsRead(t *testing.T) {
 	_, err = s.Events.Follow(context.Background(), 0, 0)
 	assert.ErrorIs(t, err, state.ErrClosed)
 }
+
+func TestLatestIsTheHighestSeq(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	got, err := f.Events.Latest(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), got)
+	_, err = f.Events.Append(ctx, &state.NewEvent{Type: "a"})
+	require.NoError(t, err)
+	seq, err := f.Events.Append(ctx, &state.NewEvent{Type: "b"})
+	require.NoError(t, err)
+	got, err = f.Events.Latest(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, seq, got)
+}

@@ -127,7 +127,7 @@ func (m *Manager) workspace(id ident.AgentID, t *tickets.Ticket, spec tickets.Ag
 		Nudges:             m.opts.Config.Agents.Nudges,
 		Autonomy:           m.autonomy(context.Background()),
 		AgentsMaySetUrgent: *m.opts.Config.AgentsMaySetUrgent,
-		CLIReference:       cliReference,
+		CLIReference:       m.opts.CLIReference,
 	}
 	for _, r := range m.opts.Config.Repos {
 		data.Repos = append(data.Repos, briefing.Repo{Name: r.Name, Path: r.Path})
@@ -155,13 +155,6 @@ func (m *Manager) workspace(id ident.AgentID, t *tickets.Ticket, spec tickets.Ag
 	ws.Briefing, ws.BriefingFile = text, path
 	return ws, nil
 }
-
-// cliReference is set by the daemon from the CLI's command tree, so the
-// briefing's command list can't drift from the CLI.
-var cliReference string
-
-// SetCLIReference installs the generated CLI reference for briefings.
-func SetCLIReference(ref string) { cliReference = ref }
 
 func kickoff(t *tickets.Ticket) string {
 	var b strings.Builder

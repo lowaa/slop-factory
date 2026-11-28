@@ -56,13 +56,13 @@ func TestSecondaryWorktreesComeWithAReadTheirInstructionsNote(t *testing.T) {
 	t.Parallel()
 	single, err := Render(data(), "")
 	require.NoError(t, err)
-	assert.NotContains(t, single, "read that repo's")
+	assert.Contains(t, single, "Read each repo's own instruction files", "even one repo: a harness may read only AGENTS.md")
 
 	d := data()
 	d.Worktrees = append(d.Worktrees, Worktree{Repo: "lib", Path: "/ws/t42-lib", Branch: "slop-bot/t42"})
 	multi, err := Render(d, "")
 	require.NoError(t, err)
-	assert.Contains(t, multi, "read that repo's\ninstruction files")
+	assert.Contains(t, multi, "Read each repo's own instruction files")
 	assert.Contains(t, multi, "`/ws/t42-lib`: repo **lib**")
 }
 

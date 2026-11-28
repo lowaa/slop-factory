@@ -111,6 +111,16 @@ func (e *Events) Append(ctx context.Context, n *NewEvent) (int64, error) {
 	return row.Seq, nil
 }
 
+// Latest is the highest seq written, or 0 when there are none: where a
+// follower that wants only what happens from now on starts.
+func (e *Events) Latest(ctx context.Context) (int64, error) {
+	var seq int64
+	if err := e.db.NewRaw("SELECT coalesce(max(seq), 0) FROM events").Scan(ctx, &seq); err != nil {
+		return 0, fmt.Errorf("state: reading the latest event: %w", err)
+	}
+	return seq, nil
+}
+
 // ReadAfter returns up to limit events with seq above after, in order. A
 // limit of 0 means DefaultEventLimit.
 func (e *Events) ReadAfter(ctx context.Context, after int64, limit int) ([]Event, error) {

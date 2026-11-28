@@ -40,6 +40,8 @@ type Deps struct {
 	// daemonBuilt lets in-package tests see the daemon `slop-bot daemon`
 	// builds, to wait on its Ready.
 	daemonBuilt func(*daemon.Daemon)
+	// harnesses lets in-package tests run the daemon on a fake harness.
+	harnesses daemon.Harnesses
 }
 
 // FromOS is the real outside world.
@@ -81,6 +83,7 @@ func New(deps *Deps) *cobra.Command {
 		a.serviceCmd(),
 		a.ticketCmd(),
 	)
+	root.AddCommand(a.agentCmds()...)
 	return root
 }
 
@@ -148,7 +151,16 @@ func (a *app) daemonCmd() *cobra.Command {
 				return err
 			}
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
-			d, err := daemon.New(&daemon.Options{Config: cfg, Paths: p, Logger: logger, Clock: clock.Real{}})
+			opts := &daemon.Options{
+				Config: cfg, Paths: p, Logger: logger, Clock: clock.Real{},
+				CLIReference: AgentReference(cmd.Root()),
+			}
+			// Only when set: a nil map in the interface would read as
+			// "no harnesses", not "build them from the config".
+			if a.deps.harnesses != nil {
+				opts.Harnesses = a.deps.harnesses
+			}
+			d, err := daemon.New(opts)
 			if err != nil {
 				return err
 			}

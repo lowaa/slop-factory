@@ -67,11 +67,11 @@ without one of those, slop-bot will nudge you, and after
 {{range .Worktrees -}}
 - `{{.Path}}`: repo **{{.Repo}}**, branch `{{.Branch}}`{{if .Primary}} (primary: your working directory){{end}}
 {{end -}}
-{{- if gt (len .Worktrees) 1}}
-Only the primary repo's own instructions (`CLAUDE.md`, `AGENTS.md`) load
-automatically. **Before working in another worktree, read that repo's
-instruction files.**
-{{end}}
+
+**Read each repo's own instruction files** (`CLAUDE.md`, `AGENTS.md`,
+whichever it has) before working in its worktree. Your harness may load
+only one of those names, or only the primary repo's.
+
 - Reuse these worktrees for everything this ticket needs, including more
   than one PR: cut a new branch in the same worktree for each.
 - Don't create worktrees elsewhere. slop-bot cleans these up when the ticket

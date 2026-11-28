@@ -42,7 +42,11 @@ func (m *Manager) Tell(ctx context.Context, from ident.Principal, to, text strin
 	}
 	sender := state.PartyOf(from)
 	if to == "user" {
-		return m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{From: sender, To: state.UserParty, Kind: state.KindTell, Body: text})
+		msg, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{From: sender, To: state.UserParty, Kind: state.KindTell, Body: text})
+		if err == nil {
+			m.event(ctx, EventQueued, from.Agent, "", map[string]string{"to": string(state.UserParty)})
+		}
+		return msg, err
 	}
 	a, err := m.resolveAgent(ctx, to)
 	if err != nil {
@@ -63,6 +67,7 @@ func (m *Manager) Tell(ctx context.Context, from ident.Principal, to, text strin
 	if err != nil {
 		return nil, err
 	}
+	m.event(ctx, EventQueued, a.ID, a.Ticket, map[string]string{"to": string(a.ID), "from": string(sender)})
 	if r, ok := m.runner(a.ID); ok {
 		if interrupt {
 			if err := r.conv.Interrupt(ctx); err != nil {

@@ -51,6 +51,9 @@ type Options struct {
 	Clock  clock.Clock
 	// CLI is the absolute path agents run slop-bot by.
 	CLI string
+	// CLIReference is the briefing's command list, generated from the CLI's
+	// command tree so it can't drift from it.
+	CLIReference string
 }
 
 // Manager runs every agent. It is a lifecycle component: Start resumes the
@@ -85,9 +88,6 @@ func New(opts *Options) (*Manager, error) {
 		done:    make(chan struct{}),
 	}, nil
 }
-
-// Name implements lifecycle.Component.
-func (m *Manager) Name() string { return "agents" }
 
 // Start resumes live agents and starts the scheduler.
 func (m *Manager) Start(ctx context.Context) error {
@@ -191,6 +191,7 @@ const (
 	EventResumed      = "agent.resumed"
 	EventState        = "agent.state"
 	EventDelivered    = "message.delivered"
+	EventQueued       = "message.queued"
 	EventNudged       = "agent.nudged"
 	EventUserTold     = "user.told"
 	EventFinished     = "agent.finished"
