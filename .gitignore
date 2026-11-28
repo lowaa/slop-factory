@@ -40,3 +40,6 @@ security-reports/
 
 # Claude Code agent worktrees, created inside the checkout
 .claude/worktrees/
+
+# quality.sh --report (dev-tools/quality)
+quality-reports/
