@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
@@ -19,3 +20,8 @@ func Render(msgs []state.Message) string { return render(msgs) }
 
 // RemovalAdvice is how the user is told to remove a kept worktree.
 func RemovalAdvice(res *worktree.CleanupResult) string { return removalAdvice(res) }
+
+// OnStartBusy makes f run whenever a start on the caller's goroutine (a
+// hand-back's resume) finds its ticket's start place taken. Set it before
+// starting what it watches.
+func (m *Manager) OnStartBusy(f func(ident.TicketID)) { m.startBusy = f }

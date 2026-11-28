@@ -181,6 +181,12 @@ func (m *Manager) recover(ctx context.Context, id ident.AgentID) {
 	if err != nil || a.EndedAt != nil {
 		return
 	}
+	// A recovery that waited for another start (recoverAfter) can find that
+	// start already runs the agent again: a second harness on the same
+	// conversation would be a second agent.
+	if _, running := m.runner(id); running {
+		return
+	}
 	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
 	if err == nil && t.Status.Terminal() {
 		m.endRecord(ctx, a, state.StateDone, endReason(t.Status))

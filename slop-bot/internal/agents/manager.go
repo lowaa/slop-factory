@@ -89,11 +89,17 @@ type Manager struct {
 	// a live place until its start settles, so starts in flight can't
 	// overfill a pool.
 	starting map[ident.TicketID]state.Pool
+	// settledCh has a channel per entry in starting, closed when that start
+	// settles: a start on the caller's goroutine waits on it for its turn.
+	settledCh map[ident.TicketID]chan struct{}
 	// recoverAfter are agents whose harness died while a start for their
 	// ticket was still in flight (a resume, still delivering): each is
 	// recovered once that start settles, rather than lost.
 	recoverAfter map[ident.TicketID]*runner
-	stopping     bool
+	// startBusy, set by tests, runs when a start on the caller's goroutine
+	// (claimStart) finds its ticket's place taken.
+	startBusy func(ident.TicketID)
+	stopping  bool
 	// streams counts the attached CLIs' open streams per agent.
 	streams map[ident.AgentID]int
 
@@ -140,6 +146,7 @@ func New(opts *Options) (*Manager, error) {
 		opts:         opts,
 		runners:      map[ident.AgentID]*runner{},
 		starting:     map[ident.TicketID]state.Pool{},
+		settledCh:    map[ident.TicketID]chan struct{}{},
 		recoverAfter: map[ident.TicketID]*runner{},
 		streams:      map[ident.AgentID]int{},
 		limits:       newLimits(),
@@ -243,7 +250,7 @@ func (m *Manager) goStartLocked(ticket ident.TicketID, pool state.Pool, admit bo
 	if _, busy := m.starting[ticket]; busy || (admit && !m.admitsLocked(pool)) {
 		return false
 	}
-	m.starting[ticket] = pool
+	m.holdStartLocked(ticket, pool)
 	m.starts.Go(func() {
 		defer m.settled(ticket)
 		ctx, cancel := context.WithTimeout(m.base, m.startTimeout())
@@ -253,9 +260,18 @@ func (m *Manager) goStartLocked(ticket ident.TicketID, pool state.Pool, admit bo
 	return true
 }
 
+// holdStartLocked takes ticket's start place, in pool. Call it holding mu,
+// with the place free; settled gives it back.
+func (m *Manager) holdStartLocked(ticket ident.TicketID, pool state.Pool) {
+	m.starting[ticket] = pool
+	m.settledCh[ticket] = make(chan struct{})
+}
+
 func (m *Manager) settled(ticket ident.TicketID) {
 	m.mu.Lock()
 	delete(m.starting, ticket)
+	close(m.settledCh[ticket])
+	delete(m.settledCh, ticket)
 	if r, ok := m.recoverAfter[ticket]; ok {
 		delete(m.recoverAfter, ticket)
 		m.goStartLocked(ticket, r.pool, false, func(ctx context.Context) { m.recover(ctx, r.id) })
