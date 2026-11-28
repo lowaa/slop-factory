@@ -204,24 +204,32 @@ func testFeedConcurrentWriters(t *testing.T, nb NewBackend) {
 	created := take(t, ch, writers)
 	assertOrdered(t, created)
 
+	// A writer that fails stops, so the events the reader waits for never
+	// all come: the reader selects on the errors too, rather than hang.
 	var wg sync.WaitGroup
-	errs := make([]error, writers)
+	errs := make(chan error, writers)
 	for i := range writers {
 		wg.Go(func() {
 			for j := range each {
 				if _, err := f.sys.Comment(f.ctx, user, work[i].ID, fmt.Sprintf("%d", j)); err != nil {
-					errs[i] = err
+					errs <- err
 					return
 				}
 			}
 		})
 	}
 	// Read while they write.
-	evs := take(t, ch, writers*each)
-	wg.Wait()
-	for _, err := range errs {
-		require.NoError(t, err)
+	evs := make([]tickets.TicketEvent, 0, writers*each)
+	for len(evs) < writers*each {
+		select {
+		case err := <-errs:
+			require.NoError(t, err)
+		case ev, ok := <-ch:
+			require.True(t, ok, "the feed closed")
+			evs = append(evs, ev)
+		}
 	}
+	wg.Wait()
 	assertOrdered(t, evs)
 	per := map[ident.TicketID]int{}
 	for _, ev := range evs {

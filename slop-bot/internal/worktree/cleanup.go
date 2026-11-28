@@ -161,15 +161,18 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 		if err != nil {
 			return nil, err
 		}
-		if dir != "" {
-			ops, err := inProgress(dir)
-			if err != nil {
-				return nil, err
-			}
-			if len(ops) > 0 {
-				reasons = append(reasons, Reason{Kind: InProgress,
-					Detail: "an operation is in progress (" + strings.Join(ops, ", ") + "); finish or abort it"})
-			}
+		if dir == "" {
+			// Registered, yet no admin dir claims it: an autostash held there
+			// can't be ruled out, and removing the worktree would lose it.
+			return nil, fmt.Errorf("worktree: no admin dir found for the registered worktree %s", st.path)
+		}
+		ops, err := inProgress(dir)
+		if err != nil {
+			return nil, err
+		}
+		if len(ops) > 0 {
+			reasons = append(reasons, Reason{Kind: InProgress,
+				Detail: "an operation is in progress (" + strings.Join(ops, ", ") + "); finish or abort it"})
 		}
 	}
 	nested, err := m.nested(ctx, repoPath, st.path)

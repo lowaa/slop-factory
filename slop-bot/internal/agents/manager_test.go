@@ -141,6 +141,9 @@ type recordingWorktrees struct {
 	cleanups []ident.TicketID
 	removed  []string
 	dir      string
+	// leftover, when set, is reported alongside each removal, as the real
+	// manager does for branches it couldn't delete.
+	leftover error
 }
 
 func (w *recordingWorktrees) Create(_ context.Context, ticket ident.TicketID, repos []string, primary string) ([]*worktree.Worktree, error) {
@@ -170,7 +173,7 @@ func (w *recordingWorktrees) Cleanup(_ context.Context, ticket ident.TicketID, w
 			continue
 		}
 		w.removed = append(w.removed, wt.Path)
-		out = append(out, &worktree.CleanupResult{Worktree: wt, Removed: true})
+		out = append(out, &worktree.CleanupResult{Worktree: wt, Removed: true, Err: w.leftover})
 	}
 	return out
 }
@@ -495,6 +498,33 @@ func TestDoneFinishesTheTicketAndCleansUp(t *testing.T) {
 	ended, err := f.state.Agents.Get(context.Background(), a.ID)
 	require.NoError(t, err)
 	assert.Equal(t, state.StateDone, ended.State)
+}
+
+// A worktree removed but with branches left behind is forgotten and the user
+// still told why: the error isn't lost behind the removal.
+func TestACleanupThatRemovedButFailedTellsTheUser(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	f.wts.mu.Lock()
+	f.wts.leftover = errors.New("branch slop-bot/t1 is checked out elsewhere")
+	f.wts.mu.Unlock()
+	tk := f.file("t", func(nt *tickets.NewTicket) { nt.Status = tickets.StatusOpen })
+	s := f.session()
+	f.user(s)
+	a := f.agentFor(tk.ID)
+	f.turn(s, func() {
+		require.NoError(t, f.mgr.Done(f.ctx(), ident.AgentPrincipal(a.ID, tk.ID), "Exported as CSV."))
+	})
+	f.await(agents.EventFinished, nil)
+
+	pending, err := f.state.Messages.Pending(context.Background(), state.UserParty)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Contains(t, pending[0].Body, "couldn't fully clean up")
+	assert.Contains(t, pending[0].Body, "checked out elsewhere")
+	ended, err := f.state.Agents.Get(context.Background(), a.ID)
+	require.NoError(t, err)
+	assert.Empty(t, ended.Worktrees, "the removed worktree is no longer recorded")
 }
 
 func TestMaxActiveCountsAgentsInATurnOnly(t *testing.T) {
