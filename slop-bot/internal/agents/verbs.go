@@ -8,7 +8,6 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
-	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
 // own returns the runner for the calling agent: verbs act on the caller's
@@ -194,11 +193,7 @@ func (m *Manager) cleanup(ctx context.Context, r *runner) {
 	if err != nil || len(a.Worktrees) == 0 {
 		return
 	}
-	wts := make([]*worktree.Worktree, 0, len(a.Worktrees))
-	for _, w := range a.Worktrees {
-		wts = append(wts, &worktree.Worktree{Ticket: r.ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary})
-	}
-	for _, res := range m.opts.Worktrees.Cleanup(ctx, r.ticket, wts) {
+	for _, res := range m.opts.Worktrees.Cleanup(ctx, r.ticket, m.worktreesOf(a)) {
 		switch {
 		case res.Removed:
 			_ = m.opts.State.Agents.RemoveWorktree(ctx, r.id, res.Worktree.Repo)

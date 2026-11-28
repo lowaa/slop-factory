@@ -182,6 +182,21 @@ func refs(rs []tickets.TicketRef) string {
 	return strings.Join(ids, ", ")
 }
 
+// worktreesOf rebuilds an agent's recorded worktrees. state.db keeps the
+// repo's name, not its path: the path comes from this machine's repo
+// lookup, which the worktree manager needs to run git in the repo.
+func (m *Manager) worktreesOf(a *state.Agent) []*worktree.Worktree {
+	out := make([]*worktree.Worktree, 0, len(a.Worktrees))
+	for _, w := range a.Worktrees {
+		wt := &worktree.Worktree{Ticket: a.Ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary}
+		if r, ok := m.opts.Config.Repo(w.Repo); ok {
+			wt.RepoPath = r.Path
+		}
+		out = append(out, wt)
+	}
+	return out
+}
+
 func stateWorktrees(wts []*worktree.Worktree) []state.Worktree {
 	out := make([]state.Worktree, 0, len(wts))
 	for _, w := range wts {
@@ -227,10 +242,7 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent) error {
 	if err := m.opts.State.Agents.RotateTokenHash(ctx, a.ID, control.HashToken(token)); err != nil {
 		return err
 	}
-	var wts []*worktree.Worktree
-	for _, w := range a.Worktrees {
-		wts = append(wts, &worktree.Worktree{Ticket: a.Ticket, Repo: w.Repo, Path: w.Path, Branch: w.Branch, Primary: w.Primary})
-	}
+	wts := m.worktreesOf(a)
 	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, wts, token)
 	if err != nil {
 		return err

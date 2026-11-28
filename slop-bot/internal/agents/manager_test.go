@@ -2,6 +2,7 @@ package agents_test
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -63,6 +64,7 @@ type recordingWorktrees struct {
 	mu       sync.Mutex
 	created  []ident.TicketID
 	cleanups []ident.TicketID
+	removed  []string
 	dir      string
 }
 
@@ -87,6 +89,12 @@ func (w *recordingWorktrees) Cleanup(_ context.Context, ticket ident.TicketID, w
 	w.cleanups = append(w.cleanups, ticket)
 	out := make([]*worktree.CleanupResult, 0, len(wts))
 	for _, wt := range wts {
+		// The real manager runs git in RepoPath: cleanup must be handed it.
+		if wt.RepoPath == "" {
+			out = append(out, &worktree.CleanupResult{Worktree: wt, Err: errors.New("no repo path")})
+			continue
+		}
+		w.removed = append(w.removed, wt.Path)
 		out = append(out, &worktree.CleanupResult{Worktree: wt, Removed: true})
 	}
 	return out
@@ -112,7 +120,7 @@ func newFixture(t *testing.T, cfgYAML string) *fixture {
 	quiet := slog.New(slog.DiscardHandler)
 	ctl, err := fake.NewController()
 	require.NoError(t, err)
-	cfg, err := config.Parse([]byte(cfgYAML), dir, dir)
+	cfg, err := config.Parse([]byte(cfgYAML+"\nrepos: [{name: app, path: "+filepath.Join(dir, "repo")+"}]\n"), dir, dir)
 	require.NoError(t, err)
 	p, err := paths.Resolve(&paths.Env{
 		Lookup: func(k string) (string, bool) {
@@ -333,6 +341,7 @@ func TestDoneFinishesTheTicketAndCleansUp(t *testing.T) {
 	require.NotEmpty(t, got.Comments)
 	assert.Contains(t, got.Comments[len(got.Comments)-1].Body, "Exported as CSV.")
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
+	assert.Len(t, f.wts.removed, 1, "the worktree was removed, not kept with an error")
 	ended, err := f.state.Agents.Get(context.Background(), a.ID)
 	require.NoError(t, err)
 	assert.Equal(t, state.StateDone, ended.State)
