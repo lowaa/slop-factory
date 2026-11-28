@@ -335,11 +335,12 @@ func (m *Messages) Log(ctx context.Context, q *LogQuery) ([]Message, error) {
 }
 
 // CountBetween counts the messages either of a and b sent the other since
-// since: the loop guard's back-and-forth cap.
+// since: the loop guard's back-and-forth cap. System messages, slop-bot's
+// own notices about a party, aren't the party talking, so they don't count.
 func (m *Messages) CountBetween(ctx context.Context, a, b Party, since time.Time) (int64, error) {
 	n, err := m.db.NewSelect().Table("messages").
 		Where("((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?))", string(a), string(b), string(b), string(a)).
-		Where("created_at >= ?", toMillis(since)).Count(ctx)
+		Where("kind <> ?", string(KindSystem)).Where("created_at >= ?", toMillis(since)).Count(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("state: counting messages between %s and %s: %w", a, b, err)
 	}
@@ -347,10 +348,11 @@ func (m *Messages) CountBetween(ctx context.Context, a, b Party, since time.Time
 }
 
 // CountSentBy counts the messages from sent since since: the loop guard's
-// per-agent send rate.
+// per-agent send rate. System messages don't count, as in CountBetween.
 func (m *Messages) CountSentBy(ctx context.Context, from Party, since time.Time) (int64, error) {
 	n, err := m.db.NewSelect().Table("messages").
-		Where("sender = ?", string(from)).Where("created_at >= ?", toMillis(since)).Count(ctx)
+		Where("sender = ?", string(from)).Where("kind <> ?", string(KindSystem)).
+		Where("created_at >= ?", toMillis(since)).Count(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("state: counting messages from %s: %w", from, err)
 	}

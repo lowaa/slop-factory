@@ -22,7 +22,7 @@ func TestCreateAndGetRoundTripEveryField(t *testing.T) {
 	n := &state.NewAgent{
 		ID: "a1", Ticket: "42", Harness: "agy", Driver: "tui", Model: "m", Effort: "high",
 		TUISession: "slop-a1", Pool: state.PoolUrgent, State: state.StateRefining, Reason: "spawned",
-		TokenHash: control.HashToken("secret"),
+		TokenHash: control.HashToken("secret"), BlockedTold: true,
 		Worktrees: []state.Worktree{
 			{Repo: "go-db", Path: "/w/t42-go-db", Branch: "t42"},
 			{Repo: "slop-factory", Path: "/w/t42-slop-factory", Branch: "t42", Primary: true},
@@ -36,7 +36,7 @@ func TestCreateAndGetRoundTripEveryField(t *testing.T) {
 	want := &state.Agent{
 		ID: "a1", Ticket: "42", Harness: "agy", Driver: "tui", Model: "m", Effort: "high",
 		Mode: state.ModeProgrammatic, TUISession: "slop-a1", Pool: state.PoolUrgent,
-		State: state.StateRefining, StateSince: t0, CreatedAt: t0,
+		State: state.StateRefining, StateSince: t0, CreatedAt: t0, BlockedTold: true,
 		// The primary first: it is the harness's cwd.
 		Worktrees: []state.Worktree{n.Worktrees[1], n.Worktrees[0]},
 	}
@@ -278,6 +278,8 @@ func TestAnEndedAgentIsFrozenAndNoLongerLive(t *testing.T) {
 			assert.ErrorIs(t, f.Agents.ResetNudges(ctx, "a1"), state.ErrEnded)
 			_, err = f.Agents.AddNudge(ctx, "a1")
 			assert.ErrorIs(t, err, state.ErrEnded)
+			_, err = f.Agents.AddRecovery(ctx, "a1")
+			assert.ErrorIs(t, err, state.ErrEnded)
 			assert.ErrorIs(t, f.Agents.AddWorktree(ctx, "a1", &state.Worktree{Repo: "r", Path: "/r"}), state.ErrEnded)
 
 			_, err = f.Agents.AgentForTokenHash(ctx, control.HashToken("token-a1"))
@@ -345,7 +347,26 @@ func TestAgentFieldUpdates(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, got.Nudges)
 
+	require.NoError(t, f.Agents.SetBlockedTold(ctx, "a1", true))
+	for want := 1; want <= 2; want++ {
+		n, err := f.Agents.AddRecovery(ctx, "a1")
+		require.NoError(t, err)
+		assert.Equal(t, want, n)
+	}
+	got, err = f.Agents.Get(ctx, "a1")
+	require.NoError(t, err)
+	assert.True(t, got.BlockedTold)
+	assert.Equal(t, 2, got.Recoveries)
+	require.NoError(t, f.Agents.SetBlockedTold(ctx, "a1", false))
+	require.NoError(t, f.Agents.ResetRecoveries(ctx, "a1"))
+	got, err = f.Agents.Get(ctx, "a1")
+	require.NoError(t, err)
+	assert.False(t, got.BlockedTold)
+	assert.Equal(t, 0, got.Recoveries)
+
 	assert.ErrorIs(t, f.Agents.SetProgressNote(ctx, "nope", "x"), state.ErrNotFound)
+	_, err = f.Agents.AddRecovery(ctx, "nope")
+	assert.ErrorIs(t, err, state.ErrNotFound)
 	_, err = f.Agents.AddNudge(ctx, "nope")
 	assert.ErrorIs(t, err, state.ErrNotFound)
 	_, err = f.Agents.Get(ctx, "nope")
