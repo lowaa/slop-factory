@@ -218,6 +218,31 @@ func TestStatusListsAgentsAndTheirNotes(t *testing.T) {
 	assert.Contains(t, e.h.ok(t, "status"), "autonomy off, agent-filed tickets 0 of")
 }
 
+// An agent parked to free a process past max_live shows as parked, beside
+// what it waits on.
+func TestStatusShowsAParkedAgent(t *testing.T) {
+	t.Parallel()
+	e := newE2EWithConfig(t, "concurrency: {max_active: 1, max_live: 2}\n")
+	for range 2 {
+		s, _ := e.started()
+		e.agent(s, "ask", "CSV or XLSX?")
+		e.do(s, fake.CmdTurnEnd)
+	}
+	e.started() // its start parks the agent that has waited longest
+
+	var st api.Status
+	require.NoError(t, jsonDecode(e.h.ok(t, "status", "--json"), &st))
+	var parked []api.AgentStatus
+	for _, a := range st.Agents {
+		if a.ParkedAt != nil {
+			parked = append(parked, a)
+		}
+	}
+	require.Len(t, parked, 1)
+	assert.Equal(t, "waiting_user", parked[0].State, "it still waits on the user")
+	assert.Contains(t, e.h.ok(t, "status"), "waiting_user (parked)")
+}
+
 func TestEventsPrintsTheLogAndFollowsIt(t *testing.T) {
 	t.Parallel()
 	e := newE2E(t)

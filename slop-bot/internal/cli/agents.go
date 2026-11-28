@@ -344,7 +344,7 @@ func (a *app) statusCmd() *cobra.Command {
 			_, _ = fmt.Fprintln(tw, "AGENT\tTICKET\tSTATE\tFOR\tHARNESS\tNOTE")
 			sort.Slice(st.Agents, func(i, j int) bool { return st.Agents[i].Ticket < st.Agents[j].Ticket })
 			for _, ag := range st.Agents {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", ag.ID, ag.Ticket, ag.State,
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", ag.ID, ag.Ticket, ag.StateLabel(),
 					time.Since(ag.Since).Round(time.Second), ag.Harness, dash(ag.Note))
 			}
 			return tw.Flush()
