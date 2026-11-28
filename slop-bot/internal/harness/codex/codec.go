@@ -38,6 +38,9 @@ type codecOptions struct {
 	resumeParams *protocol.ThreadResumeParams
 	// effort is the reasoning effort each turn/start asks for.
 	effort string
+	// permissive approves the server requests that slip through; without
+	// it they are declined (approvals.go).
+	permissive bool
 }
 
 // codec speaks Codex's app-server JSON-RPC: requests and their responses,
@@ -72,6 +75,9 @@ type codec struct {
 	// tools are the tool items started and not yet completed, by item id.
 	tools map[string]string
 	usage *harness.Usage
+	// limits are the last rate-limit windows seen, per limit id: Codex's
+	// updates are sparse, so each merges into what came before.
+	limits map[string]*limitWindows
 	// lastError is the last unretried error notification, for a turn that
 	// fails without saying why.
 	lastError string
@@ -96,7 +102,7 @@ type request struct {
 }
 
 func newCodec(opts *codecOptions) *codec {
-	return &codec{opts: opts, pending: map[int64]*request{}, tools: map[string]string{}}
+	return &codec{opts: opts, pending: map[int64]*request{}, tools: map[string]string{}, limits: map[string]*limitWindows{}}
 }
 
 // message is any JSON-RPC message: a request or notification has Method, a
@@ -236,7 +242,10 @@ func (c *codec) Send(_ context.Context, w *rpcdriver.Wire, msg *harness.Message,
 // deliver routes one message. mu is held.
 func (c *codec) deliver(w *rpcdriver.Wire, text string) error {
 	switch {
-	case c.starting:
+	case c.starting, c.interrupted && c.turnID != "":
+		// No turn to steer into yet, or one that is being interrupted: a
+		// steer there would be lost with it. turnCompleted starts the next
+		// turn with what waits.
 		c.queued = append(c.queued, text)
 		return nil
 	case c.turnID != "":
@@ -359,6 +368,9 @@ func (c *codec) steerRefused(w *rpcdriver.Wire, r *request, e *rpcError) error {
 func (c *codec) turnStarted(w *rpcdriver.Wire, m *message) ([]harness.Event, error) {
 	c.starting = false
 	if m.Error != nil {
+		// No turn, so nothing to interrupt: the interrupt mustn't carry
+		// over to the next turn.
+		c.interruptAsked = false
 		// No turn ran, so the message that asked for it is reported as a
 		// failed turn rather than lost.
 		evs := []harness.Event{
@@ -425,7 +437,7 @@ func (c *codec) notification(w *rpcdriver.Wire, m *message) ([]harness.Event, er
 	case protocol.MethodThreadTokenUsageUpdated:
 		return nil, c.tokenUsage(m.Params)
 	case protocol.MethodAccountRateLimitsUpdated:
-		return rateLimits(m.Params)
+		return c.rateLimits(m.Params)
 	case protocol.MethodError:
 		var n protocol.ErrorNotification
 		if err := json.Unmarshal(m.Params, &n); err != nil {
@@ -561,39 +573,60 @@ func (c *codec) tokenUsage(params json.RawMessage) error {
 		c.usage = &harness.Usage{}
 	}
 	last := &n.TokenUsage.Last
-	// OpenAI's input count includes the cached part; harness.Usage, like
-	// Claude's, counts them apart.
-	c.usage.InputTokens += last.InputTokens - last.CachedInputTokens
+	// OpenAI's input count includes the cached and cache-written parts;
+	// harness.Usage, like Claude's, counts them apart (as the supervisor's
+	// usage/codex.py does).
+	c.usage.InputTokens += max(last.InputTokens-last.CachedInputTokens-last.CacheWriteInputTokens, 0)
 	c.usage.CacheReadTokens += last.CachedInputTokens
 	c.usage.CacheWriteTokens += last.CacheWriteInputTokens
 	c.usage.OutputTokens += last.OutputTokens
 	return nil
 }
 
-// rateLimits reports the tighter of the plan's windows (5-hour and
-// weekly): the one the scheduler must not run past.
-func rateLimits(params json.RawMessage) ([]harness.Event, error) {
+// limitWindows are one limit id's windows: the 5-hour and the weekly.
+type limitWindows struct {
+	primary, secondary *harness.Limit
+}
+
+// rateLimits merges a sparse update into the last windows seen and reports
+// the tighter of its limit's windows: the one the scheduler must not run
+// past.
+func (c *codec) rateLimits(params json.RawMessage) ([]harness.Event, error) {
 	var n protocol.AccountRateLimitsUpdatedNotification
 	if err := json.Unmarshal(params, &n); err != nil {
 		return nil, err
 	}
-	var best *harness.Limit
-	for _, win := range []*protocol.RateLimitWindow{n.RateLimits.Primary, n.RateLimits.Secondary} {
-		if win == nil {
-			continue
-		}
-		l := &harness.Limit{UsedPercent: float64(win.UsedPercent)}
-		if win.ResetsAt != 0 {
-			l.ResetsAt = time.Unix(win.ResetsAt, 0).UTC()
-		}
-		if best == nil || l.UsedPercent > best.UsedPercent {
-			best = l
-		}
+	w := c.limits[n.RateLimits.LimitID]
+	if w == nil {
+		w = &limitWindows{}
+		c.limits[n.RateLimits.LimitID] = w
+	}
+	if l := limitOf(n.RateLimits.Primary); l != nil {
+		w.primary = l
+	}
+	if l := limitOf(n.RateLimits.Secondary); l != nil {
+		w.secondary = l
+	}
+	best := w.primary
+	if best == nil || (w.secondary != nil && w.secondary.UsedPercent > best.UsedPercent) {
+		best = w.secondary
 	}
 	if best == nil {
 		return nil, nil
 	}
-	return []harness.Event{{Kind: harness.LimitReport, Limit: best}}, nil
+	l := *best
+	return []harness.Event{{Kind: harness.LimitReport, Limit: &l}}, nil
+}
+
+func limitOf(win *protocol.RateLimitWindow) *harness.Limit {
+	if win == nil {
+		return nil
+	}
+	l := &harness.Limit{UsedPercent: float64(win.UsedPercent)}
+	if win.ResetsAt != 0 {
+		l.ResetsAt = time.Unix(win.ResetsAt, 0).UTC()
+	}
+	return l
 }
 
 func write(w *rpcdriver.Wire, m *message) error {

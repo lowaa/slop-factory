@@ -72,6 +72,49 @@ command = "docs-mcp"
 `, readConfig(t, f))
 }
 
+func TestForgetKeepsCommentsAfterARemovedTable(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ in, want string }{
+		"notes at the end": {
+			"[projects.\"/ws\"]\ntrust_level = \"trusted\"\n\n# my notes\n",
+			"# my notes\n",
+		},
+		"a commented-out table": {
+			"[projects.\"/ws\"]\ntrust_level = \"trusted\"\n\n# [profiles.old]\n# model = \"o3\"\n\n[tui]\nx = 1\n",
+			"# [profiles.old]\n# model = \"o3\"\n\n[tui]\nx = 1\n",
+		},
+		"a comment inside the table": {
+			"[projects.\"/ws\"]\n# trusted by attach\ntrust_level = \"trusted\"\n[tui]\n",
+			"[tui]\n",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := writeConfig(t, tc.in)
+			_, err := f.Forget("/ws")
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, readConfig(t, f))
+		})
+	}
+}
+
+func TestForgetEditsASymlinkedConfigInPlace(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dotfiles-config.toml")
+	require.NoError(t, os.WriteFile(target, []byte(userConfig), 0o600))
+	link := filepath.Join(dir, "config.toml")
+	require.NoError(t, os.Symlink(target, link))
+	_, err := (&TrustFile{Path: link}).Forget("/home/u/.local/share/slop-bot/worktrees/t1")
+	require.NoError(t, err)
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "still a link")
+	b, err := os.ReadFile(target) // #nosec G304 -- the test's own temp file
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "worktrees/t1", "the link's target was edited")
+}
+
 func TestForgetKeepsTheFileMode(t *testing.T) {
 	t.Parallel()
 	f := writeConfig(t, userConfig)
@@ -167,6 +210,9 @@ func TestConfigPath(t *testing.T) {
 	p, err = ConfigPath([]string{"PATH=/bin"})
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, ".codex", "config.toml"), p)
+	p, err = ConfigPath([]string{"HOME=/home/agent"})
+	require.NoError(t, err)
+	assert.Equal(t, "/home/agent/.codex/config.toml", p, "the environment's HOME, not the daemon's")
 }
 
 func TestForgetWorkspaceUsesTheAgentsCodexHome(t *testing.T) {
@@ -174,8 +220,10 @@ func TestForgetWorkspaceUsesTheAgentsCodexHome(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.toml")
 	require.NoError(t, os.WriteFile(path, []byte(userConfig), 0o600))
-	h := &Harness{Environ: func() []string { return []string{"CODEX_HOME=" + home} }}
+	// The agent's env names the home, over the daemon's.
+	h := &Harness{Environ: func() []string { return []string{"CODEX_HOME=/elsewhere"} }}
 	require.NoError(t, h.ForgetWorkspace(&harness.Workspace{
+		Env: map[string]string{"CODEX_HOME": home},
 		Dir: "/home/u/.local/share/slop-bot/worktrees/t1", ExtraDirs: []string{"/home/u/.local/share/slop-bot/worktrees/t2"},
 	}))
 	b, err := os.ReadFile(path) // #nosec G304 -- the test's own temp file

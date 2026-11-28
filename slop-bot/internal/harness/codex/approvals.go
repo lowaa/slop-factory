@@ -14,14 +14,20 @@ const methodNotFound = -32601
 // answer replies to a server request. With approvalPolicy "never" Codex
 // sends none (protocol spike), but nobody is at a terminal to answer one,
 // and unanswered it would hold the turn for ever. So each is answered the
-// way the agent's permissive mode means: approved. mu is held.
+// way the agent's mode means: approved when permissive, declined otherwise,
+// so a sandboxed agent is never escalated by a request that slipped
+// through. mu is held.
 func (c *codec) answer(w *rpcdriver.Wire, m *message) error {
-	result, err := approval(m)
+	answer, verdict := decline, "declined"
+	if c.opts.permissive {
+		answer, verdict = approval, "approved"
+	}
+	result, err := answer(m)
 	if err != nil {
 		c.opts.logger.Warn("codex sent a request slop-bot can't answer; refused", "method", m.Method, "err", err)
 		return write(w, &message{ID: m.ID, Error: &rpcError{Code: methodNotFound, Message: err.Error()}})
 	}
-	c.opts.logger.Warn("codex asked for approval despite approvalPolicy never; approved", "method", m.Method)
+	c.opts.logger.Warn("codex asked for approval despite approvalPolicy never; "+verdict, "method", m.Method)
 	b, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("codex: encoding the answer to %s: %w", m.Method, err)
@@ -64,4 +70,37 @@ func approval(m *message) (any, error) {
 		return &protocol.ToolRequestUserInputResponse{Answers: map[string]protocol.ToolRequestUserInputAnswer{}}, nil
 	}
 	return nil, fmt.Errorf("%s is not supported by slop-bot", m.Method)
+}
+
+// rejection is the reason a declined request gives the agent.
+const rejection = "slop-bot runs this agent unattended and without permissive mode: nobody can approve it"
+
+// decline is the refusing answer to one server request, for a
+// non-permissive agent. It refuses without interrupting the turn, so the
+// agent can try something else.
+func decline(m *message) (any, error) {
+	switch m.Method {
+	case protocol.MethodItemCommandExecutionRequestApproval:
+		return &protocol.CommandExecutionRequestApprovalResponse{Decision: protocol.CommandExecutionApprovalDecisionDecline}, nil
+	case protocol.MethodItemFileChangeRequestApproval:
+		return &protocol.FileChangeRequestApprovalResponse{Decision: protocol.FileChangeApprovalDecisionDecline}, nil
+	case protocol.MethodApplyPatchApproval:
+		return &protocol.ApplyPatchApprovalResponse{Decision: deniedDecision()}, nil
+	case protocol.MethodExecCommandApproval:
+		return &protocol.ExecCommandApprovalResponse{Decision: deniedDecision()}, nil
+	case protocol.MethodItemPermissionsRequestApproval:
+		// Nothing granted.
+		return &protocol.PermissionsRequestApprovalResponse{Scope: protocol.PermissionGrantScopeTurn}, nil
+	case protocol.MethodMcpServerElicitationRequest:
+		return &protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionDecline}, nil
+	case protocol.MethodItemToolRequestUserInput:
+		return &protocol.ToolRequestUserInputResponse{Answers: map[string]protocol.ToolRequestUserInputAnswer{}}, nil
+	}
+	return nil, fmt.Errorf("%s is not supported by slop-bot", m.Method)
+}
+
+// deniedDecision is ReviewDecision's denial, an object variant the
+// generated `any` has no constant for.
+func deniedDecision() any {
+	return map[string]any{"denied": map[string]string{"rejection": rejection}}
 }

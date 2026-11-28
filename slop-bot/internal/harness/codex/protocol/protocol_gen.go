@@ -241,11 +241,11 @@ type CollaborationMode struct {
 }
 
 type CommandAction struct {
-	Command string          `json:"command"`
-	Name    string          `json:"name,omitempty"`
-	Path    json.RawMessage `json:"path,omitempty"`
-	Query   string          `json:"query,omitempty"`
-	Type    string          `json:"type"`
+	Command string `json:"command"`
+	Name    string `json:"name,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Query   string `json:"query,omitempty"`
+	Type    string `json:"type"`
 }
 
 // CommandAction's `type` values.
@@ -277,15 +277,6 @@ const (
 	CommandExecutionSourceUserShell              CommandExecutionSource = "userShell"
 	CommandExecutionSourceUnifiedExecStartup     CommandExecutionSource = "unifiedExecStartup"
 	CommandExecutionSourceUnifiedExecInteraction CommandExecutionSource = "unifiedExecInteraction"
-)
-
-type CommandExecutionStatus string
-
-const (
-	CommandExecutionStatusInProgress CommandExecutionStatus = "inProgress"
-	CommandExecutionStatusCompleted  CommandExecutionStatus = "completed"
-	CommandExecutionStatusFailed     CommandExecutionStatus = "failed"
-	CommandExecutionStatusDeclined   CommandExecutionStatus = "declined"
 )
 
 // Reasoning settings interpreted by the backend for the routed model.
@@ -1068,14 +1059,14 @@ type ThreadItem struct {
 	Server         string                 `json:"server,omitempty"`
 	Source         CommandExecutionSource `json:"source,omitempty"`
 	// Unix timestamp in milliseconds when the item started, if recorded.
-	StartedAtMs           int64                  `json:"startedAtMs,omitempty"`
-	Status                CommandExecutionStatus `json:"status,omitempty"`
-	Success               bool                   `json:"success,omitempty"`
-	Summary               []string               `json:"summary,omitempty"`
-	Text                  string                 `json:"text,omitempty"`
-	Tool                  string                 `json:"tool,omitempty"`
-	TransparentBackground bool                   `json:"transparentBackground,omitempty"`
-	Type                  string                 `json:"type"`
+	StartedAtMs           int64    `json:"startedAtMs,omitempty"`
+	Status                string   `json:"status,omitempty"`
+	Success               bool     `json:"success,omitempty"`
+	Summary               []string `json:"summary,omitempty"`
+	Text                  string   `json:"text,omitempty"`
+	Tool                  string   `json:"tool,omitempty"`
+	TransparentBackground bool     `json:"transparentBackground,omitempty"`
+	Type                  string   `json:"type"`
 }
 
 // ThreadItem's `type` values.

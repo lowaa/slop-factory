@@ -56,18 +56,31 @@ type TrustFile struct {
 }
 
 // ConfigPath is the config.toml that Codex run with environ reads:
-// $CODEX_HOME's, else ~/.codex's.
+// $CODEX_HOME's, else $HOME/.codex's (the daemon's home when environ names
+// none).
 func ConfigPath(environ []string) (string, error) {
-	for _, kv := range environ {
-		if v, ok := strings.CutPrefix(kv, "CODEX_HOME="); ok && v != "" {
-			return filepath.Join(v, "config.toml"), nil
+	if v := lookup(environ, "CODEX_HOME"); v != "" {
+		return filepath.Join(v, "config.toml"), nil
+	}
+	home := lookup(environ, "HOME")
+	if home == "" {
+		var err error
+		if home, err = os.UserHomeDir(); err != nil {
+			return "", err
 		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
 	return filepath.Join(home, ".codex", "config.toml"), nil
+}
+
+// lookup is the last value environ gives name, as exec would pass it.
+func lookup(environ []string, name string) string {
+	v := ""
+	for _, kv := range environ {
+		if rest, ok := strings.CutPrefix(kv, name+"="); ok {
+			v = rest
+		}
+	}
+	return v
 }
 
 // ForgetWorkspace removes the trust entries Codex's TUI wrote for ws's
@@ -75,11 +88,9 @@ func ConfigPath(environ []string) (string, error) {
 // directories slop-bot created: an entry the user made for their own
 // checkout is theirs.
 func (h *Harness) ForgetWorkspace(ws *harness.Workspace) error {
-	base := os.Environ
-	if h.Environ != nil {
-		base = h.Environ
-	}
-	path, err := ConfigPath(base())
+	// The agent's own environment, ws.Env included: the home its Codex,
+	// and the attach, used.
+	path, err := ConfigPath(h.env(ws))
 	if err != nil {
 		return err
 	}
@@ -98,8 +109,17 @@ func (h *Harness) ForgetWorkspace(ws *harness.Workspace) error {
 // otherwise. That narrows the window to the rename; it can't close it, as
 // Codex takes no lock on config.toml.
 func (f *TrustFile) Forget(dirs ...string) ([]string, error) {
+	// A config.toml kept in a dotfiles repo is a symlink: edit the file it
+	// points at, or the rename would replace the link with a copy.
+	path, err := filepath.EvalSymlinks(f.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	for range forgetAttempts {
-		orig, err := os.ReadFile(f.Path)
+		orig, err := os.ReadFile(path) // #nosec G304 -- the Codex config the caller named
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
@@ -113,7 +133,7 @@ func (f *TrustFile) Forget(dirs ...string) ([]string, error) {
 		if err := checkOnlyRemoved(orig, edited, removed); err != nil {
 			return nil, fmt.Errorf("codex: leaving %s alone: %w", f.Path, err)
 		}
-		replaced, err := f.replaceIfUnchanged(orig, edited)
+		replaced, err := f.replaceIfUnchanged(path, orig, edited)
 		if err != nil {
 			return nil, err
 		}
@@ -124,12 +144,12 @@ func (f *TrustFile) Forget(dirs ...string) ([]string, error) {
 	return nil, fmt.Errorf("codex: %s kept changing while trust entries were removed", f.Path)
 }
 
-func (f *TrustFile) replaceIfUnchanged(orig, edited []byte) (bool, error) {
-	info, err := os.Stat(f.Path)
+func (f *TrustFile) replaceIfUnchanged(path string, orig, edited []byte) (bool, error) {
+	info, err := os.Stat(path)
 	if err != nil {
 		return false, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(f.Path), ".config.toml.slop-bot-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.toml.slop-bot-*")
 	if err != nil {
 		return false, err
 	}
@@ -140,14 +160,14 @@ func (f *TrustFile) replaceIfUnchanged(orig, edited []byte) (bool, error) {
 	if f.beforeCheck != nil {
 		f.beforeCheck()
 	}
-	now, err := os.ReadFile(f.Path)
+	now, err := os.ReadFile(path) // #nosec G304 -- as above
 	if err != nil {
 		return false, err
 	}
 	if !bytes.Equal(now, orig) {
 		return false, nil
 	}
-	return true, os.Rename(tmp.Name(), f.Path)
+	return true, os.Rename(tmp.Name(), path)
 }
 
 // writeAll writes b to tmp with mode, durably, and closes it.
@@ -165,9 +185,9 @@ func writeAll(tmp *os.File, b []byte, mode os.FileMode) error {
 // projectHeader is a `[projects.<key>]` table header, as Codex writes them.
 var projectHeader = regexp.MustCompile(`^\s*\[\s*projects\s*\.\s*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)\s*\]\s*(?:#.*)?$`)
 
-// removeProjects cuts the tables of dirs out of src. A table runs from its
-// header to the next header; comment lines just before the next header are
-// left, as they likely describe it.
+// removeProjects cuts the tables of dirs out of src. A table is its header
+// and lines up to its last key, with the blank lines after it; comments
+// after its last key are the user's (notes, a commented-out table) and stay.
 func removeProjects(src []byte, dirs []string) ([]byte, []string) {
 	lines := strings.SplitAfter(string(src), "\n")
 	var out strings.Builder
@@ -183,15 +203,18 @@ func removeProjects(src []byte, dirs []string) ([]byte, []string) {
 		for end < len(lines) && !isHeader(lines[end]) {
 			end++
 		}
-		keep := end
-		for keep > i+1 && strings.HasPrefix(strings.TrimSpace(lines[keep-1]), "#") {
-			keep--
+		last := i
+		for j := i + 1; j < end; j++ {
+			if t := strings.TrimSpace(lines[j]); t != "" && !strings.HasPrefix(t, "#") {
+				last = j
+			}
 		}
-		for _, l := range lines[keep:end] {
-			out.WriteString(l)
+		cut := last + 1
+		for cut < end && strings.TrimSpace(lines[cut]) == "" {
+			cut++
 		}
 		removed = append(removed, dir)
-		i = end
+		i = cut
 	}
 	return []byte(out.String()), removed
 }

@@ -148,6 +148,11 @@ func (g *generator) resolve(n *node) *node {
 	return n
 }
 
+func isPlainString(n *node) bool {
+	types, _ := n.Type.nonNull()
+	return len(types) == 1 && types[0] == "string" && len(n.Enum) == 0
+}
+
 func isStringEnum(n *node) bool {
 	types, _ := n.Type.nonNull()
 	return len(n.Enum) > 0 && len(types) == 1 && types[0] == "string"
@@ -333,11 +338,17 @@ func (g *generator) fieldType(owner, ident string, f *field) (string, bool) {
 		return t, nullable || isNull
 	}
 	for s := range sigs {
-		if s != "string" {
+		if !stringish(s) {
 			return rawType, nullable
 		}
 	}
 	return "string", nullable
+}
+
+// stringish is a signature of some string: plain, an enum, or a named
+// string type.
+func stringish(sig string) bool {
+	return sig == "string" || strings.HasPrefix(sig, "enum:") || strings.HasPrefix(sig, "str:")
 }
 
 // signature names a schema's shape without declaring anything, so a
@@ -347,11 +358,15 @@ func (g *generator) signature(n *node) (string, bool) {
 	case n.boolean != nil:
 		return "raw", false
 	case n.Ref != "":
-		def := g.defs[refName(n.Ref)]
-		if def != nil && g.kindOf(def) == kindEnum {
-			return "string", false
+		name := refName(n.Ref)
+		def := g.defs[name]
+		switch {
+		case def != nil && g.kindOf(def) == kindEnum:
+			return "enum:" + name, false
+		case def != nil && g.kindOf(def) == kindAlias && isPlainString(def):
+			return "str:" + name, false
 		}
-		return "ref:" + refName(n.Ref), false
+		return "ref:" + name, false
 	case len(n.AllOf) == 1:
 		return g.signature(n.AllOf[0])
 	}

@@ -192,7 +192,7 @@ func newFixture(t *testing.T, opts *codecOptions) *fixture {
 	t.Helper()
 	if opts == nil {
 		ws := &harness.Workspace{Dir: "/ws", Permissive: true, Briefing: "brief", Effort: "low"}
-		opts = &codecOptions{effort: ws.Effort}
+		opts = &codecOptions{effort: ws.Effort, permissive: ws.Permissive}
 		opts.start, opts.resumeParams = threadParams(ws)
 	}
 	opts.logger = slog.New(slog.DiscardHandler)
@@ -392,6 +392,39 @@ func TestAFailedWriteAtATurnsEndKeepsItsEvents(t *testing.T) {
 	assert.Equal(t, harness.TurnInterrupted, got[len(got)-1].Outcome)
 }
 
+func TestAMessageAfterAnInterruptStartsTheNextTurn(t *testing.T) {
+	t.Parallel()
+	// "Stop, do this instead": steered into the turn being interrupted, the
+	// message would go down with it.
+	f := newFixture(t, nil)
+	f.open()
+	f.send("sleep")
+	pl := newPlayer(t, f.p, "turn_interrupted")
+	pl.decode(f.c, f.w, itemStarted(protocol.ThreadItemTypeCommandExecution))
+	require.NoError(t, f.c.Interrupt(context.Background(), f.w))
+	f.send("do this instead")
+	assert.NotContains(t, f.p.methods(), protocol.MethodTurnSteer)
+	pl.decode(f.c, f.w, method(protocol.MethodTurnCompleted))
+	var turn protocol.TurnStartParams
+	f.p.last(protocol.MethodTurnStart, &turn)
+	assert.Equal(t, "do this instead", turn.Input[0].Text)
+	assert.Equal(t, protocol.MethodTurnStart, f.p.methods()[len(f.p.sent)-1])
+}
+
+func TestAnInterruptForARefusedTurnStartIsDropped(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, nil)
+	f.open()
+	f.send("first")
+	require.NoError(t, f.c.Interrupt(context.Background(), f.w))
+	id := string(f.p.ids[protocol.MethodTurnStart])
+	_, err := f.c.Decode([]byte(`{"id":`+id+`,"error":{"code":-32600,"message":"bad input"}}`), f.w)
+	require.NoError(t, err)
+	f.send("second")
+	newPlayer(t, f.p, "turn_completed").decode(f.c, f.w, func([]byte) bool { return true })
+	assert.NotContains(t, f.p.methods(), protocol.MethodTurnInterrupt, "the next turn isn't the one interrupted")
+}
+
 func TestInterruptBeforeTheTurnIsNamedWaitsForIt(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, nil)
@@ -427,7 +460,7 @@ func TestALostInterruptRaceIsHarmless(t *testing.T) {
 
 func resumeOptions() *codecOptions {
 	ws := &harness.Workspace{Dir: "/ws", Permissive: true}
-	opts := &codecOptions{resume: thread}
+	opts := &codecOptions{resume: thread, permissive: ws.Permissive}
 	opts.start, opts.resumeParams = threadParams(ws)
 	opts.resumeParams.ThreadID = thread
 	return opts
@@ -498,6 +531,40 @@ func TestARefusedTurnStartIsAFailedTurn(t *testing.T) {
 	assert.Equal(t, protocol.MethodTurnStart, f.p.methods()[len(f.p.sent)-1], "idle again")
 }
 
+func TestCacheWritesAreCountedApartFromInput(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, nil)
+	f.open()
+	f.send("first")
+	newPlayer(t, f.p, "turn_completed").decode(f.c, f.w, method(protocol.MethodTurnStarted))
+	turnID := f.c.turnID
+	_, err := f.c.Decode([]byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"`+thread+`","turnId":"`+turnID+
+		`","tokenUsage":{"last":{"inputTokens":1000,"cachedInputTokens":600,"cacheWriteInputTokens":300,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":1005},`+
+		`"total":{"inputTokens":1000,"cachedInputTokens":600,"cacheWriteInputTokens":300,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":1005}}}}`), f.w)
+	require.NoError(t, err)
+	assert.Equal(t, &harness.Usage{InputTokens: 100, CacheReadTokens: 600, CacheWriteTokens: 300, OutputTokens: 5}, f.c.usage)
+}
+
+func TestSparseRateLimitUpdatesMerge(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, nil)
+	decode := func(limits string) []harness.Event {
+		evs, err := f.c.Decode([]byte(`{"method":"account/rateLimits/updated","params":{"rateLimits":`+limits+`}}`), f.w)
+		require.NoError(t, err)
+		return evs
+	}
+	evs := decode(`{"limitId":"codex","primary":{"usedPercent":90,"resetsAt":100},"secondary":{"usedPercent":10,"resetsAt":200}}`)
+	assert.InDelta(t, 90.0, evs[0].Limit.UsedPercent, 0.001)
+	// Only the weekly window: the 5-hour one is still at 90%.
+	evs = decode(`{"limitId":"codex","secondary":{"usedPercent":20,"resetsAt":200}}`)
+	assert.InDelta(t, 90.0, evs[0].Limit.UsedPercent, 0.001)
+	assert.Equal(t, time.Unix(100, 0).UTC(), evs[0].Limit.ResetsAt)
+	// Another limit's windows don't mix with the plan's.
+	evs = decode(`{"limitId":"other","primary":{"usedPercent":5}}`)
+	assert.InDelta(t, 5.0, evs[0].Limit.UsedPercent, 0.001)
+	assert.Empty(t, decode(`{"limitId":"empty"}`))
+}
+
 func TestOtherThreadsAreIgnored(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, nil)
@@ -534,6 +601,33 @@ func TestServerRequestsAreApproved(t *testing.T) {
 			assert.JSONEq(t, `"req-7"`, string(got.ID), "answered by the request's own id")
 			assert.Nil(t, got.Error)
 			assert.JSONEq(t, tc.result, string(got.Result))
+		})
+	}
+}
+
+func TestServerRequestsAreDeclinedWithoutPermissiveMode(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		protocol.MethodItemCommandExecutionRequestApproval: `{"decision":"decline"}`,
+		protocol.MethodItemFileChangeRequestApproval:       `{"decision":"decline"}`,
+		protocol.MethodApplyPatchApproval:                  `{"decision":{"denied":{"rejection":"` + rejection + `"}}}`,
+		protocol.MethodExecCommandApproval:                 `{"decision":{"denied":{"rejection":"` + rejection + `"}}}`,
+		protocol.MethodItemPermissionsRequestApproval:      `{"permissions":{},"scope":"turn"}`,
+		protocol.MethodMcpServerElicitationRequest:         `{"action":"decline"}`,
+		protocol.MethodItemToolRequestUserInput:            `{"answers":{}}`,
+	}
+	for m, result := range cases {
+		t.Run(m, func(t *testing.T) {
+			t.Parallel()
+			ws := &harness.Workspace{Dir: "/ws"}
+			opts := &codecOptions{}
+			opts.start, opts.resumeParams = threadParams(ws)
+			f := newFixture(t, opts)
+			_, err := f.c.Decode([]byte(`{"id":1,"method":"`+m+`","params":{"permissions":{"network":{"enabled":true}}}}`), f.w)
+			require.NoError(t, err)
+			got := f.p.sent[len(f.p.sent)-1]
+			assert.Nil(t, got.Error)
+			assert.JSONEq(t, result, string(got.Result), "a sandboxed agent is never escalated")
 		})
 	}
 }

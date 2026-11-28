@@ -49,6 +49,7 @@
         "type": "object"
       },
       "ReasoningEffort": {"minLength": 1, "type": "string"},
+      "OtherEnum": {"enum": ["a", "b"], "type": "string"},
       "SandboxMode": {"enum": ["read-only", "danger-full-access"], "type": "string"},
       "AskForApproval": {
         "oneOf": [
@@ -64,7 +65,7 @@
       "UserInput": {
         "oneOf": [
           {
-            "properties": {"type": {"enum": ["text"], "type": "string"}, "text": {"type": "string"}, "status": {"$ref": "#/definitions/v2/SandboxMode"}},
+            "properties": {"type": {"enum": ["text"], "type": "string"}, "text": {"type": "string"}, "status": {"$ref": "#/definitions/v2/SandboxMode"}, "phase": {"$ref": "#/definitions/v2/SandboxMode"}, "mode": {"$ref": "#/definitions/v2/SandboxMode"}},
             "required": ["type", "text"],
             "type": "object"
           },
@@ -73,12 +74,12 @@
               {"properties": {"url": {"type": "string"}}, "required": ["url"], "type": "object"},
               {"properties": {"fileId": {"type": "string"}}, "required": ["fileId"], "type": "object"}
             ],
-            "properties": {"type": {"enum": ["image"], "type": "string"}, "text": {"type": "string"}, "status": {"type": "string"}},
+            "properties": {"type": {"enum": ["image"], "type": "string"}, "text": {"type": "string"}, "status": {"type": "string"}, "phase": {"$ref": "#/definitions/v2/OtherEnum"}, "mode": {"$ref": "#/definitions/v2/OtherEnum"}},
             "required": ["type"],
             "type": "object"
           },
           {
-            "properties": {"type": {"enum": ["skill"], "type": "string"}, "status": {"type": "integer"}},
+            "properties": {"type": {"enum": ["skill"], "type": "string"}, "status": {"type": "integer"}, "phase": {"$ref": "#/definitions/v2/ReasoningEffort"}},
             "required": ["type"],
             "type": "object"
           }

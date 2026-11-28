@@ -106,7 +106,7 @@ func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harn
 		return nil, err
 	}
 	env := h.env(ws)
-	opts := &codecOptions{logger: h.Logger, version: h.version(), effort: ws.Effort}
+	opts := &codecOptions{logger: h.Logger, version: h.version(), effort: ws.Effort, permissive: ws.Permissive}
 	opts.start, opts.resumeParams = threadParams(ws)
 	if resume != nil {
 		opts.resume = resume.ID

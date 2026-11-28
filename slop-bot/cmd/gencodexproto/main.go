@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -109,7 +110,15 @@ func run(o *options) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(o.out, src, 0o600)
+	if err := os.WriteFile(o.out, src, 0o600); err != nil {
+		return err
+	}
+	// The repo marks generated files for review tools; the generator
+	// keeps that mark beside its output.
+	attrs := "# " + filepath.Base(o.out) + " is written by slop-bot/cmd/gencodexproto\n" +
+		"# (`go generate ./internal/harness/codex/protocol`).\n" +
+		filepath.Base(o.out) + " linguist-generated=true\n"
+	return os.WriteFile(filepath.Join(filepath.Dir(o.out), ".gitattributes"), []byte(attrs), 0o600)
 }
 
 func codexOutput(codex string, args ...string) (string, error) {
