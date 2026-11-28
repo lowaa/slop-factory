@@ -5,18 +5,22 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	osuser "os/user"
 	"time"
 
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
-	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/state"
+	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
+	"github.com/lowaa/slop-factory/slop-bot/internal/tickets/local"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
 )
 
@@ -40,6 +44,11 @@ type Daemon struct {
 	group     *lifecycle.Group
 	startedAt time.Time
 	ready     chan struct{}
+
+	// Set by their components' Start, before the socket serves.
+	state        *state.State
+	tickets      *local.System
+	ticketRoutes *ticketRoutes
 }
 
 // New builds a daemon; nothing starts until Run.
@@ -47,7 +56,12 @@ func New(opts *Options) (*Daemon, error) {
 	if opts == nil || opts.Config == nil || opts.Paths == nil || opts.Logger == nil || opts.Clock == nil {
 		return nil, errors.New("daemon: New needs Config, Paths, Logger and Clock")
 	}
+	user, err := userID(opts.Config)
+	if err != nil {
+		return nil, err
+	}
 	d := &Daemon{opts: opts, server: control.NewServer(opts.Logger), ready: make(chan struct{})}
+	d.ticketRoutes = &ticketRoutes{cfg: opts.Config, user: user}
 	d.routes()
 	var lock *instanceLock
 	var listener *control.Listener
@@ -62,13 +76,36 @@ func New(opts *Options) (*Daemon, error) {
 			StopFunc: func(context.Context) error { return lock.release() },
 		},
 		&lifecycle.Func{
+			N: "state.db",
+			StartFunc: func(ctx context.Context) error {
+				var err error
+				d.state, err = state.Open(ctx, &state.Options{Path: opts.Paths.StateDB(), Logger: opts.Logger, Clock: opts.Clock})
+				return err
+			},
+			StopFunc: func(context.Context) error { return d.state.Close() },
+		},
+		&lifecycle.Func{
+			N: "local tickets",
+			StartFunc: func(ctx context.Context) error {
+				var err error
+				d.tickets, err = local.Open(ctx, &local.Options{
+					Path:   opts.Paths.TicketsDB(),
+					Config: tickets.Config{AgentsMaySetUrgent: *opts.Config.AgentsMaySetUrgent},
+					Logger: opts.Logger, Clock: opts.Clock,
+				})
+				d.ticketRoutes.sys = d.tickets
+				return err
+			},
+			StopFunc: func(context.Context) error { return d.tickets.Close() },
+		},
+		&lifecycle.Func{
 			N: "control socket",
 			StartFunc: func(context.Context) error {
 				var err error
 				if listener, err = control.Listen(opts.Paths.Socket(), opts.Logger); err != nil {
 					return err
 				}
-				d.server.Start(listener, noAgents{})
+				d.server.Start(listener, d.state.Agents)
 				return nil
 			},
 			// Stopping the server closes the listener, which removes the
@@ -98,6 +135,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 func (d *Daemon) Ready() <-chan struct{} { return d.ready }
 
 func (d *Daemon) routes() {
+	d.ticketRoutes.register(d.server)
 	d.server.HandleFunc("GET "+api.PathHealth, func(w http.ResponseWriter, _ *http.Request) {
 		control.WriteJSON(w, http.StatusOK, api.Health{
 			Version:   version.String(),
@@ -108,10 +146,14 @@ func (d *Daemon) routes() {
 	})
 }
 
-// noAgents resolves no tokens. It stands in until state.db's agent store is
-// wired, so every token is refused rather than trusted.
-type noAgents struct{}
-
-func (noAgents) AgentForTokenHash(context.Context, string) (ident.Principal, error) {
-	return ident.Principal{}, control.ErrUnknownToken
+// userID is who this slop-bot runs for: the config's user, or the OS user.
+func userID(cfg *config.Config) (tickets.UserID, error) {
+	if cfg.User != "" {
+		return tickets.UserID(cfg.User), nil
+	}
+	u, err := osuser.Current()
+	if err != nil {
+		return "", fmt.Errorf("daemon: no user configured and the OS user is unknown: %w", err)
+	}
+	return tickets.UserID(u.Username), nil
 }

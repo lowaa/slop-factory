@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,6 +20,8 @@ type harness struct {
 	deps          *Deps
 	out, err      *bytes.Buffer
 	home, runtime string
+	// config is a slop-bot-config.yaml under home naming a fixed user.
+	config string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -27,7 +30,9 @@ func newHarness(t *testing.T) *harness {
 	rt, err := os.MkdirTemp("", "sbcli")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(rt) })
-	h := &harness{out: &bytes.Buffer{}, err: &bytes.Buffer{}, home: home, runtime: rt}
+	h := &harness{out: &bytes.Buffer{}, err: &bytes.Buffer{}, home: home, runtime: rt,
+		config: filepath.Join(home, "slop-bot-config.yaml")}
+	require.NoError(t, os.WriteFile(h.config, []byte("user: ada\nharnesses: {claude-code: {}, pi: {}}\n"), 0o600))
 	vars := map[string]string{"XDG_RUNTIME_DIR": rt}
 	h.deps = &Deps{
 		Stdout: h.out, Stderr: h.err,
@@ -89,24 +94,40 @@ func TestHealthWithoutADaemonNamesTheSocket(t *testing.T) {
 	assert.Contains(t, h.err.String(), "can't reach the slop-bot daemon at "+filepath.Join(h.runtime, "slop-bot", "slop-bot.sock"))
 }
 
+// startDaemon runs `slop-bot daemon` in-process with h's environment, and
+// returns once it serves. The returned stop waits for it to exit cleanly.
+func startDaemon(t *testing.T, h *harness) (stop func()) {
+	t.Helper()
+	ready := make(chan *daemon.Daemon, 1)
+	daemonDeps := *h.deps
+	daemonDeps.daemonBuilt = func(d *daemon.Daemon) { ready <- d }
+	daemonDeps.Stdout, daemonDeps.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() { done <- Execute(ctx, &daemonDeps, []string{"--config", h.config, "daemon"}) }()
+	select {
+	case d := <-ready:
+		<-d.Ready()
+	case code := <-done:
+		require.Failf(t, "daemon exited", "code %d: %s", code, daemonDeps.Stderr)
+	}
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			cancel()
+			assert.Equal(t, 0, <-done)
+		})
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
 func TestHealthAgainstARunningDaemon(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	ready := make(chan *daemon.Daemon, 1)
-	h.deps.daemonBuilt = func(d *daemon.Daemon) { ready <- d }
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan int, 1)
-	daemonDeps := *h.deps
-	daemonDeps.Stdout, daemonDeps.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
-	go func() { done <- Execute(ctx, &daemonDeps, []string{"daemon"}) }()
-	d := <-ready
-	<-d.Ready()
-
+	startDaemon(t, h)
 	require.Equal(t, 0, h.run(t, "health"), h.err.String())
 	assert.True(t, strings.HasPrefix(h.out.String(), "daemon dev running"), h.out.String())
-
-	cancel()
-	assert.Equal(t, 0, <-done)
 }
 
 func TestUnknownCommandFails(t *testing.T) {

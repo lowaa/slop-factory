@@ -79,6 +79,7 @@ func New(deps *Deps) *cobra.Command {
 		a.daemonCmd(),
 		a.healthCmd(),
 		a.serviceCmd(),
+		a.ticketCmd(),
 	)
 	return root
 }
