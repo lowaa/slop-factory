@@ -6,6 +6,7 @@ internal/control/server.go Server.Handle #36
 internal/daemon/daemon.go Daemon.Ready #36
 internal/doctor/doctortest/ package #36
 internal/gitx/gitxtest/ package #36
+internal/harness/agy/ package #36
 internal/harness/conformance/ package #36
 internal/harness/conformance/scripted/ package #36
 internal/harness/fake/codec.go codec.Decode #36
@@ -64,6 +65,9 @@ internal/harness/tuidriver/conversation.go Conversation.Ref #36
 internal/harness/tuidriver/conversation.go Conversation.Send #36
 internal/harness/tuidriver/conversation.go Conversation.Stop #36
 internal/harness/tuidriver/conversation.go Start #36
+internal/harness/tuidriver/sessions.go SessionName #36
+internal/harness/tuidriver/sessions.go Sessions.AdoptAll #36
+internal/harness/tuidriver/sessions.go Sessions.Options #36
 internal/scriptedmodel/server.go Server.Append #36
 internal/service/servicetest/ package #36
 internal/sqlitex/sqlitextest/ package #36
