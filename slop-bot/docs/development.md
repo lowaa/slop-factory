@@ -66,19 +66,23 @@ All run from `slop-bot/`. CI runs `test.sh` and `quality.sh`, and
 
 ### Tier 2
 
-Tier 2 runs real Claude Code, Codex and pi binaries, with the scripted model
-answering for the model: no credential, no tokens, no network. The tests are
-opt-in (`SLOP_BOT_TIER2=1`), so `test.sh` skips them.
+Tier 2 runs real Claude Code, Codex, pi and agy binaries, with the scripted
+model answering for the model: no credential and no tokens. In Docker there is
+no network either; natively, agy still posts its telemetry to Google (no switch
+for it was found), though never a model request. The tests are opt-in
+(`SLOP_BOT_TIER2=1`), so `test.sh` skips them.
 
 | Invocation | What |
 | --- | --- |
 | `./tier2.sh [go test args]` | in Docker, each harness at its pin in `tier2/harness_versions.env`, source baked into the image, `--network none` |
 | `ATTACH=1 ./tier2.sh` | a shell in that image, offline, with `slop-bot` and `go-clock` mounted, for iterating |
-| `NATIVE=1 ./tier2.sh [args]` | on this machine with the harnesses installed (a missing one skips); each gets a temp config dir, so yours are untouched |
+| `NATIVE=1 ./tier2.sh [args]` | on this machine with the harnesses installed (a missing one skips); each gets a temp config dir or `HOME`, so yours are untouched |
 | `HARNESS_LATEST=1 ./tier2.sh` | each harness at its latest release instead of the pin |
 
 To bump a harness, edit its line in `tier2/harness_versions.env`, run
-`tier2.sh`, and commit the pin with whatever the new release changed.
+`tier2.sh`, and commit the pin with whatever the new release changed. agy's
+pin is four lines, bumped together: its version, the release in its download
+URL, and the two SHA-512s, all from its release manifests (see the file).
 `doctor`'s tested version ranges are in `internal/doctor/versions.go`; widen
 one only after the live and scripted tests pass on the new version.
 

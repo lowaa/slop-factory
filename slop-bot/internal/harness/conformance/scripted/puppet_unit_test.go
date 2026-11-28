@@ -265,25 +265,68 @@ func TestBriefingIsCheckedOnEveryConversationRequest(t *testing.T) {
 type fakeHarness struct {
 	harness.AIHarness
 	err error
+	// boot runs in Start, before it returns: a harness's own first turn.
+	boot func()
+	// last is the conversation Start made last.
+	last *fakeConversation
 }
 
 func (f *fakeHarness) Start(_ context.Context, _ *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+	if f.boot != nil {
+		f.boot()
+	}
 	id := "fresh"
 	if resume != nil {
 		id = resume.ID
 	}
-	return &fakeConversation{ref: harness.ConversationRef{ID: id}}, nil
+	f.last = &fakeConversation{ref: harness.ConversationRef{ID: id}}
+	return f.last, nil
 }
 
 type fakeConversation struct {
 	harness.Conversation
-	ref harness.ConversationRef
+	ref     harness.ConversationRef
+	stopped bool
 }
 
 func (c *fakeConversation) Ref() harness.ConversationRef { return c.ref }
+
+func (c *fakeConversation) Stop(context.Context, bool) error {
+	c.stopped = true
+	return nil
+}
+
+// A boot reply is the answer to the harness's own first turn, and a start
+// that never asked for it (agy without a sign-in it can use, whose boot
+// turn fails and still ends) is not a start on the scripted model.
+func TestABootReplyMustBePlayedByTheStart(t *testing.T) {
+	t.Parallel()
+	server, err := scriptedmodel.New(nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = server.Close() })
+	p, err := New(t, &Options{Server: server, Shell: &Shell{Tool: "Bash"}, BootReply: "ready"})
+	require.NoError(t, err)
+
+	booted := p.Harness(&fakeHarness{boot: func() {
+		assert.Contains(t, postMessages(t, p, userText("start up")), "ready")
+	}})
+	_, err = booted.Start(t.Context(), &harness.Workspace{}, nil)
+	require.NoError(t, err)
+	assert.Zero(t, p.server.Remaining())
+
+	plain := &fakeHarness{}
+	unbooted := p.Harness(plain)
+	_, err = unbooted.Start(t.Context(), &harness.Workspace{}, &harness.ConversationRef{ID: "c1"})
+	require.NoError(t, err, "a resume runs no boot turn, and none is scripted")
+	assert.Zero(t, p.server.Remaining())
+	_, err = unbooted.Start(t.Context(), &harness.Workspace{}, nil)
+	require.ErrorContains(t, err, "boot turn")
+	assert.True(t, plain.last.stopped, "the harness isn't left running")
+	p.server.Reset() // the unplayed boot reply is the point, not a leftover
+}
 
 func TestStartedReturnsTheLaunchedConversation(t *testing.T) {
 	t.Parallel()

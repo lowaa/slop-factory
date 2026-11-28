@@ -104,6 +104,7 @@ func (h *Harness) command(ws *harness.Workspace, resume *harness.ConversationRef
 	if err := writeBriefing(side, briefing); err != nil {
 		return nil, err
 	}
+	env := agentproc.WorkspaceEnv(h.Environ, ws, nil)
 	args := []string{}
 	if ws.Permissive {
 		args = append(args, "--dangerously-skip-permissions")
@@ -111,11 +112,18 @@ func (h *Harness) command(ws *harness.Workspace, resume *harness.ConversationRef
 	// A new folder's trust prompt blocks the TUI, --dangerously-skip-
 	// permissions or not; trusting it here skips it without writing it to
 	// agy's settings.json.
-	settings, err := json.Marshal(map[string]any{"trustedWorkspaces": append(append([]string{ws.Dir}, ws.ExtraDirs...), side)})
+	settings := map[string]any{"trustedWorkspaces": append(append([]string{ws.Dir}, ws.ExtraDirs...), side)}
+	if HasAPIKey(env) {
+		// agy ignores GEMINI_API_KEY unless modelProvider is gemini, which
+		// its docs set in settings.json. Set here, it holds for this
+		// session alone, so the user's own agy keeps its Google sign-in.
+		settings["modelProvider"] = apiKeyProvider
+	}
+	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
 		return nil, err
 	}
-	args = append(args, "--settings", string(settings), "--add-dir", side)
+	args = append(args, "--settings", string(settingsJSON), "--add-dir", side)
 	for _, d := range ws.ExtraDirs {
 		args = append(args, "--add-dir", d)
 	}
@@ -130,7 +138,39 @@ func (h *Harness) command(ws *harness.Workspace, resume *harness.ConversationRef
 	} else {
 		args = append(args, "--prompt-interactive", bootPrompt)
 	}
-	return &harness.LaunchSpec{Path: bin, Args: args, Env: agentproc.WorkspaceEnv(h.Environ, ws, nil), Dir: ws.Dir}, nil
+	return &harness.LaunchSpec{Path: bin, Args: args, Env: env, Dir: ws.Dir}, nil
+}
+
+// apiKeyVar is the one variable agy reads a Gemini API key from (its install
+// docs: not GOOGLE_API_KEY, nor a .env file).
+const apiKeyVar = "GEMINI_API_KEY" // #nosec G101 -- a variable's name, not a credential
+
+// apiKeyProvider is the modelProvider that runs agy on apiKeyVar, the only
+// value agy takes.
+const apiKeyProvider = "gemini"
+
+// SubcommandArgs are the arguments for an agy subcommand (`agy models`, say)
+// run with env as a session would be: in API-key mode under the same
+// session-only modelProvider, so a probe checks the key the agents will use,
+// not the Google sign-in.
+func SubcommandArgs(env []string, args ...string) []string {
+	if !HasAPIKey(env) {
+		return args
+	}
+	return append([]string{"--settings", `{"modelProvider":"` + apiKeyProvider + `"}`}, args...)
+}
+
+// HasAPIKey says the agent's environment carries a Gemini API key, which it
+// does only when the workspace opted in (agentproc drops it otherwise). An
+// empty one doesn't count: agy refuses to start with modelProvider gemini
+// and no key.
+func HasAPIKey(env []string) bool {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, apiKeyVar+"="); ok && v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // sidecar is the session's own folder, added to agy's workspace with

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -204,6 +205,38 @@ func TestCommand(t *testing.T) {
 	ws.Effort = "extreme"
 	_, err = h.command(ws, nil)
 	assert.ErrorContains(t, err, "effort")
+}
+
+// API-key mode: agy reads GEMINI_API_KEY only under modelProvider gemini, so
+// an opted-in key sets it for the session, and nothing else does.
+func TestAnOptedInAPIKeySetsTheModelProvider(t *testing.T) {
+	t.Parallel()
+	ws := workspace(t)
+	side := ws.Dir + ".slop-bot-agy"
+	trusted := `"trustedWorkspaces":["` + ws.Dir + `","` + side + `"]`
+	for name, tc := range map[string]struct {
+		env      []string
+		optIn    bool
+		settings string
+	}{
+		"opted in":               {env: []string{"GEMINI_API_KEY=k"}, optIn: true, settings: `{"modelProvider":"gemini",` + trusted + `}`},
+		"not opted in":           {env: []string{"GEMINI_API_KEY=k"}, settings: `{` + trusted + `}`},
+		"opted in, but no key":   {optIn: true, settings: `{` + trusted + `}`},
+		"opted in, an empty key": {env: []string{"GEMINI_API_KEY="}, optIn: true, settings: `{` + trusted + `}`},
+		"another key variable":   {env: []string{"GOOGLE_API_KEY=k"}, optIn: true, settings: `{` + trusted + `}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := &Harness{Binary: "/bin/agy", Environ: func() []string { return append([]string{"HOME=/home/u"}, tc.env...) }}
+			w := *ws
+			w.APIKeyOptIn = tc.optIn
+			spec, err := h.command(&w, nil)
+			require.NoError(t, err)
+			at := slices.Index(spec.Args, "--settings")
+			require.Positive(t, at)
+			assert.Equal(t, tc.settings, spec.Args[at+1])
+		})
+	}
 }
 
 // agy works in the first of its folders in sorted order (probed with

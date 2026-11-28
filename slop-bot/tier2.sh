@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs tier 2: the real harness CLIs (Claude Code, Codex, pi) driven through
+# Runs tier 2: the real harness CLIs (Claude Code, Codex, pi, agy) driven through
 # slop-bot's adapters against the scripted model, which answers for the
 # model, so no credential is used and no token spent. The tests are opt-in
 # (SLOP_BOT_TIER2=1), so test.sh doesn't run them.
@@ -45,8 +45,9 @@ if [[ "${HARNESS_LATEST:-0}" == "1" ]]; then
   CLAUDE_CODE_VERSION=latest
   CODEX_VERSION=latest
   PI_VERSION=latest
-  # "latest" is the same build arg every time, so a cached npm install
-  # layer would be reused as if it were still the latest release.
+  AGY_VERSION=latest
+  # "latest" is the same build arg every time, so a cached install layer
+  # would be reused as if it were still the latest release.
   BUILD_ARGS+=(--no-cache --pull)
 fi
 
@@ -72,6 +73,10 @@ build() {
       --build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}" \
       --build-arg "CODEX_VERSION=${CODEX_VERSION}" \
       --build-arg "PI_VERSION=${PI_VERSION}" \
+      --build-arg "AGY_VERSION=${AGY_VERSION}" \
+      --build-arg "AGY_RELEASE=${AGY_RELEASE}" \
+      --build-arg "AGY_SHA512_AMD64=${AGY_SHA512_AMD64}" \
+      --build-arg "AGY_SHA512_ARM64=${AGY_SHA512_ARM64}" \
       -f slop-bot/tier2/Dockerfile . && return 0
     echo "tier2.sh: build failed (attempt ${attempt}/3)" >&2
     sleep $((attempt * 10))

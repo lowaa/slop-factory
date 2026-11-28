@@ -296,7 +296,8 @@ and the risk is accepted**. It stops mistakes, not malice.
   shell can get round it. See [merge_guard.md](merge_guard.md).
 - `agy` runs on a Google sign-in whose consumer terms may forbid driving it
   from another program. `doctor` says so once; whether to proceed is your
-  call.
+  call. With `api_key_opt_in` and a `GEMINI_API_KEY`, agents run agy on the
+  key instead (billed per token), set for their sessions only.
 
 Run slop-bot only against repos and on machines where an agent running as
 you is an acceptable risk.
