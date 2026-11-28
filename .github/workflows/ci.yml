@@ -126,6 +126,57 @@ jobs:
           go: "true"
       - run: slop-bot/quality.sh
 
+  # slop-bot's tier 1 in a container with git, tmux and a second uid
+  # (tier1/Dockerfile): a clean Linux, unprivileged and offline, unlike the
+  # runner test.sh runs on.
+  slop-bot-tier1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: slop-bot/tier1.sh
+
+  # slop-bot on a Mac, advisory (plan 10.2): the peer-credential check
+  # (LOCAL_PEERCRED), launchd, the $TMPDIR socket path limit and the BSD tools
+  # only run for real here. continue-on-error keeps a red run from blocking a
+  # merge, so the result is in the job summary rather than the check's colour.
+  # No lint: test.sh's linters run in Docker, which these runners lack, and
+  # the ubuntu job covers them.
+  slop-bot-macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+      # tmux for the session host's tests; bash because /bin/bash is 3.2.
+      - run: brew install tmux bash
+      - name: Build and vet
+        working-directory: slop-bot
+        run: go build ./... && go vet ./...
+      - name: Test
+        working-directory: slop-bot
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          go test -race -count=1 ./... 2>&1 | tee "${RUNNER_TEMP}/slop_bot_macos.log" || status=$?
+          {
+            echo "### slop-bot on macOS (advisory): $([[ ${status} == 0 ]] && echo passed || echo FAILED)"
+            if [[ ${status} != 0 ]]; then
+              echo '```'
+              grep -E '^(--- FAIL|FAIL|panic)' "${RUNNER_TEMP}/slop_bot_macos.log" | head -50
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
+
   dev-tools-quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20

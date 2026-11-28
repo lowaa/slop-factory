@@ -63,12 +63,14 @@ the user is told. slop-bot then resumes it by its conversation id, up to 3
 times in a row. The count resets only when a turn completes: a failed turn
 doesn't reset it. Past 3, or when a resume fails, the agent is `released`
 and its worktrees are cleaned up (any holding work are kept, and the user
-is told). A `preparing` or `open` ticket is then parked as `misconfigured`,
+is told; `slop-bot worktrees` lists them, and `worktrees clean` removes them). A `preparing` or `open` ticket is then parked as `misconfigured`,
 so a new agent isn't started into the same failure. A harness that fails to
 start is treated the same way. `slop-bot ticket set <id> --status preparing`
 puts a parked ticket back in line. On a daemon restart, live agents are
 resumed by their conversation id, except those parked to free a process
-(see [slots](#slots)), which wait for work.
+(see [slots](#slots)), which wait for work; a TUI agent's (agy's) session outlives the
+daemon instead, and is taken back as it runs. `slop-bot uninstall` ends
+those sessions.
 
 ## Declarations, nudges and stalls
 
@@ -132,7 +134,10 @@ Two limits bound how many agents run. Both are counted per daemon.
   its state, and its messages queue as usual. The first message for it, or a
   change to its ticket it must hear of (its blockers, a new repo), queues it
   for a slot, and it is resumed by its conversation id when it gets one,
-  parking another if need be. A restart leaves a parked agent parked. An
+  parking another if need be. A restart leaves a parked agent parked.
+  `slop-bot status` shows it as `<state> (parked)` (`parked_at` in
+  `--json`). A TUI session is never parked while a person is in it, or once
+  joined, or adopted after a restart: stopping it would end their session. An
   agent in a turn, starting, attached, finishing, `stalled`, or with a
   message waiting for a slot is parked only for a parked agent ahead of it
   in the queue (it keeps its place). When no agent can be parked, the start
@@ -168,6 +173,14 @@ pick them up: `preparing`, then the work.
 
 ## Attach and hand-back
 
+A TUI harness (agy) is **joined** rather than handed over: `attach` runs
+`tmux attach` on the agent's own session, which runs on. Messages are held
+while you're in it, your turns leave the agent `attached`, and detaching
+(`Ctrl-b d`, or `slop-bot detach`) hands it back with the held messages.
+Quitting agy ends the session, and the hand-back resumes the conversation.
+`--no-resume` isn't available for a joined session. The rest of this
+section is the hand-over, for the other harnesses.
+
 `slop-bot attach <agent|ticket>` lets a person take over an agent's session.
 It stops the programmatic session at the end of the agent's turn (with
 `--now`, it interrupts the turn instead of waiting), then runs the harness's
@@ -194,8 +207,8 @@ fresh agent token, so `ask` and `done` work from inside it.
   the attach, the agent just ends.
 - `--no-resume` releases the agent to you: it is `released`, nothing
   resumes it, and the ticket stays assigned, but no new agent is
-  started for it. The merge guard still applies in the TUI
-  ([merge_guard.md](merge_guard.md)).
+  started for it. The merge guard still applies in the TUI, except Codex's,
+  which runs with approvals bypassed ([merge_guard.md](merge_guard.md)).
 
 Only harnesses with a TUI to hand over to can be attached.
 
@@ -296,15 +309,17 @@ and the risk is accepted**. It stops mistakes, not malice.
   (unless `api_key_opt_in`), Claude Code's parent-session variables (not
   `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*` or `CLAUDE_CODE_SKIP_*_AUTH`),
   and other agents' tokens.
-- The merge flag is policy in the briefing, backed where a harness has a
-  pre-tool hook by a guard that refuses obvious merges (`gh pr merge`, a
-  push to the default branch) on a ticket without `AutoMerge` until you
-  run `slop-bot tell <agent> --merge`. Claude Code and pi have the guard.
-  Codex doesn't. The guard is advisory: an agent with a shell can get round
-  it. See [merge_guard.md](merge_guard.md).
+- The merge flag is policy in the briefing, backed by a guard that refuses
+  obvious merges (`gh pr merge`, a push to the default branch) on a ticket
+  without `AutoMerge` until you run `slop-bot tell <agent> --merge`. Claude
+  Code, pi and agy have the guard through a pre-tool hook. Codex has it
+  through its command approvals, but only in permissive mode (the default),
+  and not in the TUI after `attach`. The guard is advisory: an agent with a
+  shell can get round it. See [merge_guard.md](merge_guard.md).
 - `agy` runs on a Google sign-in whose consumer terms may forbid driving it
   from another program. `doctor` says so once; whether to proceed is your
-  call.
+  call. With `api_key_opt_in` and a `GEMINI_API_KEY`, agents run agy on the
+  key instead (billed per token), set for their sessions only.
 
 Run slop-bot only against repos and on machines where an agent running as
 you is an acceptable risk.

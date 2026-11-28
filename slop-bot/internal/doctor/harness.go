@@ -10,6 +10,7 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agentproc"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agy"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 )
@@ -388,11 +389,12 @@ func parsePiModels(out string) []string {
 	return ids
 }
 
-// agyModels runs `agy models`, which fetches the list the signed-in
+// agyModels runs `agy models` as an agent's session would (with an opted-in
+// key, in API-key mode), which fetches the list the signed-in
 // account (or API key) is served: it proves the login without a model
 // request.
 func agyModels(ctx context.Context, h *harnessCheck) ([]string, error) {
-	res, err := h.run(ctx, "models")
+	res, err := h.run(ctx, agy.SubcommandArgs(h.env(), "models")...)
 	if err != nil || res.ExitCode != 0 {
 		return nil, errors.New(errText(err, res))
 	}

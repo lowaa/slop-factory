@@ -110,7 +110,8 @@ func (f *fixture) repo(name string) string {
 	f.t.Helper()
 	dir := filepath.Join(f.home, "src", name)
 	require.NoError(f.t, os.MkdirAll(dir, 0o700))
-	f.cmds.Answer("git -C "+dir+" rev-parse --git-dir", &service.Result{Stdout: ".git\n"})
+	f.cmds.Answer("git -C "+dir+" rev-parse --is-bare-repository", &service.Result{Stdout: "false\n"})
+	f.cmds.Answer("git -C "+dir+" rev-parse --show-toplevel", &service.Result{Stdout: dir + "\n"})
 	return dir
 }
 

@@ -9,29 +9,66 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex/protocol"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
 func TestThreadParams(t *testing.T) {
 	t.Parallel()
-	start, resume := threadParams(&harness.Workspace{Dir: "/ws", Permissive: true, Model: "gpt-x", Briefing: "brief"})
-	for _, p := range []struct {
-		cwd, model, brief string
-		approval          any
-		sandbox           protocol.SandboxMode
+	ws := &harness.Workspace{Dir: "/ws", Permissive: true, Model: "gpt-x", Briefing: "brief"}
+	for _, tc := range []struct {
+		guarded  bool
+		approval any
+		reviewer protocol.ApprovalsReviewer
 	}{
-		{start.Cwd, start.Model, start.DeveloperInstructions, start.ApprovalPolicy, start.Sandbox},
-		{resume.Cwd, resume.Model, resume.DeveloperInstructions, resume.ApprovalPolicy, resume.Sandbox},
+		{false, protocol.AskForApprovalNever, ""},
+		{true, protocol.AskForApprovalUntrusted, protocol.ApprovalsReviewerUser},
 	} {
-		assert.Equal(t, "/ws", p.cwd)
-		assert.Equal(t, "gpt-x", p.model)
-		assert.Equal(t, "brief", p.brief)
-		assert.Equal(t, protocol.AskForApprovalNever, p.approval)
-		assert.Equal(t, protocol.SandboxModeDangerFullAccess, p.sandbox)
+		start, resume := threadParams(ws, tc.guarded)
+		for _, p := range []struct {
+			cwd, model, brief string
+			approval          any
+			reviewer          protocol.ApprovalsReviewer
+			sandbox           protocol.SandboxMode
+		}{
+			{start.Cwd, start.Model, start.DeveloperInstructions, start.ApprovalPolicy, start.ApprovalsReviewer, start.Sandbox},
+			{resume.Cwd, resume.Model, resume.DeveloperInstructions, resume.ApprovalPolicy, resume.ApprovalsReviewer, resume.Sandbox},
+		} {
+			assert.Equal(t, "/ws", p.cwd)
+			assert.Equal(t, "gpt-x", p.model)
+			assert.Equal(t, "brief", p.brief)
+			assert.Equal(t, tc.approval, p.approval, "guarded: %v", tc.guarded)
+			assert.Equal(t, tc.reviewer, p.reviewer, "guarded: %v", tc.guarded)
+			assert.Equal(t, protocol.SandboxModeDangerFullAccess, p.sandbox)
+		}
 	}
 
-	start, _ = threadParams(&harness.Workspace{Dir: "/ws"})
-	assert.Equal(t, protocol.AskForApprovalNever, start.ApprovalPolicy, "nobody to answer an approval, permissive or not")
-	assert.Empty(t, start.Sandbox, "the user's configured sandbox")
+	for _, guarded := range []bool{false, true} {
+		start, _ := threadParams(&harness.Workspace{Dir: "/ws"}, guarded)
+		assert.Equal(t, protocol.AskForApprovalNever, start.ApprovalPolicy,
+			"a sandboxed agent is never asked about: an approved command would run outside the sandbox")
+		assert.Empty(t, start.ApprovalsReviewer)
+		assert.Empty(t, start.Sandbox, "the user's configured sandbox")
+	}
+}
+
+// TestOnlyAPermissiveAgentIsGuarded checks the guard reaches the codec
+// with the agent's own principal, and only for a permissive agent.
+func TestOnlyAPermissiveAgentIsGuarded(t *testing.T) {
+	t.Parallel()
+	g := &fakeGuard{}
+	h := &Harness{Guard: g}
+	opts := h.codecOptions(&harness.Workspace{Agent: "a1", Ticket: "7", Permissive: true}, nil)
+	assert.Same(t, g, opts.guard)
+	assert.Equal(t, ident.AgentPrincipal("a1", "7"), opts.by)
+	assert.Equal(t, protocol.AskForApprovalUntrusted, opts.start.ApprovalPolicy)
+
+	opts = h.codecOptions(&harness.Workspace{Agent: "a1", Ticket: "7"}, nil)
+	assert.Nil(t, opts.guard)
+	assert.Equal(t, protocol.AskForApprovalNever, opts.start.ApprovalPolicy)
+
+	opts = (&Harness{}).codecOptions(&harness.Workspace{Permissive: true}, nil)
+	assert.Nil(t, opts.guard)
+	assert.Equal(t, protocol.AskForApprovalNever, opts.start.ApprovalPolicy)
 }
 
 func TestCommonFlags(t *testing.T) {

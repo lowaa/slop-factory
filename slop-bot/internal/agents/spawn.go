@@ -69,7 +69,7 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 				// run: the next start tries again.
 				return fmt.Errorf("agents: creating worktrees for ticket %s: %w", t.ID, err)
 			}
-			return m.misconfigure(ctx, t, fmt.Errorf("creating worktrees: %w", err))
+			return m.misconfigure(ctx, t, fmt.Errorf("creating worktrees: %w%s", err, brokenHint(t.ID, err)))
 		}
 	}
 	if _, err := m.opts.State.Agents.Create(ctx, &state.NewAgent{
@@ -96,7 +96,7 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool,
 		started: &started{conv: conv, caps: h.Capabilities(), dir: ws.Dir}, st: state.StateStarting})
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
-	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: kickoff(t)}); err != nil {
+	if err := m.kickOff(ctx, r, t); err != nil {
 		m.abortStart(ctx, r, t, err)
 		return err
 	}
@@ -104,6 +104,26 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 	// open ticket's work starts now: no event may come to say so.
 	m.sync(ctx, t.ID)
 	return nil
+}
+
+// kickOff gives a new agent its ticket. It goes through the inbox like any
+// message, so a TUI agent that is pointed there finds it; and it is sent
+// at once, on the slot the start holds. A person already in the agent's
+// TUI session holds it, as any message, for the next delivery.
+func (m *Manager) kickOff(ctx context.Context, r *runner, t *tickets.Ticket) error {
+	r.deliverMu.Lock()
+	defer r.deliverMu.Unlock()
+	kick, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{
+		From: state.UserParty, To: state.AgentParty(r.id), Kind: state.KindSystem, Body: kickoff(t),
+	})
+	if err != nil {
+		return err
+	}
+	err = m.send(ctx, r, []state.Message{*kick}, state.DeliveryTurn)
+	if err != nil && m.heldInSession(ctx, r, err) {
+		return nil
+	}
+	return err
 }
 
 // misconfigure parks a ticket whose spec can't run, and tells the user how
@@ -160,6 +180,12 @@ func (m *Manager) abortStart(ctx context.Context, r *runner, t *tickets.Ticket, 
 func (m *Manager) recover(ctx context.Context, id ident.AgentID) {
 	a, err := m.opts.State.Agents.Get(ctx, id)
 	if err != nil || a.EndedAt != nil {
+		return
+	}
+	// A recovery that waited for another start (recoverAfter) can find that
+	// start already runs the agent again: a second harness on the same
+	// conversation would be a second agent.
+	if _, running := m.runner(id); running {
 		return
 	}
 	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
@@ -437,6 +463,20 @@ func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
 			m.opts.Logger.Warn("agents: recording an attach", "agent", a.ID, "err", err)
 		}
 	}
+	// A person joined to a TUI session that outlived the daemon: the
+	// session is taken back as it runs, still attached.
+	if s, ok, err := m.adoptSession(ctx, a); err != nil {
+		// Left with nothing running, as an attach without a session is:
+		// the hand-back resumes it, or says why it can't.
+		m.opts.Logger.Warn("agents: adopting an attached agent's session", "agent", a.ID, "err", err)
+	} else if ok {
+		r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s,
+			st: state.StateAttached, decl: declared(a.Declared), summary: a.DeclaredSummary})
+		r.mu.Lock()
+		r.joinable = true
+		r.mu.Unlock()
+		return
+	}
 	r := &runner{m: m, id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, st: state.StateAttached,
 		decl: declared(a.Declared), summary: a.DeclaredSummary, exited: make(chan struct{})}
 	close(r.exited)
@@ -457,16 +497,31 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error
 		}
 		a.State = state.StateStarting
 	}
-	s, err := m.startConversation(ctx, a)
+	// A session that outlived the daemon is taken back as it is: its turn
+	// wasn't cut short, but whatever it told slop-bot meanwhile was lost.
+	s, adopted, err := m.adoptSession(ctx, a)
 	if err != nil {
 		return err
+	}
+	if !adopted {
+		if s, err = m.startConversation(ctx, a); err != nil {
+			return err
+		}
 	}
 	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s, st: a.State, since: a.StateSince})
 	st, cutShort := resumedState(a.State)
 	r.setState(ctx, st, "resumed")
-	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
+	if adopted {
+		r.mu.Lock()
+		r.adoptedSession = true
+		r.mu.Unlock()
+	}
+	m.event(ctx, EventResumed, a.ID, a.Ticket, map[string]bool{"adopted": adopted})
+	switch {
+	case adopted && cutShort:
+		r.m.enqueueNotice(ctx, r, adoptedNote)
 	// An unparked agent (no note) was between turns: nothing was cut short.
-	if note != "" && (cutShort || note == recoveredNote) {
+	case !adopted && note != "" && (cutShort || note == recoveredNote):
 		r.m.enqueueNotice(ctx, r, note)
 	}
 	m.sync(ctx, a.Ticket)

@@ -87,11 +87,13 @@ func (p *Puppet) acceptLaunches() {
 			return
 		}
 		line, err := bufio.NewReader(conn).ReadString('\n')
-		_ = conn.Close()
 		pid, perr := strconv.Atoi(strings.TrimSpace(line))
 		if err != nil || perr != nil {
+			_ = conn.Close()
 			continue
 		}
+		p.track(conn, pid)
+		_ = conn.Close()
 		p.pids <- pid
 	}
 }

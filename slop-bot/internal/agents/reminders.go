@@ -31,7 +31,7 @@ func (m *Manager) remindAsks(ctx context.Context) {
 		}
 		body := fmt.Sprintf("Reminder: agent %s (ticket %s) asked %s ago and is still waiting for an answer:\n%s\n"+
 			"`slop-bot asks` lists the open questions; `slop-bot tell %s ...` answers it.",
-			agent, ticket, now.Sub(ask.CreatedAt).Round(time.Minute), quote(ask.Body), agent)
+			agent, ticket, now.Sub(ask.CreatedAt).Round(time.Minute), Quote(ask.Body), agent)
 		// The reminder and its mark are one write, so it goes once per ask.
 		reminded, err := m.opts.State.Messages.Remind(ctx, ask.ID, &state.NewMessage{
 			From: state.AgentParty(agent), To: state.UserParty, Kind: state.KindSystem, Body: body,

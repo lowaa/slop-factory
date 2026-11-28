@@ -171,6 +171,9 @@ type HookPayload struct {
 type HookReply struct {
 	Inject   []InjectedMessage `json:"inject,omitempty"`
 	Continue bool              `json:"continue,omitempty"`
+	// Deny, on tool_start, refuses the call, with why. The fake only
+	// reports it (RepHook's Reply).
+	Deny string `json:"deny,omitempty"`
 }
 
 // InjectedMessage is one message a hook reply injects.

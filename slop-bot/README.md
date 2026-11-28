@@ -25,7 +25,7 @@ A harness is a coding-agent CLI. A driver is how slop-bot drives it.
 | `claude-code` | `stream-json` | runs |
 | `codex` | `app-server` | runs |
 | `pi` | `rpc` | runs |
-| `agy` | `tui` (in tmux) | accepted by the config, not runnable yet: `doctor` warns, and its tickets become `misconfigured` |
+| `agy` | `tui` (in tmux) | agy's own TUI in slop-bot's tmux server (`tmux -L slop-bot`); needs tmux. Its sessions outlive a daemon restart, and `attach` joins them. On a consumer Google sign-in, see `doctor`'s terms warning |
 
 ## Quickstart
 

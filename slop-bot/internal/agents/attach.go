@@ -53,6 +53,10 @@ type Attachment struct {
 	Command *harness.LaunchSpec
 	// Released is set for NoResume: there is no hand-back.
 	Released bool
+	// Join says the person joins the agent's running session (Command is
+	// a tmux attach): detaching hands it back, and quitting the harness
+	// ends the session, which slop-bot then resumes.
+	Join bool
 }
 
 // HandBackOutcome is what became of an agent when its attach ended.
@@ -77,6 +81,8 @@ const (
 	EventHandedBack = "agent.handed_back"
 	// EventTUILaunched: the attached CLI started the TUI.
 	EventTUILaunched = "agent.tui_launched"
+	// EventJoinedExit: the harness exited in a session a person had joined.
+	EventJoinedExit = "agent.joined_exit"
 )
 
 // Record logs an attach event the daemon's routes observe, on the agent's
@@ -149,15 +155,22 @@ func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, plan 
 		m.event(ctx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "released": true})
 		return att, nil
 	}
-	token, err := m.rotateToken(ctx, a.ID)
-	if err != nil {
-		m.dropLease(ctx, a.ID, req.Holder)
-		m.abandonAttach(ctx, r, "the attach failed: "+err.Error())
-		return nil, err
+	if plan.Kind == harness.Join {
+		// The person joins the session as it runs: its environment keeps
+		// the agent's token, and the attach command (tmux) needs none.
+		att.Command, att.Join = plan.Command, true
+	} else {
+		token, err := m.rotateToken(ctx, a.ID)
+		if err != nil {
+			m.dropLease(ctx, a.ID, req.Holder)
+			m.abandonAttach(ctx, r, "the attach failed: "+err.Error())
+			return nil, err
+		}
+		att.Command = withEnv(plan.Command, control.TokenEnv, token)
 	}
 	r.setState(ctx, state.StateAttached, "attached by "+req.Holder)
 	r.setAttaching(false)
-	att.Command = withEnv(plan.Command, control.TokenEnv, token)
+	var err error
 	att.Held, err = m.opts.State.Messages.Pending(ctx, state.AgentParty(a.ID))
 	if err != nil {
 		m.opts.Logger.Warn("agents: reading held messages", "agent", a.ID, "err", err)
@@ -180,8 +193,11 @@ func (m *Manager) stopForAttach(ctx context.Context, r *runner, a *state.Agent, 
 	}
 	m.event(ctx, EventAttaching, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "now": req.Now})
 	plan, err := r.conv.AttachPlan(ctx)
+	if err == nil && plan.Kind == harness.Join {
+		return m.joinForAttach(ctx, r, a, plan, req)
+	}
 	if err == nil && (plan.Kind != harness.HandOver || plan.Command == nil) {
-		err = fmt.Errorf("%w: %s attaches by joining its session, which isn't supported yet", ErrNoHandOver, a.Harness)
+		err = fmt.Errorf("%w: %s has no TUI to hand over to", ErrNoHandOver, a.Harness)
 	}
 	if err != nil {
 		r.setAttaching(false)
@@ -381,6 +397,9 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 			decl = declAsk
 		}
 	}
+	if r.joined() {
+		return m.rejoin(ctx, r, decl, summary, why), nil
+	}
 	return m.resumeHandedBack(ctx, r, why, decl, summary)
 }
 
@@ -396,11 +415,17 @@ func (m *Manager) resumeHandedBack(ctx context.Context, r *runner, why string, d
 	// place, so Stop waits for it and a sync leaves the ticket to it, and it
 	// is bounded and cancelled as goStart's are, so a hung handshake can't
 	// hold up the caller (the lease sweeper, which Stop waits on) for ever.
-	startCtx, done, err := m.claimStart(a.Ticket, a.Pool)
+	startCtx, done, err := m.claimStart(ctx, a.Ticket, a.Pool)
 	if err != nil {
 		return "", err
 	}
 	defer done()
+	// The start waited for may have changed the agent (ended it, or resumed
+	// it): only the attached runner this hand-back is for is resumed, and
+	// adoptHandBack checks again once the conversation is up.
+	if cur, ok := m.runner(id); !ok || cur != r || cur.isEnding() || cur.state() != state.StateAttached {
+		return Ended, nil
+	}
 	s, err := m.startConversation(startCtx, a)
 	if err != nil {
 		return "", m.handBackFailed(ctx, r, err)
@@ -445,24 +470,40 @@ func (m *Manager) handBackFailed(ctx context.Context, r *runner, err error) erro
 // claimStart holds ticket's start place for a start run on the caller's
 // goroutine, as goStart does for its own: Stop waits for it, and its context
 // is bounded by startTimeout and cancelled by Stop. done gives the place
-// back.
-func (m *Manager) claimStart(ticket ident.TicketID, pool state.Pool) (ctx context.Context, done func(), err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopping {
-		return nil, nil, fmt.Errorf("%w: slop-bot is stopping; the agent resumes when it starts again", ErrNoLiveAgent)
+// back. A start already in flight for the ticket (the agent's own spawn
+// still settling, say) is waited for, not raced or given up on: it is
+// itself bounded by startTimeout, and Stop ends the wait.
+func (m *Manager) claimStart(ctx context.Context, ticket ident.TicketID, pool state.Pool) (context.Context, func(), error) {
+	for {
+		m.mu.Lock()
+		if m.stopping {
+			m.mu.Unlock()
+			return nil, nil, fmt.Errorf("%w: slop-bot is stopping; the agent resumes when it starts again", ErrNoLiveAgent)
+		}
+		inFlight, busy := m.settledCh[ticket]
+		if !busy {
+			m.holdStartLocked(ticket, pool)
+			m.starts.Add(1)
+			m.mu.Unlock()
+			startCtx, cancel := context.WithTimeout(m.base, m.startTimeout())
+			return startCtx, func() {
+				cancel()
+				m.settled(ticket)
+				m.starts.Done()
+			}, nil
+		}
+		m.mu.Unlock()
+		if m.startBusy != nil {
+			m.startBusy(ticket)
+		}
+		select {
+		case <-inFlight:
+		case <-m.base.Done():
+			return nil, nil, fmt.Errorf("%w: slop-bot is stopping; the agent resumes when it starts again", ErrNoLiveAgent)
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
 	}
-	if _, busy := m.starting[ticket]; busy {
-		return nil, nil, fmt.Errorf("agents: ticket %s's agent is already being started", ticket)
-	}
-	m.starting[ticket] = pool
-	m.starts.Add(1)
-	ctx, cancel := context.WithTimeout(m.base, m.startTimeout())
-	return ctx, func() {
-		cancel()
-		m.settled(ticket)
-		m.starts.Done()
-	}, nil
 }
 
 // adoptHandBack adopts a hand-back's resumed conversation in place of the

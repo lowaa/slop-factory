@@ -58,8 +58,8 @@ func validLeaf(name string) error {
 	return nil
 }
 
-// dirName is the worktree's directory under the workspace: t<ticket>-<repo>.
-func dirName(ticket ident.TicketID, repo string) string {
+// DirName is the worktree's directory under the workspace: t<ticket>-<repo>.
+func DirName(ticket ident.TicketID, repo string) string {
 	return "t" + string(ticket) + "-" + repo
 }
 

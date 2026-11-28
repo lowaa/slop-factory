@@ -17,8 +17,8 @@ repos
   ok    workspace_dir    /home/ada/slop-bot/workspace (created on first use)
 
 platform
-  ok    runtime dir      /run/user/1000/slop-bot ($XDG_RUNTIME_DIR)
-  ok    socket           /run/user/1000/slop-bot/slop-bot.sock (37 of 103 bytes)
+  ok    runtime dir      /run/user/65533/slop-bot ($XDG_RUNTIME_DIR)
+  ok    socket           /run/user/65533/slop-bot/slop-bot.sock (38 of 103 bytes)
   ok    service manager  the systemd user manager answers
   warn  linger           off: systemd stops slop-bot when your last session ends
                          fix: to keep it running with nobody logged in (a headless box): loginctl enable-linger $USER
@@ -32,7 +32,7 @@ slop-bot is installed. Where things are:
   tickets db     /home/ada/.local/share/slop-bot/tickets.db
   state db       /home/ada/.local/state/slop-bot/state.db
   logs           journalctl --user -u slop-bot.service
-  socket         /run/user/1000/slop-bot/slop-bot.sock
+  socket         /run/user/65533/slop-bot/slop-bot.sock
   workspace_dir  /home/ada/slop-bot/workspace                     worktrees; set in the config
   service        /home/ada/.config/systemd/user/slop-bot.service  runs: /home/ada/bin/slop-bot daemon
 
@@ -41,7 +41,7 @@ XDG variables (from this shell; written into the service):
   XDG_DATA_HOME    defaulted  /home/ada/.local/share
   XDG_STATE_HOME   defaulted  /home/ada/.local/state
   XDG_CACHE_HOME   defaulted  /home/ada/.cache
-  XDG_RUNTIME_DIR  set        /run/user/1000
+  XDG_RUNTIME_DIR  set        /run/user/65533
   (systemd gives the service its own XDG_RUNTIME_DIR, /run/user/<uid>)
 
 linger: off. systemd stops slop-bot when your last session ends; to keep it running with nobody logged in (a headless box), run: loginctl enable-linger

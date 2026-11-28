@@ -192,6 +192,36 @@ func TestAParkedHeadOfTheQueueParksAnAgentQueuedBehindIt(t *testing.T) {
 	assert.Contains(t, f.user(resumed).Text, "for a1")
 }
 
+// A TUI session a person turns out to be in (one attached without slop-bot)
+// is never stopped to free a process: the park is given up, the agent stays
+// live, and the start it was for waits.
+func TestAnAgentWithAPersonInItsSessionIsNotParked(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, twoLive)
+	s1, a1 := f.waitingAgent("first", nil)
+	f.clock.Advance(time.Minute)
+	_, a2 := f.waitingAgent("second", nil)
+	f.hooks.set(func(h *harnessHooks) { h.attached = true })
+
+	third := f.file("third", nil)
+	refused := map[ident.AgentID]bool{}
+	for len(refused) < 2 {
+		refused[f.await(agents.EventParkRefused, nil).Agent] = true
+	}
+	assert.Equal(t, map[ident.AgentID]bool{a1.Agent: true, a2.Agent: true}, refused, "each tried once, then left alone")
+	assert.False(t, f.mgr.IsParked(a1.Agent))
+	assert.False(t, f.mgr.IsParked(a2.Agent))
+	f.noLiveAgent(third.ID)
+	for _, a := range []ident.Principal{a1, a2} {
+		rec, err := f.state.Agents.Get(context.Background(), a.Agent)
+		require.NoError(t, err)
+		assert.Nil(t, rec.ParkedAt)
+	}
+	// Still live: a message reaches it in its own session.
+	f.tell(a1.Agent, "CSV")
+	assert.Contains(t, f.user(s1).Text, "CSV")
+}
+
 // A message left for a parked agent with no queue place (the daemon died
 // between the two writes) still wakes it after a restart.
 func TestAParkedAgentsMessageWithoutAQueuePlaceWakesItAfterARestart(t *testing.T) {

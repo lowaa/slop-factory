@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -106,6 +107,11 @@ type attachRun struct {
 	agent          string
 	// pid is the TUI's, once it runs.
 	pid int
+	// ending is set once this attach is over as far as the CLI knows: it is
+	// handing back, or the daemon said the attach ended. The daemon closes
+	// the stream then, and that is the attach ending, not a restart to
+	// reconnect through; a hand-back retries through a restart itself.
+	ending atomic.Bool
 }
 
 // launched tells the daemon the TUI's pid, so that if this CLI dies the
@@ -120,7 +126,10 @@ func (at *attachRun) launched(ctx context.Context) {
 func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequest) error {
 	req.Holder = at.holder
 	if !req.Now {
-		at.say("Waiting for the agent's turn to end (--now interrupts it)...")
+		// Said before the daemon answers, so before it is known whether the
+		// harness hands over (which waits for the turn) or is joined (which
+		// doesn't).
+		at.say("Attaching; a hand-over waits for the agent's turn to end (--now interrupts it)...")
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -174,6 +183,7 @@ func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequ
 	frames := make(chan api.AttachFrame)
 	go at.follow(streamCtx, body, frames)
 	if at.supervise(tui, sigs, frames) {
+		at.ending.Store(true)
 		at.handBack(ctx)
 	}
 	return nil
@@ -286,21 +296,7 @@ type scannedBody struct {
 func (at *attachRun) follow(ctx context.Context, body *scannedBody, out chan<- api.AttachFrame) {
 	defer close(out)
 	for {
-		sb := body
-		for sb.sc.Scan() {
-			var f api.AttachFrame
-			if json.Unmarshal(sb.sc.Bytes(), &f) != nil {
-				continue
-			}
-			select {
-			case out <- f:
-			case <-ctx.Done():
-				_ = body.Close()
-				return
-			}
-		}
-		_ = body.Close()
-		if ctx.Err() != nil {
+		if !at.relay(ctx, body, out) || ctx.Err() != nil || at.ending.Load() {
 			return
 		}
 		at.say("\r\nslop-bot: lost the daemon; reconnecting (your TUI keeps running)...")
@@ -319,6 +315,27 @@ func (at *attachRun) follow(ctx context.Context, body *scannedBody, out chan<- a
 		at.say("\r\nslop-bot: reconnected.")
 		at.launched(ctx)
 	}
+}
+
+// relay passes one stream's frames on until it ends, then closes it. It
+// reports false when ctx ended first.
+func (at *attachRun) relay(ctx context.Context, body *scannedBody, out chan<- api.AttachFrame) bool {
+	defer func() { _ = body.Close() }()
+	for body.sc.Scan() {
+		var f api.AttachFrame
+		if json.Unmarshal(body.sc.Bytes(), &f) != nil {
+			continue
+		}
+		if f.Type == api.FrameEnded {
+			at.ending.Store(true)
+		}
+		select {
+		case out <- f:
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
 }
 
 // reconnect retries the attach as this holder until the daemon answers.
@@ -384,6 +401,9 @@ func (at *attachRun) show(att *api.Attachment) {
 	if att.Released {
 		fmt.Fprintf(&b, "Released: slop-bot no longer runs this agent, and ticket %s stays assigned to you.\n", att.Ticket)
 		b.WriteString("The agent's own slop-bot commands (ask, done, ...) no longer work from this TUI.\n")
+	} else if att.Join {
+		b.WriteString("Joining the agent's running session. Detaching from it (Ctrl-b d) hands the agent back to slop-bot;\n" +
+			"quitting the harness ends the session, and slop-bot resumes the conversation once you're out.\n")
 	} else {
 		b.WriteString("Quitting the TUI hands the agent back to slop-bot.\n")
 	}

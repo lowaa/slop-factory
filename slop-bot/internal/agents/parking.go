@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
@@ -24,14 +25,23 @@ import (
 // EventParked is an agent stopped to free a process.
 const EventParked = "agent.parked"
 
+// EventParkRefused is a park given up: a person is in the agent's TUI
+// session.
+const EventParkRefused = "agent.park_refused"
+
 // parkedAgent is a live agent with no process, waiting for work.
 type parkedAgent struct {
 	id     ident.AgentID
 	ticket ident.TicketID
 	pool   state.Pool
-	// stopped is closed once its process has exited: a resume waits for
-	// it, so one conversation never runs in two processes.
+	// stopped is closed once its process has exited, or the park was given
+	// up (kept): a resume waits for it, so one conversation never runs in
+	// two processes.
 	stopped chan struct{}
+	// kept is a park given up because a person is in its TUI session: the
+	// agent is live again, and nothing is to resume. Set before stopped is
+	// closed.
+	kept bool
 }
 
 // newParked is the entry for an agent that already has no process.
@@ -49,13 +59,18 @@ const parkGrace = 10 * time.Second
 
 // parkableLocked reports whether r may be stopped to free a process: it is
 // between turns waiting on a person (an ask, a discussion, a merge, an
-// interrupt) or on its ticket's blockers. Never one in a turn, settling its
+// interrupt) or on its ticket's blockers. Never a TUI session a person
+// joined, or one adopted after a restart, or one whose messages are held for
+// a person in it: stopping it would end their session. Never one in a turn, settling its
 // turn's end (a nudge or a message may be on its way), starting, attached or
 // being attached, finishing, or with a slot to take into its next turn; and
 // not stalled, which can be set mid-turn and read before the turn's end is
 // settled. Call it holding r.mu.
 func (r *runner) parkableLocked() bool {
 	if r.conv == nil || r.inTurn || r.settling || r.attaching || r.holdsSlot || r.stopping || r.ending || r.finishing {
+		return false
+	}
+	if r.joinable || r.adoptedSession || r.redelivering || r.personIn {
 		return false
 	}
 	switch r.st {
@@ -176,15 +191,22 @@ func (m *Manager) parkLocked(v *runner) *parkedAgent {
 
 // park stops a parked agent's conversation and waits for it to exit, on
 // the goroutine of the start it makes room for. It is between turns, so a
-// clean stop loses nothing; one that outlives parkGrace is killed.
-func (m *Manager) park(ctx context.Context, r *runner, p *parkedAgent) {
+// clean stop loses nothing; one that outlives parkGrace is killed. A TUI
+// session a person turns out to be in isn't stopped: the agent is kept live,
+// and park reports false, so the start it was for doesn't go ahead.
+func (m *Manager) park(ctx context.Context, r *runner, p *parkedAgent) bool {
 	keep := context.WithoutCancel(ctx)
 	// Recorded first: a daemon that dies from here on leaves it parked, not
 	// resumed at the next start into a process it gave up.
 	m.setParked(keep, r.id, true)
 	grace, cancel := context.WithTimeout(keep, parkGrace)
 	defer cancel()
-	r.stopConv(grace, false)
+	if r.conv != nil {
+		if err := r.conv.Stop(grace, false); errors.Is(err, harness.ErrAttached) {
+			m.keepLive(keep, r, p)
+			return false
+		}
+	}
 	select {
 	case <-r.exited:
 	case <-grace.Done():
@@ -193,6 +215,27 @@ func (m *Manager) park(ctx context.Context, r *runner, p *parkedAgent) {
 	}
 	close(p.stopped)
 	m.event(keep, EventParked, r.id, r.ticket, map[string]string{"state": string(r.state())})
+	return true
+}
+
+// keepLive undoes a park whose agent has a person in its TUI session: it is
+// a runner again, holding its place, and isn't tried again until its next
+// turn.
+func (m *Manager) keepLive(ctx context.Context, r *runner, p *parkedAgent) {
+	m.opts.Logger.Info("agents: not parking an agent a person is in the session of", "agent", r.id)
+	m.mu.Lock()
+	delete(m.parked, r.id)
+	m.runners[r.id] = r
+	stopping := m.stopping
+	r.mu.Lock()
+	r.parking, r.stopping, r.personIn = false, stopping, true
+	r.mu.Unlock()
+	p.kept = true
+	close(p.stopped)
+	m.mu.Unlock()
+	m.setParked(ctx, r.id, false)
+	m.event(ctx, EventParkRefused, r.id, r.ticket, nil)
+	m.Kick()
 }
 
 // adoptParked takes on an agent that was parked when the daemon last
@@ -257,8 +300,9 @@ func (m *Manager) unparkWhenServed(id ident.AgentID) {
 	}
 	delete(m.parked, id)
 	m.goStartLocked(p.ticket, p.pool, false, func(ctx context.Context) {
-		if victim != nil {
-			m.park(ctx, victim, parkedVictim)
+		if victim != nil && !m.park(ctx, victim, parkedVictim) {
+			m.repark(p) // no room after all: served again later
+			return
 		}
 		// Its own park, if still stopping its process: one conversation
 		// never runs in two.
@@ -267,6 +311,9 @@ func (m *Manager) unparkWhenServed(id ident.AgentID) {
 		case <-ctx.Done():
 			m.repark(p)
 			return
+		}
+		if p.kept {
+			return // it never stopped: it is live, and delivers as any runner
 		}
 		m.unpark(ctx, p)
 	})

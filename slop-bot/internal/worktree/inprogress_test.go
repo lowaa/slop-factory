@@ -112,3 +112,25 @@ func TestCreateSavesADeletedWorktreesAutostash(t *testing.T) {
 	assert.Contains(t, f.run(wt.RepoPath, "stash", "list"), "slop-bot: autostash from "+wt.Path)
 	assert.Contains(t, f.run(wt.RepoPath, "stash", "show", "-p", "stash@{0}"), "+uncommitted edit")
 }
+
+// `git stash` needs a work tree, which a bare repo hasn't: saving the
+// autostash through it failed every later Create for the ticket.
+func TestCreateSavesADeletedWorktreesAutostashInABareRepo(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "a")
+	bare := filepath.Join(f.root, "repos", "bare.git")
+	f.run(f.root, "clone", "-q", "--bare", f.repos["a"], bare)
+	f.repos["bare"] = bare
+	wt := f.create("74", []string{"bare"}, "bare")[0]
+	f.commit(wt.Path, "work", "work")
+	f.write(wt.Path, "README", "uncommitted edit\n")
+	_, err := f.git.Run(context.Background(), wt.Path, "rebase", "--autostash", "--force-rebase", "-x", "false", "main")
+	require.Error(t, err, "the rebase must stop part way")
+	require.NoError(t, os.RemoveAll(wt.Path))
+
+	again := f.create("74", []string{"bare"}, "bare")[0]
+	// The bare repo has no stash list of its own to show; its worktrees
+	// share its refs, refs/stash included.
+	assert.Contains(t, f.run(again.Path, "stash", "list"), "slop-bot: autostash from "+wt.Path)
+	assert.Contains(t, f.run(again.Path, "stash", "show", "-p", "stash@{0}"), "+uncommitted edit")
+}

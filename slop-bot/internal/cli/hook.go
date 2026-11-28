@@ -32,15 +32,7 @@ func (a *app) hookCmd() *cobra.Command {
 			if stdin == nil {
 				stdin = strings.NewReader("")
 			}
-			git, err := gitx.New(&gitx.Options{Bin: "git", Logger: slog.New(slog.DiscardHandler)})
-			var cl *mergeguard.Classifier
-			if err == nil {
-				cl = mergeguard.NewClassifier(git)
-			} else {
-				// No git: the push checks lose the current branch, the
-				// rest still works.
-				cl = mergeguard.NewClassifier(nil)
-			}
+			cl := offlineClassifier()
 			return mergeguard.RunHook(cmd.Context(), &mergeguard.HookOptions{
 				Ask: func(ctx context.Context, call *api.PreTool) (*api.PreToolVerdict, error) {
 					c, err := a.client()
@@ -60,5 +52,18 @@ func (a *app) hookCmd() *cobra.Command {
 			})
 		},
 	})
+	c.AddCommand(a.hookTUICmd())
 	return c
+}
+
+// offlineClassifier is the merge guard's classifier for a hook to decide
+// with when the daemon can't be asked.
+func offlineClassifier() *mergeguard.Classifier {
+	git, err := gitx.New(&gitx.Options{Bin: "git", Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		// No git: the push checks lose the current branch, the rest still
+		// works.
+		return mergeguard.NewClassifier(nil)
+	}
+	return mergeguard.NewClassifier(git)
 }

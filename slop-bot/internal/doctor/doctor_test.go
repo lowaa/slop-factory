@@ -134,10 +134,11 @@ func TestTmuxOnlyWhenATUIDriverIsConfigured(t *testing.T) {
 	assert.Equal(t, doctor.Skip, f.result(f.run(), "prerequisites", "tmux").Level)
 
 	f.config("harnesses: {claude-code: {}, agy: {}}\n")
+	f.opts.Implemented = func(name, _ string) bool { return name != "agy" }
 	assert.Equal(t, doctor.Skip, f.result(f.run(), "prerequisites", "tmux").Level,
 		"no tmux for a tui harness this build can't run")
 
-	f.opts.Implemented = func(string, string) bool { return true }
+	f.opts.Implemented = nil // this build's own: it runs agy
 	res := f.result(f.run(), "prerequisites", "tmux")
 	assert.Equal(t, doctor.Fail, res.Level)
 	assert.Contains(t, res.Detail, "the tui driver (agy)")
@@ -352,6 +353,27 @@ func TestAgyTermsWarnOnAGoogleSignIn(t *testing.T) {
 	assert.Contains(t, res.Fix, "systemctl --user import-environment GEMINI_API_KEY")
 }
 
+// With an opted-in key, agents run agy in API-key mode (agy.SubcommandArgs),
+// so the listing is asked for in it too: without it agy lists the Google
+// sign-in's models, or says to sign in (agy 1.5.19).
+func TestAgyListsModelsInAPIKeyModeWithAnOptedInKey(t *testing.T) {
+	t.Parallel()
+	const keyed = `agy --settings {"modelProvider":"gemini"} models`
+	f := agyFixture(t, "{api_key_opt_in: true, model: gemini-3.8-flash-low}")
+	f.vars["GEMINI_API_KEY"] = "k"
+	f.cmds.Answer("agy models", &service.Result{ExitCode: 1, Stderr: "Please sign in to view available models\n"})
+	f.cmds.Answer(keyed, &service.Result{Stdout: "gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n"})
+	r := f.run()
+	assert.Equal(t, doctor.Pass, f.result(r, "harness agy", "signed in").Level)
+	assert.Equal(t, doctor.Pass, f.result(r, "harness agy", "model").Level)
+	assert.Contains(t, f.cmds.Calls(), keyed)
+
+	f = agyFixture(t, "{model: gemini-3.8-flash-low}")
+	f.vars["GEMINI_API_KEY"] = "k"
+	f.run()
+	assert.NotContains(t, f.cmds.Calls(), keyed, "a key that isn't opted in never reaches agy")
+}
+
 func TestAgySignInAndModelShareOneListing(t *testing.T) {
 	t.Parallel()
 	f := agyFixture(t, "{model: gemini-3.8-flash-low}")
@@ -383,17 +405,24 @@ func TestRepos(t *testing.T) {
 	f := newFixture(t, "linux")
 	notGit := filepath.Join(f.home, "plain")
 	require.NoError(t, os.MkdirAll(notGit, 0o700))
-	f.cmds.Answer("git -C "+notGit+" rev-parse --git-dir", &service.Result{ExitCode: 128, Stderr: "fatal: not a git repository"})
+	f.cmds.Answer("git -C "+notGit+" rev-parse --is-bare-repository", &service.Result{ExitCode: 128, Stderr: "fatal: not a git repository"})
+	// A directory inside a repo: git answers from the enclosing one.
+	sub := filepath.Join(f.home, "src", "mono", "app")
+	require.NoError(t, os.MkdirAll(sub, 0o700))
+	f.cmds.Answer("git -C "+sub+" rev-parse --is-bare-repository", &service.Result{Stdout: "false\n"})
+	f.cmds.Answer("git -C "+sub+" rev-parse --show-toplevel", &service.Result{Stdout: filepath.Dir(sub) + "\n"})
 	file := filepath.Join(f.home, "file")
 	require.NoError(t, os.WriteFile(file, nil, 0o600))
 	f.config("repos:\n  - {name: good, path: " + f.repo("good") + "}\n  - {name: plain, path: ~/plain}\n" +
-		"  - {name: file, path: ~/file}\n  - {name: gone, path: ~/gone}\n")
+		"  - {name: file, path: ~/file}\n  - {name: gone, path: ~/gone}\n  - {name: sub, path: " + sub + "}\n")
 	r := f.run()
 	assert.Equal(t, doctor.Pass, f.result(r, "repos", "good").Level)
 	assert.Contains(t, f.result(r, "repos", "plain").Detail, "isn't a git repo")
 	assert.Contains(t, f.result(r, "repos", "file").Detail, "isn't a directory")
 	assert.Contains(t, f.result(r, "repos", "gone").Detail, "no such file or directory")
-	for _, n := range []string{"plain", "file", "gone"} {
+	assert.Contains(t, f.result(r, "repos", "sub").Detail, "not a repo of its own")
+	assert.Contains(t, f.result(r, "repos", "sub").Fix, "top level")
+	for _, n := range []string{"plain", "file", "gone", "sub"} {
 		assert.Equal(t, doctor.Fail, f.result(r, "repos", n).Level, n)
 	}
 }
@@ -583,6 +612,8 @@ func TestProbesGetTheAgentsEnvironment(t *testing.T) {
 func TestUnimplementedHarness(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "linux")
+	// A harness still to come; agy stands in for it.
+	f.opts.Implemented = func(name, _ string) bool { return name != "agy" }
 	f.config("harnesses: {claude-code: {}, agy: {}}\n")
 	res := f.result(f.run(), "harness agy", "implemented")
 	assert.Equal(t, doctor.Warn, res.Level, "only agy's tickets are parked")

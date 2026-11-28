@@ -175,6 +175,16 @@ func TestCreateMissingOrNonGitRepoPath(t *testing.T) {
 	f.repos["plain"] = plain
 	_, err = f.m.Create(ctx, "1", []string{"plain"}, "plain")
 	require.ErrorIs(t, err, gitx.ErrNotARepo)
+
+	// git finds the enclosing repo from a subdirectory, so only the
+	// top-level check refuses it (doctor shares it, through CheckRepo).
+	sub := filepath.Join(f.root, "mono")
+	f.run(f.root, "init", "-q", sub)
+	require.NoError(t, os.Mkdir(filepath.Join(sub, "app"), 0o750))
+	f.repos["sub"] = filepath.Join(sub, "app")
+	_, err = f.m.Create(ctx, "1", []string{"sub"}, "sub")
+	require.ErrorIs(t, err, ErrNotTopLevel)
+	assert.Contains(t, err.Error(), "is inside the repo at "+sub)
 }
 
 func TestCreateRefusesAPathThatIsNotOurs(t *testing.T) {

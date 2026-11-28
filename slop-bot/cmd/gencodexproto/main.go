@@ -39,6 +39,8 @@ var roots = []string{
 	"ErrorNotification",
 	// server → client requests: what the harness answers them with
 	"PermissionsRequestApprovalParams",
+	// the command the merge guard classifies
+	"CommandExecutionRequestApprovalParams",
 	"CommandExecutionRequestApprovalResponse",
 	"FileChangeRequestApprovalResponse",
 	"PermissionsRequestApprovalResponse",
