@@ -33,8 +33,11 @@ func TestDatabaseFailuresAreWrappedWithTheirOperation(t *testing.T) {
 			wantMsg: "state: reading setting",
 		},
 		{
-			name:    "listing messages",
-			call:    func(ctx context.Context, f *fixture) error { _, err := f.Messages.Pending(ctx, state.UserParty); return err },
+			name: "listing messages",
+			call: func(ctx context.Context, f *fixture) error {
+				_, err := f.Messages.Pending(ctx, state.UserParty)
+				return err
+			},
 			wantMsg: "state: listing messages",
 		},
 		{
