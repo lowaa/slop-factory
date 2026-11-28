@@ -133,13 +133,21 @@ func testIdleTurn(t *testing.T, s *Subject) {
 	require.NoError(t, s.Puppet.Received(ctx, "hello", false))
 }
 
-func testMidTurn(t *testing.T, s *Subject) {
-	ctx := ctxFor(t, s)
-	conv := start(ctx, t, s, nil)
+// inLongTool starts a conversation whose turn is running a tool call until
+// release is called.
+func inLongTool(t *testing.T, s *Subject) (ctx context.Context, conv harness.Conversation, release func(context.Context) error) {
+	t.Helper()
+	ctx = ctxFor(t, s)
+	conv = start(ctx, t, s, nil)
 	release, err := s.Puppet.LongTool(ctx)
 	require.NoError(t, err)
 	send(ctx, t, conv, "do the long thing")
 	next(ctx, t, conv, harness.ToolStarted)
+	return ctx, conv, release
+}
+
+func testMidTurn(t *testing.T, s *Subject) {
+	ctx, conv, release := inLongTool(t, s)
 	send(ctx, t, conv, "main is broken, stop merging")
 	require.NoError(t, s.Puppet.Received(ctx, "main is broken, stop merging", true))
 	require.NoError(t, release(ctx))
@@ -147,12 +155,7 @@ func testMidTurn(t *testing.T, s *Subject) {
 }
 
 func testInterrupt(t *testing.T, s *Subject) {
-	ctx := ctxFor(t, s)
-	conv := start(ctx, t, s, nil)
-	_, err := s.Puppet.LongTool(ctx)
-	require.NoError(t, err)
-	send(ctx, t, conv, "do the long thing")
-	next(ctx, t, conv, harness.ToolStarted)
+	ctx, conv, _ := inLongTool(t, s)
 	require.NoError(t, conv.Interrupt(ctx))
 	ended := next(ctx, t, conv, harness.TurnEnded)
 	assert.Equal(t, harness.TurnInterrupted, ended.Outcome)
@@ -176,13 +179,7 @@ func testStopIdle(t *testing.T, s *Subject) {
 }
 
 func testStopWaits(t *testing.T, s *Subject) {
-	ctx := ctxFor(t, s)
-	conv := start(ctx, t, s, nil)
-	release, err := s.Puppet.LongTool(ctx)
-	require.NoError(t, err)
-	send(ctx, t, conv, "do the long thing")
-	next(ctx, t, conv, harness.ToolStarted)
-
+	ctx, conv, release := inLongTool(t, s)
 	stopped := make(chan error, 1)
 	go func() { stopped <- conv.Stop(ctx, false) }()
 	select {
@@ -197,12 +194,7 @@ func testStopWaits(t *testing.T, s *Subject) {
 }
 
 func testStopForce(t *testing.T, s *Subject) {
-	ctx := ctxFor(t, s)
-	conv := start(ctx, t, s, nil)
-	_, err := s.Puppet.LongTool(ctx)
-	require.NoError(t, err)
-	send(ctx, t, conv, "do the long thing")
-	next(ctx, t, conv, harness.ToolStarted)
+	ctx, conv, _ := inLongTool(t, s)
 	require.NoError(t, conv.Stop(ctx, true))
 	next(ctx, t, conv, harness.Exited)
 }
