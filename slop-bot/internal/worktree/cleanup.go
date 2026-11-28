@@ -29,6 +29,10 @@ const (
 	// Locked is a worktree someone locked (`git worktree lock`), often
 	// because it lives on storage that isn't always mounted.
 	Locked ReasonKind = "locked"
+	// Nested is another worktree inside this one, typically under an
+	// ignored path (an agent's own worktrees): git would delete it, files
+	// and all, with this one, and `git status` doesn't show it.
+	Nested ReasonKind = "nested"
 )
 
 // Reason is one thing that would be lost if the worktree were removed.
@@ -75,7 +79,9 @@ type CleanupResult struct {
 // covered; nothing should be working in a finished ticket's worktree.
 //
 // A worktree with initialised submodules can't be removed by git, so Cleanup
-// reports git's error for it every time; ForceCleanup removes it.
+// reports git's error for it every time; ForceCleanup removes it. Edits to
+// files marked skip-worktree or assume-unchanged, and a separate repo under
+// an ignored path, are invisible to git's status and are not kept for.
 func (m *Manager) Cleanup(ctx context.Context, ticket ident.TicketID, worktrees []*Worktree) []*CleanupResult {
 	out := make([]*CleanupResult, 0, len(worktrees))
 	for _, wt := range worktrees {
@@ -121,7 +127,23 @@ func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Wor
 			return false, nil, err
 		}
 	}
+	m.dropResume(ticket, wt.Repo)
 	return true, nil, m.deleteBranches(ctx, wt.RepoPath, st.branches)
+}
+
+// nested are the registered worktrees of repoPath inside path.
+func (m *Manager) nested(ctx context.Context, repoPath, path string) ([]string, error) {
+	regs, err := m.registrations(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, r := range regs {
+		if strings.HasPrefix(r.path, path+string(filepath.Separator)) {
+			out = append(out, r.path)
+		}
+	}
+	return out, nil
 }
 
 // atRisk is everything removing st would lose.
@@ -129,6 +151,13 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 	var reasons []Reason
 	if st.reg != nil && st.reg.locked {
 		reasons = append(reasons, Reason{Kind: Locked, Detail: "locked: " + orNone(st.reg.lockReason)})
+	}
+	nested, err := m.nested(ctx, repoPath, st.path)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range nested {
+		reasons = append(reasons, Reason{Kind: Nested, Detail: "holds the worktree at " + p})
 	}
 	if st.reg != nil && st.present {
 		dirty, err := m.dirty(ctx, repoPath, st.path)
@@ -148,7 +177,8 @@ func (m *Manager) atRisk(ctx context.Context, repoPath string, st *state) ([]Rea
 // hold, for `slop-bot worktrees clean <t> --force` once the user has looked.
 // That includes a locked one, one whose creation was interrupted, and one
 // whose .git link is gone. It still refuses a path that isn't this repo's
-// worktree.
+// worktree, and one holding another worktree, which may not be the ticket's
+// to discard.
 func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *Worktree) error {
 	if err := m.owns(ctx, ticket, wt); err != nil {
 		return err
@@ -164,6 +194,12 @@ func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *W
 	if err != nil {
 		return err
 	}
+	if nested, err := m.nested(ctx, wt.RepoPath, st.path); err != nil {
+		return err
+	} else if len(nested) > 0 {
+		return fmt.Errorf("worktree: %w: %s holds the worktrees at %s; remove them first",
+			ErrCollision, st.path, strings.Join(nested, ", "))
+	}
 	switch {
 	case st.reg != nil && st.present:
 		if err := m.forceRemove(ctx, wt.RepoPath, st.path); err != nil {
@@ -177,6 +213,7 @@ func (m *Manager) ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *W
 	if err := m.deleteBranches(ctx, wt.RepoPath, st.branches); err != nil {
 		return err
 	}
+	m.dropResume(ticket, wt.Repo)
 	m.logger.Info("worktree force-removed", "ticket", ticket, "path", st.path, "branches", len(st.branches))
 	return nil
 }
@@ -277,13 +314,20 @@ func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktr
 			return nil, err
 		}
 	}
-	out, err := m.git.Run(ctx, wt.RepoPath, "for-each-ref", "--format=%(objectname) %(refname)", ticketBranchPrefix(ticket))
+	out, err := m.git.Run(ctx, wt.RepoPath, "for-each-ref",
+		"--format=%(objectname) %(refname) %(symref)", ticketBranchPrefix(ticket))
 	if err != nil {
 		return nil, err
 	}
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if oid, ref, ok := strings.Cut(line, " "); ok {
-			st.branches = append(st.branches, branchRef{ref: ref, oid: oid})
+		fields := strings.Fields(line)
+		switch {
+		case len(fields) == 3:
+			// A symref under the ticket's prefix isn't a branch slop-bot cut,
+			// and deleting through it would delete its target.
+			m.logger.Warn("ignoring a symbolic ref among a ticket's branches", "ref", fields[1], "target", fields[2])
+		case len(fields) == 2:
+			st.branches = append(st.branches, branchRef{ref: fields[1], oid: fields[0]})
 		}
 	}
 	return st, nil
@@ -367,7 +411,7 @@ func (m *Manager) deleteBranches(ctx context.Context, repoPath string, branches 
 			errs = append(errs, fmt.Errorf("worktree: not deleting %s: it is checked out at %s", b.ref, at))
 			continue
 		}
-		if _, err := m.git.Run(ctx, repoPath, "update-ref", "-d", b.ref, b.oid); err != nil {
+		if _, err := m.git.Run(ctx, repoPath, "update-ref", "--no-deref", "-d", b.ref, b.oid); err != nil {
 			errs = append(errs, fmt.Errorf("worktree: deleting %s: %w", b.ref, err))
 			continue
 		}
@@ -386,7 +430,10 @@ func (m *Manager) deleteBranches(ctx context.Context, repoPath string, branches 
 // branchesInUse maps each branch a worktree of repoPath is on, or is in the
 // middle of rebasing or bisecting from, to that worktree. Mid-rebase and
 // mid-bisect, git lists the worktree as detached, but `rebase --continue` or
-// `bisect reset` still needs the branch.
+// `bisect reset` still needs the branch. The rebase and bisect state is read
+// from each worktree's admin dir in the common git dir, which is there even
+// when the checkout isn't (unmounted storage); anything unreadable is an
+// error, not "not in use".
 func (m *Manager) branchesInUse(ctx context.Context, repoPath string) (map[string]string, error) {
 	regs, err := m.registrations(ctx, repoPath)
 	if err != nil {
@@ -397,19 +444,28 @@ func (m *Manager) branchesInUse(ctx context.Context, repoPath string) (map[strin
 		if r.branch != "" {
 			inUse["refs/heads/"+r.branch] = r.path
 		}
-		if !r.detached {
-			continue
+	}
+	common, err := m.commonDir(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	gitDirs := []string{common}
+	entries, err := os.ReadDir(filepath.Join(common, "worktrees"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			gitDirs = append(gitDirs, filepath.Join(common, "worktrees", e.Name()))
 		}
-		present, err := exists(r.path)
-		if err != nil || !present {
-			continue
-		}
-		gitDir, err := m.git.Run(ctx, r.path, "rev-parse", "--path-format=absolute", "--git-dir")
+	}
+	for _, d := range gitDirs {
+		refs, err := pendingBranches(d)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		for _, ref := range pendingBranches(strings.TrimSpace(gitDir)) {
-			inUse[ref] = r.path
+		for _, ref := range refs {
+			inUse[ref] = "the rebase or bisect in " + d
 		}
 	}
 	return inUse, nil
@@ -417,12 +473,15 @@ func (m *Manager) branchesInUse(ctx context.Context, repoPath string) (map[strin
 
 // pendingBranches are the branches a rebase or bisect in gitDir will return
 // to.
-func pendingBranches(gitDir string) []string {
+func pendingBranches(gitDir string) ([]string, error) {
 	var refs []string
 	for _, f := range []string{"rebase-merge/head-name", "rebase-apply/head-name", "BISECT_START"} {
 		raw, err := os.ReadFile(filepath.Join(gitDir, f)) // #nosec G304 -- git's own state files in a worktree's git dir
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return nil, err
 		}
 		ref := strings.TrimSpace(string(raw))
 		if !strings.HasPrefix(ref, "refs/") {
@@ -432,7 +491,7 @@ func pendingBranches(gitDir string) []string {
 		}
 		refs = append(refs, ref)
 	}
-	return refs
+	return refs, nil
 }
 
 func plural(n int, noun string) string {

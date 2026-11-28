@@ -214,9 +214,12 @@ func (m *Manager) ensureLocked(ctx context.Context, ticket ident.TicketID, r rep
 		return nil, nil, err
 	}
 	defer unlock()
-	wt, err := m.ensure(ctx, ticket, r)
+	wt, attempted, err := m.ensure(ctx, ticket, r)
 	if err == nil {
 		return wt, nil, nil
+	}
+	if !attempted {
+		return nil, nil, err
 	}
 	pctx, cancel := probeContext(ctx)
 	defer cancel()
@@ -228,69 +231,98 @@ func (m *Manager) ensureLocked(ctx context.Context, ticket ident.TicketID, r rep
 	return nil, &Worktree{Ticket: ticket, Repo: r.name, RepoPath: r.path, Path: path, Branch: reg.branch}, err
 }
 
-func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) (*Worktree, error) {
+// ensure makes or reuses wt. attempted reports whether it got as far as
+// asking git to make a worktree, so a failure may have left one behind.
+func (m *Manager) ensure(ctx context.Context, ticket ident.TicketID, r repoRef) (*Worktree, bool, error) {
 	wt := &Worktree{Ticket: ticket, Repo: r.name, RepoPath: r.path, Path: m.path(ticket, r.name)}
 	reg, err := m.registration(ctx, r.path, wt.Path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	present, err := exists(wt.Path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	switch {
 	case reg != nil && reg.locked && reg.lockReason == lockInitializing:
-		return nil, fmt.Errorf("%w: %s: an earlier `git worktree add` was interrupted; clean it up with --force",
+		return nil, false, fmt.Errorf("%w: %s: an earlier `git worktree add` was interrupted; clean it up with --force",
 			ErrBroken, wt.Path)
 	case reg != nil && present:
 		if err := m.checkWorktree(ctx, r.path, wt.Path); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		wt.Branch = reg.branch
 		m.logger.Info("reusing worktree", "ticket", ticket, "repo", r.name, "path", wt.Path, "branch", wt.Branch)
-		return wt, nil
+		return wt, false, nil
 	case reg != nil && reg.locked:
 		// Locked and missing is git's way of saying "on storage that isn't
 		// mounted": it may come back, so it isn't stale.
-		return nil, fmt.Errorf("%w: %s is locked (%s) but missing; remount it, or clean it up with --force",
+		return nil, false, fmt.Errorf("%w: %s is locked (%s) but missing; remount it, or clean it up with --force",
 			ErrBroken, wt.Path, reg.lockReason)
 	case reg != nil:
 		return m.recover(ctx, wt, reg)
 	case present:
-		return nil, fmt.Errorf("%w: %s exists but isn't a worktree of %s", ErrCollision, wt.Path, r.path)
+		return nil, false, fmt.Errorf("%w: %s exists but isn't a worktree of %s", ErrCollision, wt.Path, r.path)
 	}
-	return m.add(ctx, wt, BranchName(ticket, FirstBranch))
+	if res, err := m.readResume(ticket, r.name); err != nil {
+		return nil, false, err
+	} else if res != nil {
+		// An earlier recover dropped the registration but never re-added it.
+		return m.reAdd(ctx, wt, res)
+	}
+	wt, err = m.add(ctx, wt, BranchName(ticket, FirstBranch))
+	return wt, true, err
 }
 
 // recover re-adds a worktree whose directory was deleted, on the branch it
-// was on, so the agent carries on with the PR it was working on.
-func (m *Manager) recover(ctx context.Context, wt *Worktree, reg *registration) (*Worktree, error) {
+// was on, so the agent carries on with the PR it was working on. git must
+// drop the stale registration first, and with it the only record of that
+// branch, so the branch (or detached HEAD) goes into a resume file before:
+// a failed or interrupted add is then retried on the same branch.
+func (m *Manager) recover(ctx context.Context, wt *Worktree, reg *registration) (*Worktree, bool, error) {
+	res := &resume{Branch: reg.branch}
 	if reg.detached {
 		if err := m.rescue(ctx, wt.RepoPath, wt.Ticket, reg.head); err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		res = &resume{Head: reg.head}
+	}
+	if err := m.writeResume(wt.Ticket, wt.Repo, res); err != nil {
+		return nil, false, err
 	}
 	if err := m.unregister(ctx, wt.RepoPath, wt.Path); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if reg.detached {
-		if _, err := m.git.Run(ctx, wt.RepoPath, "worktree", "add", "--quiet", "--detach", wt.Path, reg.head); err != nil {
-			return nil, err
+	return m.reAdd(ctx, wt, res)
+}
+
+// reAdd adds wt back as res says it was, and drops the resume file once it's
+// there.
+func (m *Manager) reAdd(ctx context.Context, wt *Worktree, res *resume) (*Worktree, bool, error) {
+	var err error
+	if res.Head != "" {
+		_, err = m.git.Run(ctx, wt.RepoPath, "worktree", "add", "--quiet", "--detach", wt.Path, res.Head)
+		if err == nil {
+			m.logger.Info("re-added worktree", "ticket", wt.Ticket, "repo", wt.Repo, "path", wt.Path, "head", res.Head)
 		}
-		m.logger.Info("re-added worktree", "ticket", wt.Ticket, "repo", wt.Repo, "path", wt.Path, "head", reg.head)
-		return wt, nil
+	} else {
+		branch := BranchName(wt.Ticket, FirstBranch)
+		if res.Branch != "" {
+			ok, existsErr := m.branchExists(ctx, wt.RepoPath, res.Branch)
+			if existsErr != nil {
+				return nil, false, existsErr
+			}
+			if ok {
+				branch = res.Branch
+			}
+		}
+		_, err = m.add(ctx, wt, branch)
 	}
-	branch := BranchName(wt.Ticket, FirstBranch)
-	if reg.branch != "" {
-		ok, err := m.branchExists(ctx, wt.RepoPath, reg.branch)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			branch = reg.branch
-		}
+	if err != nil {
+		return nil, true, err
 	}
-	return m.add(ctx, wt, branch)
+	m.dropResume(wt.Ticket, wt.Repo)
+	return wt, true, nil
 }
 
 // add makes the worktree on branch, cutting the branch from the default

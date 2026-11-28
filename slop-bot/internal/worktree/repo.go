@@ -47,8 +47,11 @@ func (m *Manager) checkRepo(ctx context.Context, p string) error {
 	if err != nil {
 		return err
 	}
-	want, err := filepath.EvalSymlinks(p)
+	want, err := filepath.Abs(p)
 	if err != nil {
+		return err
+	}
+	if want, err = filepath.EvalSymlinks(want); err != nil {
 		return err
 	}
 	if got := filepath.Clean(strings.TrimSpace(top)); got != want {
