@@ -85,8 +85,10 @@ func (m *Manager) check(ctx context.Context, e *WorktreeEntry, wt *worktree.Work
 // CleanWorktrees cleans up ticket's recorded worktrees on the user's say-so,
 // as Cleanup does at the ticket's end, or with force, ForceCleanup: whatever
 // they hold. It holds the ticket's start place, so no agent starts into a
-// worktree being removed, and refuses while the ticket's agent is live.
-func (m *Manager) CleanWorktrees(ctx context.Context, ticket ident.TicketID, force bool) ([]*worktree.CleanupResult, error) {
+// worktree being removed, and refuses while the ticket's agent is live. It
+// runs under that start's context, not the caller's: a CLI that hangs up
+// mustn't leave a worktree removed but still recorded.
+func (m *Manager) CleanWorktrees(_ context.Context, ticket ident.TicketID, force bool) ([]*worktree.CleanupResult, error) {
 	ctx, done, err := m.claimStart(ticket, state.PoolNormal)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrWorktreesInUse, err)

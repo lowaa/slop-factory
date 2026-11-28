@@ -102,7 +102,8 @@ func TestInstallSummaryGolden(t *testing.T) {
 	h := newInstallHarness(t)
 	repo := filepath.Join(h.home, "src", "app")
 	require.NoError(t, os.MkdirAll(repo, 0o700))
-	h.cmds.Answer("git -C "+repo+" rev-parse --git-dir", &service.Result{Stdout: ".git\n"})
+	h.cmds.Answer("git -C "+repo+" rev-parse --is-bare-repository", &service.Result{Stdout: "false\n"})
+	h.cmds.Answer("git -C "+repo+" rev-parse --show-toplevel", &service.Result{Stdout: repo + "\n"})
 
 	require.Equal(t, 0, h.run(t, "install", "--repo", "app=~/src/app"), h.err.String()+h.out.String())
 	golden(t, "install", h.stable(h.out.String()))
