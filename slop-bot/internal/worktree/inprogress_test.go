@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,50 @@ var stoppedWithAutostash = map[string]func(f *fixture, wt *Worktree){
 		f.run(wt.Path, "checkout", "--ours", "conflict")
 		f.run(wt.Path, "add", "conflict")
 	},
+}
+
+// With worktree.useRelativePaths git writes the admin dir's gitdir file
+// relative to it; a lookup that only understood absolute paths would find no
+// admin dir and treat the worktree as safe to remove.
+func TestRelativeGitdirStillFindsTheAdminDir(t *testing.T) {
+	t.Parallel()
+	checks := map[string]func(t *testing.T, f *fixture, wt *Worktree){
+		"cleanup keeps a mid-rebase worktree": func(t *testing.T, f *fixture, wt *Worktree) {
+			r := f.m.Cleanup(context.Background(), "72", []*Worktree{wt})[0]
+			require.NoError(t, r.Err)
+			assert.False(t, r.Removed, "removing it loses the autostashed edit")
+			assert.Contains(t, kinds(r.Reasons), InProgress)
+		},
+		"a deleted worktree's autostash is saved": func(t *testing.T, f *fixture, wt *Worktree) {
+			require.NoError(t, os.RemoveAll(wt.Path))
+			f.create("72", []string{"a"}, "a")
+			assert.Contains(t, f.run(wt.RepoPath, "stash", "list"), "slop-bot: autostash from "+wt.Path)
+		},
+	}
+	for name, check := range checks {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t, "a")
+			f.run(f.repos["a"], "config", "worktree.useRelativePaths", "true")
+			wt := f.create("72", []string{"a"}, "a")[0]
+			stoppedWithAutostash["rebase"](f, wt)
+			check(t, f, wt)
+		})
+	}
+}
+
+// A registered worktree whose admin dir can't be matched may be holding an
+// autostash, so atRisk refuses rather than guess it's safe. Git itself drops
+// such a worktree from its list, so this is reachable only through a path
+// mismatch; the test builds that state directly.
+func TestAtRiskFailsClosedWhenTheAdminDirIsNotFound(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "a")
+	st := &state{path: filepath.Join(t.TempDir(), "elsewhere"), reg: &registration{path: "elsewhere"}}
+
+	_, err := f.m.atRisk(context.Background(), f.repos["a"], st)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no admin dir")
 }
 
 func TestCleanupKeepsAWorktreeMidOperationWithACleanStatus(t *testing.T) {

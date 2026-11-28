@@ -18,9 +18,12 @@ type PruneCutoffs struct {
 	Events time.Time
 	// StateChanges deletes agent state history recorded before it.
 	StateChanges time.Time
-	// ReadMessages deletes messages read before it. An open ask is kept
-	// however old: it is still the user's to answer.
-	ReadMessages time.Time
+	// DeliveredMessages deletes messages delivered (or read) before it. A
+	// message pushed into an agent's conversation is delivered but never
+	// marked read, so keying on reads alone would keep it forever. Queued
+	// messages are kept, as is an open ask however old: it is still the
+	// user's to answer.
+	DeliveredMessages time.Time
 	// EndedAgents deletes agents that ended before it, with their history.
 	// One that still has worktrees recorded is kept, so no worktree slop-bot
 	// made is orphaned: cleanup removes the worktree first.
@@ -52,7 +55,7 @@ func (p *Pruner) Prune(ctx context.Context, c *PruneCutoffs) (*PruneResult, erro
 		}{
 			{"events", c.Events, &r.Events, "DELETE FROM events WHERE at < ?"},
 			{"agent state changes", c.StateChanges, &r.StateChanges, "DELETE FROM agent_state_changes WHERE at < ?"},
-			{"read messages", c.ReadMessages, &r.Messages, `DELETE FROM messages WHERE status = 'read' AND read_at < ?
+			{"delivered messages", c.DeliveredMessages, &r.Messages, `DELETE FROM messages WHERE status <> 'queued' AND coalesce(read_at, delivered_at) < ?
 				AND id NOT IN (SELECT message_id FROM asks WHERE closed_at IS NULL)`},
 			{"ended agents", c.EndedAgents, &r.Agents, `DELETE FROM agents WHERE ended_at < ?
 				AND NOT EXISTS (SELECT 1 FROM agent_worktrees w WHERE w.agent_id = agents.id)`},

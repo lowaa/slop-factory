@@ -87,6 +87,11 @@ type Options struct {
 	// to stop, for its children (hooks, filters) to let go of its output.
 	// Zero means DefaultWaitDelay.
 	WaitDelay time.Duration
+	// CommandTimeout bounds each command whatever the caller's context: a
+	// command stuck on a hung hook, a lock or a dead network mount would
+	// otherwise hold its caller for ever, notably cleanup, which runs
+	// detached from any caller's deadline. Zero means DefaultCommandTimeout.
+	CommandTimeout time.Duration
 	// Logger defaults to discarding.
 	Logger *slog.Logger
 }
@@ -94,12 +99,18 @@ type Options struct {
 // DefaultWaitDelay is Options.WaitDelay's default.
 const DefaultWaitDelay = 10 * time.Second
 
+// DefaultCommandTimeout is Options.CommandTimeout's default: far past any
+// healthy worktree add or status, short of a stuck command pinning a caller
+// for good.
+const DefaultCommandTimeout = 5 * time.Minute
+
 // Git runs git commands.
 type Git struct {
-	bin       string
-	env       []string
-	waitDelay time.Duration
-	logger    *slog.Logger
+	bin            string
+	env            []string
+	waitDelay      time.Duration
+	commandTimeout time.Duration
+	logger         *slog.Logger
 }
 
 // New resolves the git binary and builds the environment every command runs
@@ -121,7 +132,10 @@ func New(opts *Options) (*Git, error) {
 	if env == nil {
 		env = os.Environ()
 	}
-	g := &Git{bin: bin, env: cleanEnv(env), waitDelay: opts.WaitDelay, logger: opts.Logger}
+	g := &Git{bin: bin, env: cleanEnv(env), waitDelay: opts.WaitDelay, commandTimeout: opts.CommandTimeout, logger: opts.Logger}
+	if g.commandTimeout == 0 {
+		g.commandTimeout = DefaultCommandTimeout
+	}
 	if g.waitDelay == 0 {
 		g.waitDelay = DefaultWaitDelay
 	}
@@ -178,6 +192,8 @@ func cleanEnv(in []string) []string {
 
 // Run runs `git args...` in dir and returns its stdout.
 func (g *Git) Run(ctx context.Context, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, g.commandTimeout)
+	defer cancel()
 	// #nosec G204 -- bin is the configured git binary; args go to git as argv,
 	// never through a shell.
 	cmd := exec.CommandContext(ctx, g.bin, args...)

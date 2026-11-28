@@ -118,6 +118,24 @@ func TestCancelledContext(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// A command that never finishes is cut off by the per-command deadline even
+// when the caller's context has none: cleanup runs on a context stripped of
+// its caller's deadline. The fake binary blocks opening a FIFO nobody writes
+// to, so nothing here depends on how long anything takes.
+func TestCommandTimeoutStopsAHungCommand(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "never")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	bin := filepath.Join(dir, "hung-git")
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\nread _ < "+fifo+"\n"), 0o700)) // #nosec G306 -- an executable test script
+	g, err := gitx.New(&gitx.Options{Bin: bin, Env: gitxtest.Env(t), CommandTimeout: time.Millisecond})
+	require.NoError(t, err)
+
+	_, err = g.Run(context.Background(), dir, "status")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
 // hookRepo is a repo whose post-commit hook runs body.
 func hookRepo(t *testing.T, g *gitx.Git, body string) string {
 	t.Helper()

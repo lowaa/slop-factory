@@ -93,7 +93,7 @@ Ticket ids are as `ticket list` prints them.
 | `ticket comment <id> <text>` | agent | Comment: for product decisions, blockers and scope changes. |
 | `ticket block <id> --on <blocker>` | agent | Make a ticket wait on another. |
 | `ticket unblock <id> --on <blocker>` | agent | Lift a blocker. An agent may lift only blockers it added. |
-| `ticket cancel <id>` | agent | Cancel a ticket (agents: only one they filed). |
+| `ticket cancel <id>` | agent | Cancel a ticket (agents: your own, unless it is in discussion, or one you filed). |
 | `ticket assign <id> [<user>\|me]` | user | Assign a ticket, by default to slop-bot's user, so an agent picks it up; with an empty user, unassign it. |
 
 `ticket create` flags:
