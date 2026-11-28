@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -22,8 +23,8 @@ import (
 var updateGolden = flag.Bool("update", false, "rewrite testdata/*.golden from the current output")
 
 const (
-	installUID  = 1000
-	lingerQuery = "loginctl show-user 1000 -p Linger"
+	installUID  = 65533
+	lingerQuery = "loginctl show-user 65533 -p Linger"
 )
 
 // installHarness is the service harness with a fake PATH for doctor's
@@ -37,12 +38,15 @@ type installHarness struct {
 }
 
 // newInstallHarness runs with logind's runtime dir, so the service and the
-// CLI agree unless a test changes it. Nothing listens there.
+// CLI agree unless a test changes it. It is a uid with no login session, so
+// nothing listens there, not even a slop-bot really installed on this
+// machine, which the purge checks would otherwise find.
 func newInstallHarness(t *testing.T) *installHarness {
 	t.Helper()
+	require.NoDirExists(t, fmt.Sprintf("/run/user/%d", installUID), "the test uid must have no runtime dir")
 	h, runner := newServiceHarness(t)
 	ih := &installHarness{harness: h, runner: runner, cmds: doctortest.Healthy(filepath.Join(h.home, ".local", "bin")),
-		vars: map[string]string{"XDG_RUNTIME_DIR": "/run/user/1000", "PATH": "/usr/local/bin:/usr/bin"}}
+		vars: map[string]string{"XDG_RUNTIME_DIR": "/run/user/65533", "PATH": "/usr/local/bin:/usr/bin"}}
 	h.deps.Commands = ih.cmds
 	h.deps.Env.UID = installUID
 	h.deps.Env.Lookup = func(k string) (string, bool) { v, ok := ih.vars[k]; return v, ok }
@@ -276,12 +280,12 @@ func TestClientCommandsNameTheServicesSocketWhenTheyDiffer(t *testing.T) {
 	assert.Equal(t, 1, h.run(t, "health"))
 	assert.Contains(t, h.err.String(), "can't reach the slop-bot daemon at "+cliSock)
 	assert.Contains(t, h.err.String(), "note: the installed service ("+h.unit()+") listens at "+
-		"/run/user/1000/slop-bot/slop-bot.sock, not "+cliSock)
+		"/run/user/65533/slop-bot/slop-bot.sock, not "+cliSock)
 
 	require.Equal(t, 0, h.run(t, "paths"), h.err.String())
 	assert.Contains(t, h.out.String(), "warning: control socket: this shell resolves "+cliSock)
 	assert.Contains(t, h.out.String(), "fix: systemd always gives the service logind's runtime dir: "+
-		"export XDG_RUNTIME_DIR=/run/user/1000 in your shell, or unset it")
+		"export XDG_RUNTIME_DIR=/run/user/65533 in your shell, or unset it")
 
 	require.Equal(t, 0, h.run(t, "doctor"), h.err.String())
 	assert.Contains(t, h.out.String(), "warn  service paths    control socket")
@@ -382,6 +386,6 @@ func TestInstallSummaryShowsTheServicesSocket(t *testing.T) {
 	h := newInstallHarness(t)
 	h.vars["XDG_RUNTIME_DIR"] = h.runtime
 	require.Equal(t, 0, h.run(t, "install"), h.err.String()+h.out.String())
-	assert.Regexp(t, `socket\s+/run/user/1000/slop-bot/slop-bot.sock\s+the service's; this shell resolves `+
+	assert.Regexp(t, `socket\s+/run/user/65533/slop-bot/slop-bot.sock\s+the service's; this shell resolves `+
 		filepath.Join(h.runtime, "slop-bot", "slop-bot.sock"), h.out.String())
 }
