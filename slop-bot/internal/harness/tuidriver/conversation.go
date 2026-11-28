@@ -1,0 +1,825 @@
+package tuidriver
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/lowaa/slop-factory/go-clock"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
+)
+
+// conversationTag is the session tag holding the conversation id, so Adopt
+// recovers it from the session itself.
+const conversationTag = "slop-bot-conversation"
+
+// Defaults for Options' timings.
+const (
+	defaultPollInterval   = time.Second
+	defaultConfirmTimeout = 5 * time.Second
+	defaultRenderTimeout  = 5 * time.Second
+	// renderPoll is how often a paste's rendering is checked.
+	renderPoll = 10 * time.Millisecond
+)
+
+var (
+	// ErrAttached means a person is attached to the session, so the kit
+	// won't type into it. The message wasn't delivered; send it later.
+	ErrAttached = errors.New("tuidriver: a person is attached to the session")
+	// ErrUnconfirmed means keys were sent, retried, and the harness never
+	// showed that it acted on them.
+	ErrUnconfirmed = errors.New("tuidriver: the harness didn't confirm")
+	errExited      = errors.New("tuidriver: the session has exited")
+)
+
+// Options configure one conversation.
+type Options struct {
+	Profile *Profile
+	Host    sessionhost.SessionHost
+	Hub     HookHub
+	// Session is the session's name, unique on Host.
+	Session string
+	// Pointer is the text typed in place of messages that can't be injected,
+	// e.g. "2 new messages: run `slop-bot inbox`". The daemon composes it.
+	Pointer func(msgs []*harness.Message) string
+	Logger  *slog.Logger
+	Clock   clock.Clock
+	// PollInterval is how often the screen markers are read: the fallback
+	// for what hooks don't say. A marker overrides the hooks' turn state
+	// only after a PollInterval with no hook.
+	PollInterval time.Duration
+	// ConfirmTimeout is how long a submit, cancel or quit waits for the
+	// harness to act before it is retried or given up on.
+	ConfirmTimeout time.Duration
+	// RenderTimeout bounds the wait for a paste to show on screen.
+	RenderTimeout time.Duration
+}
+
+func (o *Options) normalised() (*Options, error) {
+	n := *o
+	if n.Profile == nil || n.Host == nil || n.Hub == nil || n.Pointer == nil || n.Session == "" {
+		return nil, errors.New("tuidriver: Profile, Host, Hub, Pointer and Session are required")
+	}
+	if n.Profile.Markers == nil || n.Profile.ParseHook == nil || n.Profile.Reply == nil {
+		return nil, fmt.Errorf("tuidriver: %s's profile needs Markers, ParseHook and Reply", n.Profile.Harness)
+	}
+	if n.Logger == nil {
+		n.Logger = slog.New(slog.DiscardHandler)
+	}
+	n.Logger = n.Logger.With("harness", n.Profile.Harness, "session", n.Session)
+	n.Clock = clock.Or(n.Clock)
+	if n.PollInterval <= 0 {
+		n.PollInterval = defaultPollInterval
+	}
+	if n.ConfirmTimeout <= 0 {
+		n.ConfirmTimeout = defaultConfirmTimeout
+	}
+	if n.RenderTimeout <= 0 {
+		n.RenderTimeout = defaultRenderTimeout
+	}
+	return &n, nil
+}
+
+// Conversation is a TUI session.
+type Conversation struct {
+	opts    *Options
+	p       *Profile
+	host    sessionhost.SessionHost
+	events  chan harness.Event
+	exited  chan struct{}
+	unroute func()
+	// bg runs the watchers; cancel ends them.
+	bg     context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	// keys serialises everything that types: a paste and its submit can't
+	// interleave with a cancel or another paste.
+	keys sync.Mutex
+
+	// emitMu orders state changes with the events they emit, across the
+	// hook, screen and exit sources. It is taken before mu.
+	emitMu       sync.Mutex
+	eventsClosed bool
+
+	mu    sync.Mutex
+	id    string
+	ready bool
+	// readyCh closes once ready.
+	readyCh chan struct{}
+	inTurn  bool
+	// settled is closed and replaced whenever a turn ends, so Stop and
+	// Interrupt can wait for "not in a turn".
+	settled chan struct{}
+	// submitted is closed and replaced whenever the harness takes a prompt.
+	submitted chan struct{}
+	// pending are messages waiting for an injecting hook, or for idle.
+	pending []*harness.Message
+	// heldForAttach means pending is waiting for the person to detach.
+	heldForAttach bool
+	// hookGen counts hooks, and lastHook is when the last arrived: a screen
+	// read that overlaps a hook, or follows it closely, is stale.
+	hookGen      uint64
+	lastHook     time.Time
+	interrupting bool
+	stopping     bool
+	killed       bool
+	closing      bool
+	exitErr      error
+
+	finishOnce sync.Once
+	closeOnce  sync.Once
+}
+
+func newConversation(opts *Options) *Conversation {
+	bg, cancel := context.WithCancel(context.Background())
+	c := &Conversation{
+		opts: opts, p: opts.Profile, host: opts.Host,
+		events:    make(chan harness.Event, 64),
+		exited:    make(chan struct{}),
+		bg:        bg,
+		cancel:    cancel,
+		readyCh:   make(chan struct{}),
+		settled:   make(chan struct{}),
+		submitted: make(chan struct{}),
+		unroute:   func() {},
+	}
+	close(c.settled) // not in a turn yet
+	return c
+}
+
+// Start launches a session, resuming resume's conversation when it is
+// non-nil, and returns once the harness is ready for a message.
+func Start(ctx context.Context, opts *Options, ws *harness.Workspace, resume *harness.ConversationRef) (*Conversation, error) {
+	o, err := opts.normalised()
+	if err != nil {
+		return nil, err
+	}
+	spec, err := o.Profile.Command(ws, resume)
+	if err != nil {
+		return nil, err
+	}
+	if o.Profile.InstallHooks != nil {
+		if err := o.Profile.InstallHooks(ws, spec, o.Hub.Command(o.Session)); err != nil {
+			return nil, fmt.Errorf("tuidriver: installing %s's hooks: %w", o.Profile.Harness, err)
+		}
+	}
+	c := newConversation(o)
+	if resume != nil {
+		c.id = resume.ID
+	}
+	// Routed before the session starts, so its first hook isn't missed.
+	if err := c.route(); err != nil {
+		return nil, err
+	}
+	err = o.Host.Start(ctx, &sessionhost.StartSpec{
+		Name: o.Session, Argv: append([]string{spec.Path}, spec.Args...), Env: spec.Env, Dir: spec.Dir,
+	})
+	if err != nil {
+		c.unroute()
+		return nil, err
+	}
+	c.watch()
+	if err := c.awaitReady(ctx); err != nil {
+		_ = c.kill(context.Background())
+		return nil, err
+	}
+	return c, nil
+}
+
+// Adopt takes over a session that outlived the daemon that started it, by
+// its name (opts.Session). Its state is read off the screen: it starts with
+// Ready, then TurnStarted if a turn is running.
+func Adopt(ctx context.Context, opts *Options) (*Conversation, error) {
+	o, err := opts.normalised()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := o.Host.Status(ctx, o.Session); err != nil {
+		return nil, err
+	}
+	id, err := o.Host.Tag(ctx, o.Session, conversationTag)
+	if err != nil {
+		return nil, err
+	}
+	screen, err := o.Host.Capture(ctx, o.Session)
+	if err != nil {
+		return nil, err
+	}
+	c := newConversation(o)
+	c.id = id
+	if err := c.route(); err != nil {
+		return nil, err
+	}
+	c.apply(func() []harness.Event {
+		evs := []harness.Event{c.markReady()}
+		if o.Profile.Markers.classify(screen) == screenBusy {
+			evs = append(evs, c.turnStarted()...)
+		}
+		return evs
+	})
+	c.watch()
+	return c, nil
+}
+
+func (c *Conversation) route() error {
+	unroute, err := c.opts.Hub.Route(c.opts.Session, c.hook)
+	if err != nil {
+		return fmt.Errorf("tuidriver: routing %s's hooks: %w", c.opts.Session, err)
+	}
+	var once sync.Once
+	c.unroute = func() { once.Do(unroute) }
+	return nil
+}
+
+// watch starts the exit and screen watchers.
+func (c *Conversation) watch() {
+	c.wg.Add(2)
+	go func() {
+		defer c.wg.Done()
+		c.watchExit()
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.watchScreen()
+	}()
+}
+
+func (c *Conversation) awaitReady(ctx context.Context) error {
+	select {
+	case <-c.readyCh:
+		return nil
+	case <-c.exited:
+		return fmt.Errorf("tuidriver: %s exited before it was ready: %w", c.p.Harness, c.exitErr)
+	case <-ctx.Done():
+		screen, _ := c.host.Capture(context.Background(), c.opts.Session)
+		return fmt.Errorf("tuidriver: %s not ready: %w (screen: %s)", c.p.Harness, ctx.Err(), lastLine(screen))
+	}
+}
+
+// apply runs a state change and emits the events it returns, in order with
+// every other source's.
+func (c *Conversation) apply(change func() []harness.Event) {
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
+	c.mu.Lock()
+	evs := change()
+	c.mu.Unlock()
+	if c.eventsClosed {
+		return
+	}
+	// Sending blocks when the consumer falls behind: back-pressure onto
+	// the hooks rather than dropped events.
+	for _, ev := range evs {
+		if ev.At.IsZero() {
+			ev.At = c.opts.Clock.Now()
+		}
+		c.events <- ev
+	}
+}
+
+// The state transitions; c.mu is held.
+
+func (c *Conversation) markReady() harness.Event {
+	if !c.ready {
+		c.ready = true
+		close(c.readyCh)
+	}
+	return harness.Event{Kind: harness.Ready}
+}
+
+func (c *Conversation) turnStarted() []harness.Event {
+	if c.inTurn {
+		return nil
+	}
+	c.inTurn = true
+	c.settled = make(chan struct{})
+	c.signalSubmitted()
+	return []harness.Event{{Kind: harness.TurnStarted}}
+}
+
+func (c *Conversation) turnEnded(outcome harness.TurnOutcome) []harness.Event {
+	if !c.inTurn {
+		return nil
+	}
+	c.inTurn = false
+	close(c.settled)
+	if outcome == "" {
+		outcome = harness.TurnCompleted
+	}
+	if len(c.pending) > 0 {
+		c.spawnFlush()
+	}
+	return []harness.Event{{Kind: harness.TurnEnded, Outcome: outcome}}
+}
+
+func (c *Conversation) signalSubmitted() {
+	close(c.submitted)
+	c.submitted = make(chan struct{})
+}
+
+// spawnFlush types the pointer for pending messages, once idle.
+func (c *Conversation) spawnFlush() {
+	if c.closing || c.stopping {
+		return
+	}
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.flush(c.bg)
+	}()
+}
+
+// hook handles one hook invocation, routed from the HookHub.
+func (c *Conversation) hook(ctx context.Context, event string, payload []byte) ([]byte, error) {
+	call, err := c.p.ParseHook(event, payload)
+	if err != nil {
+		// Still answer: a harness may read no answer as a refusal.
+		c.opts.Logger.Warn("tuidriver: unreadable hook payload", "event", event, "err", err)
+		call = &HookCall{}
+	}
+	call.Event = event
+	var inject []*harness.Message
+	var newID string
+	c.apply(func() []harness.Event {
+		c.hookGen++
+		c.lastHook = c.opts.Clock.Now()
+		if call.ConversationID != "" && call.ConversationID != c.id {
+			c.id, newID = call.ConversationID, call.ConversationID
+		}
+		if call.Submitted {
+			c.signalSubmitted()
+		}
+		if c.p.Injects && call.Inject != InjectNone && !c.stopping && len(c.pending) > 0 {
+			inject, c.pending = c.pending, nil
+		}
+		return c.hookEvents(call, len(inject) > 0)
+	})
+	if newID != "" {
+		if err := c.host.SetTag(ctx, c.opts.Session, conversationTag, newID); err != nil {
+			c.opts.Logger.Warn("tuidriver: recording the conversation id", "err", err)
+		}
+	}
+	return c.p.Reply(call, inject)
+}
+
+// hookEvents applies a hook's events to the turn state; c.mu is held.
+func (c *Conversation) hookEvents(call *HookCall, injected bool) []harness.Event {
+	var evs []harness.Event
+	for _, ev := range call.Events {
+		switch ev.Kind {
+		case harness.Ready:
+			if c.id == "" {
+				c.opts.Logger.Warn("tuidriver: ready without a conversation id", "event", call.Event)
+				continue
+			}
+			if !c.ready {
+				evs = append(evs, c.markReady())
+			}
+		case harness.TurnStarted:
+			evs = append(evs, c.turnStarted()...)
+		case harness.TurnEnded:
+			if call.Inject == InjectTurnEnd && injected {
+				continue // the reply keeps the turn going
+			}
+			evs = append(evs, c.turnEnded(ev.Outcome)...)
+		default:
+			evs = append(evs, ev)
+		}
+	}
+	return evs
+}
+
+// watchScreen polls the screen markers: the fallback for state the hooks
+// don't report, such as a cancel on agy.
+func (c *Conversation) watchScreen() {
+	tick := c.opts.Clock.NewTicker(c.opts.PollInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-c.bg.Done():
+			return
+		case <-tick.C():
+			c.readScreen(c.bg)
+		}
+	}
+}
+
+func (c *Conversation) readScreen(ctx context.Context) {
+	c.mu.Lock()
+	gen := c.hookGen
+	c.mu.Unlock()
+	screen, err := c.host.Capture(ctx, c.opts.Session)
+	if err != nil {
+		return // the exit watcher reports a gone session
+	}
+	st := c.p.Markers.classify(screen)
+	cancelled := c.p.Markers.interrupted(screen)
+	c.apply(func() []harness.Event {
+		// A hook during the read, or just before it, may not have reached
+		// the screen yet: the hook is the better witness.
+		if st == screenUnknown || c.hookGen != gen || c.opts.Clock.Now().Sub(c.lastHook) < c.opts.PollInterval {
+			return nil
+		}
+		return c.screenEvents(st, cancelled)
+	})
+	c.retryHeld()
+}
+
+// screenEvents applies what the screen shows to the turn state; c.mu is
+// held.
+func (c *Conversation) screenEvents(st screenState, cancelled bool) []harness.Event {
+	switch st {
+	case screenBusy:
+		return c.turnStarted()
+	case screenIdle:
+		var evs []harness.Event
+		if !c.ready && c.id != "" {
+			evs = append(evs, c.markReady())
+		}
+		outcome := harness.TurnCompleted
+		if c.interrupting || cancelled {
+			outcome = harness.TurnInterrupted
+		}
+		return append(evs, c.turnEnded(outcome)...)
+	}
+	return nil
+}
+
+// retryHeld retries pending messages held while a person was attached.
+func (c *Conversation) retryHeld() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.heldForAttach && !c.inTurn && len(c.pending) > 0 {
+		c.heldForAttach = false
+		c.spawnFlush()
+	}
+}
+
+// watchExit reports the session's end: its process's death, or the session
+// going away.
+func (c *Conversation) watchExit() {
+	for {
+		st, err := c.host.Status(c.bg, c.opts.Session)
+		if c.bg.Err() != nil {
+			return // closed: the session lives on without us
+		}
+		if err != nil {
+			c.finish(c.goneStatus(err))
+			return
+		}
+		if st.Dead {
+			screen, _ := c.host.Capture(c.bg, c.opts.Session)
+			var exitErr error
+			if st.ExitStatus != 0 {
+				exitErr = fmt.Errorf("%s exited with status %d: %s", c.p.Harness, st.ExitStatus, lastLine(screen))
+			}
+			// The dead pane was kept only for its status.
+			if err := c.host.Kill(c.bg, c.opts.Session); err != nil && !errors.Is(err, sessionhost.ErrNoSession) {
+				c.opts.Logger.Warn("tuidriver: removing the dead session", "err", err)
+			}
+			c.finish(st.ExitStatus, exitErr)
+			return
+		}
+		// It may return early (a signal kept from an earlier session of the
+		// same name); the loop checks again.
+		if err := c.host.WaitExit(c.bg, c.opts.Session); err != nil && c.bg.Err() == nil {
+			c.opts.Logger.Warn("tuidriver: waiting for the session's exit", "err", err)
+		}
+	}
+}
+
+func (c *Conversation) goneStatus(err error) (int, error) {
+	c.mu.Lock()
+	killed := c.killed
+	c.mu.Unlock()
+	// kill-session hangs the pane up.
+	code := 128 + int(syscall.SIGHUP)
+	if killed {
+		return code, fmt.Errorf("%s session killed", c.p.Harness)
+	}
+	return code, fmt.Errorf("%s session went away: %w", c.p.Harness, err)
+}
+
+// finish reports the exit, last, and closes Events.
+func (c *Conversation) finish(code int, exitErr error) {
+	c.finishOnce.Do(func() {
+		c.unroute()
+		c.emitMu.Lock()
+		c.mu.Lock()
+		if c.inTurn {
+			c.inTurn = false
+			close(c.settled)
+		}
+		c.exitErr = exitErr
+		c.mu.Unlock()
+		if !c.eventsClosed {
+			c.events <- harness.Event{Kind: harness.Exited, At: c.opts.Clock.Now(), ExitCode: code, Err: exitErr}
+			c.eventsClosed = true
+			close(c.events)
+		}
+		c.emitMu.Unlock()
+		close(c.exited)
+		c.cancel()
+	})
+}
+
+// Ref implements harness.Conversation.
+func (c *Conversation) Ref() harness.ConversationRef {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return harness.ConversationRef{Harness: c.p.Harness, Driver: Driver, ID: c.id}
+}
+
+// Events implements harness.Conversation.
+func (c *Conversation) Events() <-chan harness.Event { return c.events }
+
+// Exited is closed once the session has gone and Events has closed.
+func (c *Conversation) Exited() <-chan struct{} { return c.exited }
+
+// Send implements harness.Conversation. Mid-turn, the message waits for a
+// hook that can inject it, or else for the turn to end, and Send returns at
+// once. Idle, Send types the pointer and returns once the harness took it,
+// or ErrAttached while a person is attached.
+func (c *Conversation) Send(ctx context.Context, msg *harness.Message) error {
+	c.keys.Lock()
+	defer c.keys.Unlock()
+	c.mu.Lock()
+	select {
+	case <-c.exited:
+		c.mu.Unlock()
+		return errExited
+	default:
+	}
+	if c.inTurn {
+		c.pending = append(c.pending, msg)
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Unlock()
+	return c.typePointer(ctx, []*harness.Message{msg})
+}
+
+// flush types the pointer for the pending messages, if the harness is idle.
+func (c *Conversation) flush(ctx context.Context) {
+	c.keys.Lock()
+	defer c.keys.Unlock()
+	c.mu.Lock()
+	msgs := c.pending
+	if c.inTurn || c.stopping || len(msgs) == 0 {
+		c.mu.Unlock()
+		return
+	}
+	c.pending = nil
+	c.mu.Unlock()
+	err := c.typePointer(ctx, msgs)
+	switch {
+	case errors.Is(err, ErrAttached):
+		c.mu.Lock()
+		c.pending = append(msgs, c.pending...)
+		c.heldForAttach = true
+		c.mu.Unlock()
+	case err != nil:
+		// Not retried: the text may be in the prompt already, and a second
+		// paste would double it. The messages stay in the inbox the pointer
+		// names.
+		c.opts.Logger.Warn("tuidriver: delivering held messages", "count", len(msgs), "err", err)
+	}
+}
+
+// typePointer pastes the pointer for msgs, waits for it to show, then
+// submits it, retrying the submit once. c.keys is held.
+func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message) error {
+	if err := c.notAttached(ctx); err != nil {
+		return err
+	}
+	text := c.opts.Pointer(msgs)
+	c.mu.Lock()
+	submitted := c.submitted
+	c.mu.Unlock()
+	if err := c.host.Paste(ctx, c.opts.Session, text); err != nil {
+		return err
+	}
+	if err := c.awaitRendered(ctx, text); err != nil {
+		return err
+	}
+	return c.confirmed(ctx, c.p.SubmitKey, submitted)
+}
+
+// confirmed presses key until done closes: twice at most, because the
+// first press can be swallowed (the Enter race: a TUI still handling the
+// paste drops it).
+func (c *Conversation) confirmed(ctx context.Context, key string, done <-chan struct{}) error {
+	for attempt := 1; ; attempt++ {
+		if err := c.notAttached(ctx); err != nil {
+			return err
+		}
+		if err := c.host.SendKeys(ctx, c.opts.Session, key); err != nil {
+			return err
+		}
+		select {
+		case <-done:
+			return nil
+		case <-c.exited:
+			return errExited
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.opts.Clock.After(c.opts.ConfirmTimeout):
+		}
+		if attempt == 2 {
+			return fmt.Errorf("%w: %s", ErrUnconfirmed, key)
+		}
+		c.opts.Logger.Info("tuidriver: unconfirmed, pressing again", "key", key)
+	}
+}
+
+func (c *Conversation) notAttached(ctx context.Context) error {
+	st, err := c.host.Status(ctx, c.opts.Session)
+	if err != nil {
+		return err
+	}
+	if st.Attached > 0 {
+		return ErrAttached
+	}
+	return nil
+}
+
+// awaitRendered waits for text to show on screen, so the submit doesn't
+// overtake the paste. Nothing signals a redraw, so this polls; it runs on
+// the wall clock, not the injected one, because it is a sub-second wait on
+// tmux's redraw that no test needs to move.
+func (c *Conversation) awaitRendered(ctx context.Context, text string) error {
+	ctx, cancel := context.WithTimeout(ctx, c.opts.RenderTimeout)
+	defer cancel()
+	tick := time.NewTicker(renderPoll)
+	defer tick.Stop()
+	for {
+		screen, err := c.host.Capture(ctx, c.opts.Session)
+		if err == nil && c.p.rendered(screen, text) {
+			return nil
+		}
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			return fmt.Errorf("tuidriver: the paste never showed: %w (screen: %s)", ctx.Err(), lastLine(screen))
+		}
+	}
+}
+
+// Interrupt implements harness.Conversation: the cancel key, confirmed by
+// the turn ending, from a hook or the screen. Idle, there is nothing to
+// interrupt.
+func (c *Conversation) Interrupt(ctx context.Context) error {
+	c.keys.Lock()
+	defer c.keys.Unlock()
+	c.mu.Lock()
+	if !c.inTurn {
+		c.mu.Unlock()
+		return nil
+	}
+	settled := c.settled
+	c.interrupting = true
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.interrupting = false
+		c.mu.Unlock()
+	}()
+	err := c.confirmed(ctx, c.p.CancelKey, settled)
+	if errors.Is(err, errExited) {
+		return nil
+	}
+	return err
+}
+
+// Stop implements harness.Conversation: after the turn settles, the
+// profile's quit sequence, confirmed by the pane dying; with force, or when
+// that fails, the session is killed.
+func (c *Conversation) Stop(ctx context.Context, force bool) error {
+	if force {
+		return c.kill(ctx)
+	}
+	for quitting := false; !quitting; {
+		c.mu.Lock()
+		settled := c.settled
+		c.mu.Unlock()
+		select {
+		case <-settled:
+		case <-c.exited:
+			return nil
+		case <-ctx.Done():
+			return c.kill(context.Background())
+		}
+		quitting = c.beginQuit()
+	}
+	err := c.quit(ctx)
+	c.keys.Unlock()
+	if err != nil {
+		c.opts.Logger.Warn("tuidriver: quitting", "err", err)
+		return c.kill(context.Background())
+	}
+	select {
+	case <-c.exited:
+		return nil
+	case <-ctx.Done():
+	case <-c.opts.Clock.After(c.opts.ConfirmTimeout):
+		c.opts.Logger.Warn("tuidriver: the harness didn't quit; killing it")
+	}
+	return c.kill(context.Background())
+}
+
+// beginQuit takes the keys for the quit sequence, unless a turn started
+// meanwhile (a held message's pointer, typed as the last turn ended): then
+// Stop waits for that one too. On true, the caller holds c.keys.
+func (c *Conversation) beginQuit() bool {
+	c.keys.Lock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.inTurn {
+		c.keys.Unlock()
+		return false
+	}
+	c.stopping = true
+	return true
+}
+
+// quit types the quit sequence; c.keys is held.
+func (c *Conversation) quit(ctx context.Context) error {
+	for _, in := range c.p.Quit {
+		if in.Text != "" {
+			if err := c.host.SendText(ctx, c.opts.Session, in.Text); err != nil {
+				return err
+			}
+		}
+		if len(in.Keys) > 0 {
+			if err := c.host.SendKeys(ctx, c.opts.Session, in.Keys...); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// kill ends the session and waits for the exit to be reported.
+func (c *Conversation) kill(ctx context.Context) error {
+	c.mu.Lock()
+	c.killed = true
+	c.mu.Unlock()
+	if err := c.host.Kill(ctx, c.opts.Session); err != nil && !errors.Is(err, sessionhost.ErrNoSession) {
+		select {
+		case <-c.exited:
+			return nil
+		default:
+		}
+		return err
+	}
+	select {
+	case <-c.exited:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// AttachPlan implements harness.Conversation: a person joins the session
+// itself.
+func (c *Conversation) AttachPlan(context.Context) (*harness.AttachPlan, error) {
+	argv := c.host.AttachCommand(c.opts.Session)
+	return &harness.AttachPlan{Kind: harness.Join, Command: &harness.LaunchSpec{Path: argv[0], Args: argv[1:]}}, nil
+}
+
+// Close lets go of the session without ending it, as a daemon shutting down
+// does: the session lives on for Adopt. Events closes with no Exited.
+func (c *Conversation) Close() error {
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.closing = true
+		c.mu.Unlock()
+		c.unroute()
+		c.cancel()
+		c.wg.Wait()
+		c.emitMu.Lock()
+		if !c.eventsClosed {
+			c.eventsClosed = true
+			close(c.events)
+		}
+		c.emitMu.Unlock()
+	})
+	return nil
+}
+
+func lastLine(screen string) string {
+	lines := strings.Split(strings.TrimRight(screen, " \n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return ""
+}

@@ -40,25 +40,29 @@ func (h *Harness) Capabilities() harness.Capabilities {
 
 // Start implements harness.AIHarness.
 func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
+	return rpcdriver.Start(ctx, &rpcdriver.Options{
+		Harness: Name, Driver: Driver, Codec: codec{}, Spec: launch(h.Binary, h.Control, ws, resume),
+		Logger: h.Logger, Clock: h.Clock,
+	})
+}
+
+// launch is the fake's command line, in either mode (extra comes first).
+func launch(binary, control string, ws *harness.Workspace, resume *harness.ConversationRef, extra ...string) *harness.LaunchSpec {
 	set := map[string]string{}
 	for k, v := range ws.Env {
 		set[k] = v
 	}
-	if h.Control != "" {
-		set[EnvControl] = h.Control
+	if control != "" {
+		set[EnvControl] = control
 	}
-	var args []string
+	args := extra
 	if resume != nil {
-		args = []string{"--resume", resume.ID}
+		args = append(args, "--resume", resume.ID)
 	}
-	spec := &harness.LaunchSpec{
-		Path: h.Binary,
+	return &harness.LaunchSpec{
+		Path: binary,
 		Args: args,
 		Env:  agentproc.AgentEnv(&agentproc.EnvOptions{Base: os.Environ(), APIKeyOptIn: ws.APIKeyOptIn, Set: set}),
 		Dir:  ws.Dir,
 	}
-	return rpcdriver.Start(ctx, &rpcdriver.Options{
-		Harness: Name, Driver: Driver, Codec: codec{}, Spec: spec,
-		Logger: h.Logger, Clock: h.Clock,
-	})
 }
