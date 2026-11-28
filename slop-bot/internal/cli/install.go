@@ -280,8 +280,13 @@ func (a *app) uninstall(cmd *cobra.Command, purge, yes bool) error {
 	// service goes: the unit is the record of where its data is.
 	var targets []string
 	if purge {
-		if targets, err = a.purgeTargets(cmd.Context(), out, m, p); err != nil {
+		if targets, err = a.purgeTargets(out, m, p); err != nil {
 			return err
+		}
+		if _, err := m.ServiceEnv(); errors.Is(err, service.ErrNotInstalled) && a.daemonAnswers(cmd.Context(), p.Socket()) {
+			// No service to stop, so the daemon was started by hand: say so
+			// before asking, rather than after.
+			return fmt.Errorf("a slop-bot daemon is still running at %s; stop it, then purge", p.Socket())
 		}
 		if len(targets) > 0 && !yes {
 			out.printf("type 'purge' to delete them: ")
@@ -302,6 +307,12 @@ func (a *app) uninstall(cmd *cobra.Command, purge, yes bool) error {
 		out.printf("kept slop-bot's files (config, tickets, state); `slop-bot uninstall --purge` deletes them\n")
 		return out.err
 	}
+	// The service's daemon is stopped now. One that still answers was
+	// started by hand, and would go on writing into what's deleted.
+	if len(targets) > 0 && a.daemonAnswers(cmd.Context(), p.Socket()) {
+		return fmt.Errorf("a slop-bot daemon started by hand is still running at %s, so nothing was deleted; "+
+			"stop it, then run `slop-bot uninstall --purge` again", p.Socket())
+	}
 	for _, t := range targets {
 		if err := os.RemoveAll(t); err != nil {
 			return fmt.Errorf("purging %s: %w", t, err)
@@ -320,12 +331,7 @@ var errNotConfirmed = errors.New("not confirmed; nothing was deleted and the ser
 // that exist: nothing else under a base is touched. It refuses when the
 // directories might not be the right ones, or would take workspace_dir
 // (with work in progress) with them.
-func (a *app) purgeTargets(ctx context.Context, out *errWriter, m service.Manager, p *paths.Paths) ([]string, error) {
-	// A daemon started by hand would go on writing into what's deleted.
-	if conn, err := control.Dialer(p.Socket())(ctx, "", ""); err == nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("a slop-bot daemon is still running at %s; stop it, then purge", p.Socket())
-	}
+func (a *app) purgeTargets(out *errWriter, m service.Manager, p *paths.Paths) ([]string, error) {
 	// This shell's directories may not be the service's: purge from the
 	// shell that installed it, or the real data stays and another
 	// instance's goes.
@@ -360,6 +366,19 @@ func (a *app) purgeTargets(ctx context.Context, out *errWriter, m service.Manage
 	}
 	out.printf("and leaves workspace_dir alone (%s): it may hold work in progress\n", c.WorkspaceDir)
 	return targets, nil
+}
+
+// daemonAnswers reports whether a daemon answers at socket.
+func (a *app) daemonAnswers(ctx context.Context, socket string) bool {
+	if a.deps.daemonAnswers != nil {
+		return a.deps.daemonAnswers(ctx, socket)
+	}
+	conn, err := control.Dialer(socket)(ctx, "", "")
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // within reports whether path is dir or under it, after symlinks, so a
