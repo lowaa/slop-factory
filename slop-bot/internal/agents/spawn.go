@@ -119,14 +119,7 @@ func (m *Manager) kickOff(ctx context.Context, r *runner, t *tickets.Ticket) err
 		return err
 	}
 	err = m.send(ctx, r, []state.Message{*kick}, state.DeliveryTurn)
-	if errors.Is(err, harness.ErrAttached) || errors.Is(err, harness.ErrUnsubmitted) {
-		m.opts.Logger.Info("agents: the kick-off waits: a person is in the session", "agent", r.id, "err", err)
-		if r.state() != state.StateAttached {
-			r.setState(ctx, state.StateIdle, "a person is in its session")
-		}
-		if errors.Is(err, harness.ErrAttached) {
-			m.redeliverLater(r)
-		}
+	if err != nil && m.heldInSession(ctx, r, err) {
 		return nil
 	}
 	return err
@@ -457,7 +450,11 @@ func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
 	}
 	// A person joined to a TUI session that outlived the daemon: the
 	// session is taken back as it runs, still attached.
-	if s, ok := m.adoptSession(ctx, a); ok {
+	if s, ok, err := m.adoptSession(ctx, a); err != nil {
+		// Left with nothing running, as an attach without a session is:
+		// the hand-back resumes it, or says why it can't.
+		m.opts.Logger.Warn("agents: adopting an attached agent's session", "agent", a.ID, "err", err)
+	} else if ok {
 		r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, started: s,
 			st: state.StateAttached, decl: declared(a.Declared), summary: a.DeclaredSummary})
 		r.mu.Lock()
@@ -487,9 +484,11 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error
 	}
 	// A session that outlived the daemon is taken back as it is: its turn
 	// wasn't cut short, but whatever it told slop-bot meanwhile was lost.
-	s, adopted := m.adoptSession(ctx, a)
+	s, adopted, err := m.adoptSession(ctx, a)
+	if err != nil {
+		return err
+	}
 	if !adopted {
-		var err error
 		if s, err = m.startConversation(ctx, a); err != nil {
 			return err
 		}

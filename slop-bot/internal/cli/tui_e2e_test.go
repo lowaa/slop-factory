@@ -57,11 +57,17 @@ func (c cliHub) Command(session string) []string {
 
 func newTUIE2E(t *testing.T) *tuiE2E {
 	t.Helper()
+	return newTUIE2EWith(t, "")
+}
+
+// newTUIE2EWith is newTUIE2E with more config.
+func newTUIE2EWith(t *testing.T, cfg string) *tuiE2E {
+	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
 	h := newHarness(t)
-	require.NoError(t, os.WriteFile(h.config, []byte("user: ada\ndefault_harness: agy\nharnesses: {agy: {}}\n"), 0o600))
+	require.NoError(t, os.WriteFile(h.config, []byte("user: ada\ndefault_harness: agy\nharnesses: {agy: {}}\n"+cfg), 0o600))
 	b := make([]byte, 6)
 	_, err := rand.Read(b)
 	require.NoError(t, err)
@@ -156,6 +162,10 @@ func TestARestartedDaemonAdoptsTheSessionMidTurn(t *testing.T) {
 	s, agent := e.spawned("t")
 	e.do(s, fake.CmdTurnStart)
 	e.await("agent.state", toState("refining"))
+	// Taken for the turn, waiting for its next step's hook, when the daemon
+	// stops.
+	e.h.ok(t, "tell", agent, "use the v2 API")
+	e.await("message.delivered", nil)
 
 	e.stop()
 	names, err := e.host.List(e.ctx())
@@ -174,6 +184,7 @@ func TestARestartedDaemonAdoptsTheSessionMidTurn(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fake.ViaHook, note.Via)
 	assert.Contains(t, note.Text, "slop-bot restarted while you worked")
+	assert.Contains(t, note.Text, "use the v2 API", "what the old daemon held isn't lost")
 	e.agent(s, "done", "--summary", "ok")
 	e.do(s, fake.CmdTurnEnd)
 	e.await("agent.finished", nil)
@@ -216,6 +227,43 @@ func TestAJoinedAttachHoldsMessagesAndDetachHandsBack(t *testing.T) {
 	assert.Contains(t, inbox, "CSV")
 	assert.Contains(t, inbox, "A person worked with you directly")
 	assert.Zero(t, e.count("agent.nudged", "1"), "the person's turn wasn't the agent stopping")
+}
+
+func TestDetachingMidTurnGivesTheSlotBackAtTheTurnsEnd(t *testing.T) {
+	t.Parallel()
+	e := newTUIE2EWith(t, "concurrency: {max_active: 1, max_live: 4}\n")
+	s, agent := e.spawned("first")
+	e.agent(s, "inbox")
+	e.do(s, fake.CmdTurnStart)
+	term := e.joined(agent)
+	assert.Contains(t, e.h.ok(t, "detach", agent), "handed back: resumed")
+	_, _ = term.done(e.ctx())
+
+	// The turn the person watched runs on, and ends waiting: the only slot
+	// is free again, and new work gets it. The hand-back's note goes into
+	// it at its end, which keeps it going.
+	e.do(s, fake.CmdTurnEnd)
+	note, err := s.Await(e.ctx(), fake.RepUser)
+	require.NoError(t, err)
+	assert.Equal(t, fake.ViaHook, note.Via)
+	e.agent(s, "ask", "CSV or XLSX?")
+	e.do(s, fake.CmdTurnEnd)
+	e.await("agent.state", toState("waiting_user"))
+	second := e.h.ticket(t, "ticket", "create", "--title", "second", "--assign")
+	e.await("agent.spawned", func(ev *api.Event) bool { return ev.Ticket == second.ID })
+}
+
+func TestARestartLeavesSessionsItDoesntKnow(t *testing.T) {
+	t.Parallel()
+	e := newTUIE2E(t)
+	// Another slop-bot's agent, on the same server: none of this one's.
+	require.NoError(t, e.host.Start(e.ctx(), &sessionhost.StartSpec{Name: "agy-t9-abcdef", Argv: []string{"sleep", "600"}}))
+	e.stop()
+	e.restart()
+	e.h.ok(t, "health")
+	names, err := e.host.List(e.ctx())
+	require.NoError(t, err)
+	assert.Contains(t, names, "agy-t9-abcdef")
 }
 
 func TestStoppingTheDaemonWithAPersonJoinedLeavesTheSession(t *testing.T) {

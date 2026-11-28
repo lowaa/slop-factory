@@ -73,6 +73,10 @@ type runner struct {
 	joinable bool
 	// redelivering is a held delivery's retry, waiting (redeliverLater).
 	redelivering bool
+	// joinedExit and rejoined settle which came first for a joined session:
+	// its exit (the hand-back resumes it) or its hand-back (an exit is then
+	// a crash). See runner.joined.
+	joinedExit, rejoined bool
 	// exited is closed when the conversation's events end.
 	exited chan struct{}
 }
@@ -320,7 +324,10 @@ func (r *runner) settle(ctx context.Context, decl declared, ev *harness.Event) {
 func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 	r.mu.Lock()
 	stopping := r.stopping || r.attaching
-	joined := r.st == state.StateAttached
+	// Not if a hand-back has claimed the session (joined): it is no longer
+	// the person's, and this exit a crash like any other.
+	joined := r.st == state.StateAttached && !r.rejoined
+	r.joinedExit = joined
 	r.mu.Unlock()
 	if stopping {
 		return
@@ -360,12 +367,25 @@ func (r *runner) shutdown(ctx context.Context) {
 		case <-r.exited:
 		default:
 			_ = lasting.Close()
+			r.requeue(ctx, lasting.Held())
 		}
 		<-r.exited
 		return
 	}
 	r.stopConv(ctx, false)
 	<-r.exited
+}
+
+// requeue queues again the messages a let-go conversation held, which were
+// marked delivered when it took them, so the next daemon delivers them.
+func (r *runner) requeue(ctx context.Context, held []*harness.Message) {
+	var ids []int64
+	for _, msg := range held {
+		ids = append(ids, msg.IDs...)
+	}
+	if err := r.m.opts.State.Messages.Requeue(context.WithoutCancel(ctx), ids); err != nil {
+		r.m.opts.Logger.Warn("agents: queueing held messages again", "agent", r.id, "err", err)
+	}
 }
 
 func eventPayload(ev *harness.Event) map[string]any {

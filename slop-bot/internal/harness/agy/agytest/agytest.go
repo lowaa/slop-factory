@@ -7,12 +7,18 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
 // ForgetConversation removes what agy keeps of a conversation under home.
 func ForgetConversation(home, id string) error {
+	// A blank id would name the whole brain directory: every conversation
+	// of the user's.
+	if id == "" || filepath.Base(id) != id || id == "." || id == ".." {
+		return fmt.Errorf("agytest: %q isn't a conversation id", id)
+	}
 	root := filepath.Join(home, ".gemini", "antigravity-cli")
 	errs := []error{os.RemoveAll(filepath.Join(root, "brain", id))}
 	for _, f := range []string{

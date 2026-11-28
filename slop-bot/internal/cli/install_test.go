@@ -198,8 +198,11 @@ func TestInstallWithAnExplicitConfigWritesItThere(t *testing.T) {
 func TestUninstallKeepsDataUnlessPurged(t *testing.T) {
 	t.Parallel()
 	h := newInstallHarness(t)
+	ended := 0
+	h.deps.EndSessions = func(context.Context) error { ended++; return nil }
 	require.Equal(t, 0, h.run(t, "install"), h.err.String()+h.out.String())
 	require.Equal(t, 0, h.run(t, "uninstall"), h.err.String())
+	assert.Equal(t, 1, ended, "with no daemon to come back, the TUI agents' sessions go too")
 	assert.Contains(t, h.out.String(), "stopped and removed the slop-bot service")
 	assert.Contains(t, h.out.String(), "`slop-bot uninstall --purge` deletes them")
 	assert.NoFileExists(t, h.unit())

@@ -2,6 +2,7 @@ package agents_test
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -60,7 +61,8 @@ func TestAPointerTypedButNotSubmittedIsntTypedAgain(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "")
 	s, agent := f.waitingMerge()
-	f.failFirstSend(agent.Agent, harness.ErrUnsubmitted)
+	// As the TUI driver says it: a person attached as the pointer was typed.
+	f.failFirstSend(agent.Agent, fmt.Errorf("%w: %w", harness.ErrUnsubmitted, harness.ErrAttached))
 	_, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), string(agent.Agent), "merge it", false)
 	require.NoError(t, err)
 	f.await(agents.EventState, withReason(state.StateIdle, "a person is in its session"))
@@ -72,6 +74,21 @@ func TestAPointerTypedButNotSubmittedIsntTypedAgain(t *testing.T) {
 	got := f.user(s).Text
 	assert.Contains(t, got, "and rebase")
 	assert.NotContains(t, got, "merge it")
+}
+
+func TestAPointerTheHarnessNeverTookStallsTheAgent(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	_, agent := f.waitingMerge()
+	f.failFirstSend(agent.Agent, fmt.Errorf("%w: the harness didn't confirm: Enter", harness.ErrUnsubmitted))
+	_, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), string(agent.Agent), "merge it", false)
+	require.NoError(t, err)
+	// Nobody is there to submit it, and no turn end will come: left idle,
+	// the agent would wait for ever.
+	f.await(agents.EventState, toState(state.StateStalled))
+	told := f.await(agents.EventUserTold, nil)
+	assert.Contains(t, string(told.Payload), "didn't take the pointer to its inbox")
+	assert.Equal(t, state.StatusDelivered, f.messageStatus(agent.Agent, "merge it"), "not typed twice")
 }
 
 func TestAMessageHeldForAPersonInTheSessionIsTriedAgain(t *testing.T) {

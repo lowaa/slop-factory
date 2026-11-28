@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
@@ -12,6 +13,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/sessionhost"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
 )
 
@@ -178,8 +180,8 @@ func (d *Daemon) orphanedSessions() lifecycle.Component {
 	}
 }
 
-// endOrphans kills the sessions on slop-bot's server that no live agent
-// owns (their ticket ended while the daemon was away, say): left running,
+// endOrphans kills the sessions on slop-bot's server whose agents have
+// ended (their ticket ended while the daemon was away, say): left running,
 // they would work on with nobody to hear them. It runs once the agents
 // have taken back theirs.
 func (d *Daemon) endOrphans(ctx context.Context) {
@@ -188,20 +190,18 @@ func (d *Daemon) endOrphans(ctx context.Context) {
 		d.opts.Logger.Warn("daemon: listing tmux sessions", "err", err)
 		return
 	}
-	live, err := d.state.Agents.ListLive(ctx)
-	if err != nil {
-		d.opts.Logger.Warn("daemon: listing live agents", "err", err)
-		return
-	}
 	for _, name := range names {
-		owned := false
-		for _, a := range live {
-			owned = owned || tuidriver.OwnsSession(name, a.ID)
-		}
-		if owned {
+		// Only an agent this daemon knows, and has ended: another slop-bot
+		// (its own state dir, the same default socket) owns the rest.
+		_, id, ok := strings.Cut(name, "-")
+		if !ok {
 			continue
 		}
-		d.opts.Logger.Info("daemon: ending a session no live agent owns", "session", name)
+		a, err := d.state.Agents.Get(ctx, ident.AgentID(id))
+		if err != nil || a.EndedAt == nil || !tuidriver.OwnsSession(name, a.ID) {
+			continue
+		}
+		d.opts.Logger.Info("daemon: ending the session of an agent that has ended", "session", name, "agent", a.ID)
 		if err := d.host.Kill(ctx, name); err != nil && !errors.Is(err, sessionhost.ErrNoSession) {
 			d.opts.Logger.Warn("daemon: ending an orphaned session", "session", name, "err", err)
 		}

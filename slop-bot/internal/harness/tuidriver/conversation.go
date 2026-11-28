@@ -752,8 +752,9 @@ func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message)
 	}
 	switch {
 	case errors.Is(err, ErrAttached):
-		// Not ErrAttached itself, which promises nothing was typed.
-		return true, ErrUnsubmitted
+		// Not ErrAttached alone, which promises nothing was typed: wrapped,
+		// it says why the submit stopped (a person is at the prompt).
+		return true, fmt.Errorf("%w: %w", ErrUnsubmitted, ErrAttached)
 	case err != nil:
 		// Whatever failed, the pointer may be in the prompt.
 		return true, fmt.Errorf("%w: %w", ErrUnsubmitted, err)
@@ -1039,6 +1040,14 @@ func (c *Conversation) kill(ctx context.Context) error {
 func (c *Conversation) AttachPlan(context.Context) (*harness.AttachPlan, error) {
 	argv := c.host.AttachCommand(c.opts.Session)
 	return &harness.AttachPlan{Kind: harness.Join, Command: &harness.LaunchSpec{Path: argv[0], Args: argv[1:]}}, nil
+}
+
+// Held implements harness.Lasting: the messages Send took that no hook or
+// pointer has delivered yet, which a Close leaves undelivered.
+func (c *Conversation) Held() []*harness.Message {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*harness.Message(nil), c.pending...)
 }
 
 // Close lets go of the session without ending it, as a daemon shutting down

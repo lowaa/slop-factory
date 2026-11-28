@@ -277,6 +277,23 @@ func (m *Messages) AgentInbox(ctx context.Context, agent ident.AgentID) ([]Messa
 	})
 }
 
+// Requeue puts delivered messages back in the queue, for a driver that had
+// taken them but let go of them undelivered (a TUI conversation closed at
+// shutdown with messages waiting for a hook): the next delivery sends them.
+// Read ones are left as they are.
+func (m *Messages) Requeue(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := m.db.NewUpdate().Table("messages").
+		Set("status = ?", string(StatusQueued)).Set("delivery_path = ''").Set("delivered_at = NULL").
+		Where("id IN (?)", bun.List(ids)).Where("status = ?", string(StatusDelivered)).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("state: queueing messages again: %w", err)
+	}
+	return nil
+}
+
 // MarkPointed records that the agent was pointed at its inbox for these
 // messages, delivered or not yet: AgentInbox shows them until it reads them.
 // Read ones are left as they are.

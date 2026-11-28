@@ -69,6 +69,10 @@ type Lasting interface {
 	// Close lets go of the session without ending it: Events closes with no
 	// Exited, and the session runs on for a later AdoptAgent.
 	Close() error
+	// Held, after Close, are the messages Send took that never reached the
+	// model (waiting for a hook or the turn's end): the caller's to queue
+	// again, or they are lost with the closed conversation.
+	Held() []*Message
 }
 
 var (
@@ -78,9 +82,10 @@ var (
 	// ErrAttached means a person is attached to a TUI session, so the driver
 	// won't type into it. Nothing was typed.
 	ErrAttached = errors.New("harness: a person is attached to the session")
-	// ErrUnsubmitted means typing began, then stopped short of submitting
-	// (a person attached, or the harness never confirmed): the text may sit
-	// in the prompt, so sending again would type it twice.
+	// ErrUnsubmitted means typing began, then stopped short of submitting:
+	// the text may sit in the prompt, so sending again would type it twice.
+	// It wraps ErrAttached when a person attached meanwhile; otherwise the
+	// harness never confirmed, and nobody may be there to submit it.
 	ErrUnsubmitted = errors.New("harness: typed into the prompt but not submitted")
 )
 

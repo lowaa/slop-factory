@@ -283,6 +283,11 @@ func (m *Manager) forgetWorkspace(a *state.Agent) {
 			ws.ExtraDirs = append(ws.ExtraDirs, w.Path)
 		}
 	}
+	// Where the harness was started, which is what it kept things for (and
+	// where a resume runs it): the primary worktree, unless that changed.
+	if a.ConversationDir != "" {
+		ws.Dir = a.ConversationDir
+	}
 	if err := f.ForgetWorkspace(ws); err != nil {
 		m.opts.Logger.Warn("agents: removing what the harness kept for a workspace", "agent", a.ID, "err", err)
 	}

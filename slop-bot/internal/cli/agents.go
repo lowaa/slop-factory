@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/agents"
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 )
 
@@ -112,7 +113,13 @@ func (a *app) printInbox(cmd *cobra.Command, path string, asJSON, sayEmpty bool)
 		return err
 	}
 	for _, m := range msgs {
-		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), sender(&m), m.Kind, m.Body); err != nil {
+		body := m.Body
+		if a.deps.Token != "" {
+			// An agent weighs a message by its header, so a body mustn't be
+			// able to print one (a TUI agent reads all its messages here).
+			body = agents.Quote(body)
+		}
+		if _, err := fmt.Fprintf(w, "[%s] from %s (%s):\n%s\n\n", m.CreatedAt.Format("15:04"), sender(&m), m.Kind, body); err != nil {
 			return err
 		}
 	}

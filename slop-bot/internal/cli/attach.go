@@ -120,7 +120,10 @@ func (at *attachRun) launched(ctx context.Context) {
 func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequest) error {
 	req.Holder = at.holder
 	if !req.Now {
-		at.say("Waiting for the agent's turn to end (--now interrupts it)...")
+		// Said before the daemon answers, so before it is known whether the
+		// harness hands over (which waits for the turn) or is joined (which
+		// doesn't).
+		at.say("Attaching; a hand-over waits for the agent's turn to end (--now interrupts it)...")
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -18,22 +18,24 @@ const adoptedNote = "slop-bot restarted while you worked. Any slop-bot command t
 // adoptSession takes a's session back, if its harness's sessions outlive the
 // daemon and a's did: the conversation runs on as it was, and keeps its
 // token (the session's environment has it), where a resume starts the
-// conversation again. ok is false when there is nothing to adopt.
-func (m *Manager) adoptSession(ctx context.Context, a *state.Agent) (*started, bool) {
+// conversation again. ok is false when there is nothing to adopt. A session
+// that is there but can't be adopted is an error: a resume would start a
+// second one under the same name.
+func (m *Manager) adoptSession(ctx context.Context, a *state.Agent) (s *started, ok bool, err error) {
 	h, found := m.opts.Harnesses.Harness(a.Harness)
 	ad, isAdopter := h.(harness.Adopter)
 	if !found || !isAdopter {
-		return nil, false
+		return nil, false, nil
 	}
 	conv, err := ad.AdoptAgent(ctx, a.ID)
-	if err != nil {
-		if !errors.Is(err, harness.ErrNoSession) {
-			m.opts.Logger.Warn("agents: adopting a session; resuming instead", "agent", a.ID, "err", err)
-		}
-		return nil, false
+	switch {
+	case errors.Is(err, harness.ErrNoSession):
+		return nil, false, nil
+	case err != nil:
+		return nil, false, fmt.Errorf("adopting its session: %w", err)
 	}
 	// Still running where it started.
-	return &started{conv: conv, caps: h.Capabilities(), dir: a.ConversationDir}, true
+	return &started{conv: conv, caps: h.Capabilities(), dir: a.ConversationDir}, true, nil
 }
 
 // joinForAttach is stopForAttach for a conversation a person joins (a TUI
@@ -47,7 +49,7 @@ func (m *Manager) joinForAttach(ctx context.Context, r *runner, a *state.Agent, 
 			ErrNoHandOver, a.Harness)
 	}
 	r.mu.Lock()
-	r.joinable = true
+	r.joinable, r.joinedExit, r.rejoined = true, false, false
 	r.mu.Unlock()
 	if req.Now {
 		if err := r.conv.Interrupt(ctx); err != nil {
@@ -57,20 +59,27 @@ func (m *Manager) joinForAttach(ctx context.Context, r *runner, a *state.Agent, 
 	return plan, nil
 }
 
-// joined says whether r's conversation is a session a person can join that
-// is still running: a hand-back then has nothing to resume.
+// joined says whether r's conversation is a session a person joined that
+// is still running, claiming it for the hand-back: there is then nothing to
+// resume. It decides, under r.mu, against the session's exit (exitedWith):
+// once claimed, an exit is a crash to recover from; once exited, the
+// hand-back resumes the conversation.
 func (r *runner) joined() bool {
 	if r.conv == nil {
 		return false
 	}
 	select {
 	case <-r.exited:
-		return false
+		return false // let go of, or gone
 	default:
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.joinable
+	if !r.joinable || r.joinedExit {
+		return false
+	}
+	r.rejoined = true
+	return true
 }
 
 // rejoin hands back a joined session that is still running: the agent
@@ -80,7 +89,10 @@ func (m *Manager) rejoin(ctx context.Context, r *runner, decl declared, summary,
 	r.declare(decl, summary)
 	r.mu.Lock()
 	inTurn := r.inTurn
-	r.holdsSlot = true
+	// Into the delivery of what was held, if it isn't in a turn: a turn
+	// that runs on holds the slot by itself, and a slot carried past its
+	// end would never be given back (only an idle delivery takes it).
+	r.holdsSlot = !inTurn
 	r.mu.Unlock()
 	m.event(ctx, EventHandedBack, r.id, r.ticket, map[string]string{"why": why, "outcome": string(Resumed)})
 	m.enqueueNotice(ctx, r, handBackNote)
