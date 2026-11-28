@@ -14,9 +14,9 @@ import (
 // App is the directory name slop-bot uses under each base directory.
 const App = "slop-bot"
 
-// maxSocketPath is the shortest sun_path limit slop-bot runs on: macOS
+// MaxSocketPath is the shortest sun_path limit slop-bot runs on: macOS
 // allows 104 bytes including the terminating NUL (Linux allows 108).
-const maxSocketPath = 103
+const MaxSocketPath = 103
 
 // Env is the environment the resolver reads, so tests needn't touch the real
 // one.
@@ -82,9 +82,9 @@ func Resolve(env *Env) (*Paths, error) {
 		return nil, err
 	}
 	p.Runtime = rt
-	if n := len(p.Socket()); n > maxSocketPath {
+	if n := len(p.Socket()); n > MaxSocketPath {
 		return nil, fmt.Errorf("paths: socket path %s is %d bytes, over the %d-byte limit; "+
-			"set XDG_RUNTIME_DIR to a shorter directory", p.Socket(), n, maxSocketPath)
+			"set XDG_RUNTIME_DIR to a shorter directory", p.Socket(), n, MaxSocketPath)
 	}
 	return p, nil
 }

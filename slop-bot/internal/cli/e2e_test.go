@@ -212,7 +212,7 @@ func TestAnAgentCantActAsTheUser(t *testing.T) {
 
 func TestTheBriefingListsTheAgentCommands(t *testing.T) {
 	t.Parallel()
-	ref := AgentReference(New(&Deps{Stdout: os.Stdout, Stderr: os.Stderr}))
+	ref := AgentReference((&app{deps: &Deps{Stdout: os.Stdout, Stderr: os.Stderr}}).root())
 	for _, want := range []string{"slop-bot ask <question>", "slop-bot tell <agent|ticket|user> <text>", "slop-bot done --summary <text>",
 		"slop-bot ticket create --title <title>", "slop-bot status set <note>", "slop-bot ready-to-merge", "slop-bot discuss <decision>", "slop-bot inbox"} {
 		assert.Contains(t, ref, "`"+want+"`")

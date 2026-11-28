@@ -53,10 +53,11 @@ concurrency: {max_active: 2, max_live: 10, urgent: {max_active: 2}}
 autonomy: {enabled: true, tickets_per_agent: 3}
 harnesses:
   codex: {}
-  agy: {driver: tui, permissive: false}
+  agy: {driver: tui, permissive: false, model: gemini-x}
   pi:
 agents: {nudges: 5, stall_after: 30m, ask_reminder_after: 2h}
 retention: {transcripts: 72h, events: 48h}
+doctor: {require: [gh, shellcheck]}
 `)
 	require.NoError(t, err)
 	assert.Equal(t, "/home/u/ws", c.WorkspaceDir)
@@ -69,6 +70,9 @@ retention: {transcripts: 72h, events: 48h}
 	assert.Equal(t, "app-server", c.Harnesses[Codex].Driver)
 	assert.Equal(t, "rpc", c.Harnesses[Pi].Driver, "a bare harness key gets its default driver")
 	assert.False(t, *c.Harnesses[Agy].Permissive)
+	assert.Equal(t, "gemini-x", c.Harnesses[Agy].Model)
+	assert.Empty(t, c.Harnesses[Pi].Model)
+	assert.Equal(t, []string{"gh", "shellcheck"}, c.Doctor.Require)
 	assert.Equal(t, 30*time.Minute, c.Agents.StallAfter.D())
 	assert.Equal(t, 48*time.Hour, c.Retention.Events.D())
 }
@@ -76,20 +80,21 @@ retention: {transcripts: 72h, events: 48h}
 func TestInvalidConfigsNameTheField(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct{ yml, want string }{
-		"typo key":             {"workspace_dri: /x\n", "field workspace_dri not found"},
-		"unknown harness":      {"harnesses: {cursor: {}}\ndefault_harness: cursor\n", "harnesses.cursor: unknown harness"},
-		"bad driver":           {"harnesses: {claude-code: {driver: tui}}\n", `harnesses.claude-code.driver: "tui" isn't a driver`},
-		"default not present":  {"default_harness: pi\nharnesses: {codex: {}}\n", `default_harness: "pi" isn't configured`},
-		"unknown ticketing":    {"ticketing: {system: jira}\n", `ticketing.system: "jira"`},
-		"duplicate repo":       {"repos: [{name: a, path: /a}, {name: a, path: /b}]\n", `repos[1].name: "a" is listed twice`},
-		"unnamed repo":         {"repos: [{path: /a}]\n", "repos[0].name: is empty"},
-		"repo name with slash": {"repos: [{name: owner/repo, path: /a}]\n", `repos[0].name: "owner/repo": want a letter or digit first`},
-		"repo name dot first":  {"repos: [{name: .github, path: /a}]\n", `repos[0].name: ".github": want a letter or digit first`},
-		"repo without path":    {"repos: [{name: a}]\n", "repos[0].path: is empty"},
-		"max_live too small":   {"concurrency: {max_active: 4, max_live: 2}\n", "concurrency.max_live: 2 is below"},
-		"bad duration":         {"agents: {stall_after: soon}\n", `"soon" isn't a duration`},
-		"zero budget":          {"autonomy: {tickets_per_agent: -1}\n", "tickets_per_agent: must be at least 1"},
-		"negative concurrency": {"concurrency: {max_active: -1}\n", "max_active and urgent.max_active must be at least 1"},
+		"typo key":              {"workspace_dri: /x\n", "field workspace_dri not found"},
+		"unknown harness":       {"harnesses: {cursor: {}}\ndefault_harness: cursor\n", "harnesses.cursor: unknown harness"},
+		"bad driver":            {"harnesses: {claude-code: {driver: tui}}\n", `harnesses.claude-code.driver: "tui" isn't a driver`},
+		"default not present":   {"default_harness: pi\nharnesses: {codex: {}}\n", `default_harness: "pi" isn't configured`},
+		"unknown ticketing":     {"ticketing: {system: jira}\n", `ticketing.system: "jira"`},
+		"duplicate repo":        {"repos: [{name: a, path: /a}, {name: a, path: /b}]\n", `repos[1].name: "a" is listed twice`},
+		"unnamed repo":          {"repos: [{path: /a}]\n", "repos[0].name: is empty"},
+		"repo name with slash":  {"repos: [{name: owner/repo, path: /a}]\n", `repos[0].name: "owner/repo": want a letter or digit first`},
+		"repo name dot first":   {"repos: [{name: .github, path: /a}]\n", `repos[0].name: ".github": want a letter or digit first`},
+		"repo without path":     {"repos: [{name: a}]\n", "repos[0].path: is empty"},
+		"max_live too small":    {"concurrency: {max_active: 4, max_live: 2}\n", "concurrency.max_live: 2 is below"},
+		"bad duration":          {"agents: {stall_after: soon}\n", `"soon" isn't a duration`},
+		"zero budget":           {"autonomy: {tickets_per_agent: -1}\n", "tickets_per_agent: must be at least 1"},
+		"negative concurrency":  {"concurrency: {max_active: -1}\n", "max_active and urgent.max_active must be at least 1"},
+		"blank required binary": {"doctor: {require: [gh, \"\"]}\n", "doctor.require[1]: is empty"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
