@@ -19,6 +19,7 @@ import (
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/agentproc"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/driverkit"
 )
 
 // maxLine bounds one protocol message. Harnesses put whole tool outputs in a
@@ -84,7 +85,7 @@ type Conversation struct {
 	proc   *agentproc.Process
 	wire   *Wire
 	id     string
-	events chan harness.Event
+	events *driverkit.Events
 
 	mu sync.Mutex
 	// inTurn is the turn state as the harness last reported it.
@@ -108,7 +109,7 @@ func Start(ctx context.Context, opts *Options) (*Conversation, error) {
 		opts:    opts,
 		proc:    proc,
 		wire:    &Wire{w: proc.Stdin},
-		events:  make(chan harness.Event, 64),
+		events:  driverkit.NewEvents(opts.Logger),
 		settled: make(chan struct{}),
 		lines:   make(chan []byte, 64),
 		exited:  make(chan struct{}),
@@ -120,6 +121,7 @@ func Start(ctx context.Context, opts *Options) (*Conversation, error) {
 		proc.Kill()
 		for range c.lines { // let read finish
 		}
+		c.events.Close()
 		return nil, fmt.Errorf("rpcdriver: %s handshake: %w (stderr: %s)", opts.Harness, err, lastLine(proc.Stderr()))
 	}
 	c.mu.Lock()
@@ -223,14 +225,14 @@ func (c *Conversation) dispatch() {
 		exitErr = fmt.Errorf("%s exited with status %d: %s", c.opts.Harness, code, lastLine(c.proc.Stderr()))
 	}
 	c.setTurn(false)
-	c.events <- harness.Event{Kind: harness.Exited, At: c.opts.Clock.Now(), ExitCode: code, Err: exitErr}
-	close(c.events)
+	c.events.Push(harness.Event{Kind: harness.Exited, At: c.opts.Clock.Now(), ExitCode: code, Err: exitErr})
+	c.events.Close()
 	close(c.exited)
 }
 
-// emit tracks turn state from the events it passes on. Sending blocks when
-// the consumer falls behind: back-pressure onto the harness's stdout rather
-// than dropped events.
+// emit tracks turn state from the events it passes on. It never waits for
+// the consumer (driverkit.Events): Decode answers the harness's requests on
+// this goroutine, and the exit it reports is what a Stop waits for.
 func (c *Conversation) emit(ev harness.Event) {
 	if ev.At.IsZero() {
 		ev.At = c.opts.Clock.Now()
@@ -241,7 +243,7 @@ func (c *Conversation) emit(ev harness.Event) {
 	case harness.TurnEnded:
 		c.setTurn(false)
 	}
-	c.events <- ev
+	c.events.Push(ev)
 }
 
 func (c *Conversation) setTurn(on bool) {
@@ -290,7 +292,7 @@ func (c *Conversation) Interrupt(ctx context.Context) error {
 }
 
 // Events implements harness.Conversation.
-func (c *Conversation) Events() <-chan harness.Event { return c.events }
+func (c *Conversation) Events() <-chan harness.Event { return c.events.C() }
 
 // Stop implements harness.Conversation. Without force it waits for the turn
 // to settle, then closes stdin, which every supported harness takes as "end
@@ -305,22 +307,26 @@ func (c *Conversation) Stop(ctx context.Context, force bool) error {
 		case <-c.exited:
 			return nil
 		case <-ctx.Done():
-			return c.kill()
+			return c.kill(ctx)
 		}
 		_ = c.proc.Stdin.Close()
 		select {
 		case <-c.exited:
 			return nil
 		case <-ctx.Done():
-			return c.kill()
+			return c.kill(ctx)
 		}
 	}
-	return c.kill()
+	return c.kill(ctx)
 }
 
 // kill asks the group to stop, and only after KillGrace has passed with no
-// exit does it force it, so the harness can flush its session state.
-func (c *Conversation) kill() error {
+// exit, or ctx has ended, does it force it, so the harness can flush its
+// session state. The wait after SIGKILL is bounded by agentproc, which
+// reports the exit once stdout is drained or its drain bound passes; and
+// by nothing else, since the events are queued whether or not anyone reads
+// them.
+func (c *Conversation) kill(ctx context.Context) error {
 	_ = c.proc.Signal(syscall.SIGTERM)
 	grace := c.opts.KillGrace
 	if grace == 0 {
@@ -329,6 +335,7 @@ func (c *Conversation) kill() error {
 	select {
 	case <-c.exited:
 		return nil
+	case <-ctx.Done():
 	case <-clock.Or(c.opts.Clock).After(grace):
 	}
 	c.proc.Kill()
