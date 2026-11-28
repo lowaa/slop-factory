@@ -1,0 +1,6 @@
+# Mutation score (killed or timed out, of decided mutants): <package> <percent>.
+# Written by mutation.sh; see dev-tools/mutation/README.md.
+./internal/agents 80.0
+./internal/state 98.4
+./internal/tickets 5.5
+./internal/tickets/local 98.0
