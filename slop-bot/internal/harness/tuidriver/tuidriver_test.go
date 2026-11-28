@@ -261,6 +261,10 @@ func TestAdoptAfterADaemonRestart(t *testing.T) {
 	next(r.ctx, t, adopted, harness.TurnEnded)
 	require.NoError(t, adopted.Send(r.ctx, msg("still there?")))
 	assert.Equal(t, pointer("still there?"), r.await(t, fake.RepUser).Text)
+	// The turn that prompt opens has to run before Stop can quit.
+	r.do(t, fake.Command{Cmd: fake.CmdTurnStart})
+	r.do(t, fake.Command{Cmd: fake.CmdTurnEnd})
+	next(r.ctx, t, adopted, harness.TurnEnded)
 
 	require.NoError(t, adopted.Stop(r.ctx, false))
 	exited := next(r.ctx, t, adopted, harness.Exited)

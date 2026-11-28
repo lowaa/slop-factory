@@ -3,6 +3,8 @@ module github.com/lowaa/slop-factory/slop-bot
 go 1.27.4
 
 require (
+	github.com/BurntSushi/toml v1.6.0
+	github.com/google/uuid v1.6.0
 	github.com/lowaa/slop-factory/go-clock v0.0.0-20261118121736-c1a6832892a8
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/spf13/cobra v1.10.2
@@ -17,7 +19,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

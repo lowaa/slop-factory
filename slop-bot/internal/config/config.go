@@ -38,6 +38,9 @@ var drivers = map[string][]string{
 type Config struct {
 	// WorkspaceDir is where ticket worktrees are created.
 	WorkspaceDir string `yaml:"workspace_dir"`
+	// User is who slop-bot runs for: tickets assigned to this id are its
+	// agents' to work. Blank means the OS user name.
+	User string `yaml:"user"`
 	// BriefingPath is the user's own briefing. Empty means none.
 	BriefingPath       string                    `yaml:"briefing_path"`
 	DefaultHarness     string                    `yaml:"default_harness"`

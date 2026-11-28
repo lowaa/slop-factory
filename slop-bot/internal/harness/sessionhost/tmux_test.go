@@ -141,10 +141,15 @@ func TestPaneDeathWakesAWaiter(t *testing.T) {
 	ctx := ctxFor(t)
 	host := patient(t, socketName(t))
 	shell(ctx, t, host, "reads", `read x; exit 4`)
-	waited := make(chan error, 1)
-	go func() { waited <- host.WaitExit(ctx, "reads") }()
 	require.NoError(t, host.SendKeys(ctx, "reads", "Enter"))
-	require.NoError(t, <-waited, "the pane-died hook signals")
+	// Status, not the signal, first: tmux 3.4 sometimes reaps (and so fires
+	// pane-died) only once Status makes it. There's no event for the
+	// death itself, so this waits on the tmux state, bounded.
+	require.Eventually(t, func() bool {
+		st, err := host.Status(ctx, "reads")
+		return err == nil && st.Dead
+	}, 10*time.Second, 5*time.Millisecond)
+	require.NoError(t, host.WaitExit(ctx, "reads"), "the pane-died hook signalled, and tmux kept it")
 	st, err := host.Status(ctx, "reads")
 	require.NoError(t, err)
 	assert.Equal(t, &sessionhost.Status{Dead: true, ExitStatus: 4}, st)

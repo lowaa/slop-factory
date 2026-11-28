@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,7 +18,9 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
+	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 )
 
 func testPaths(t *testing.T) *paths.Paths {
@@ -118,4 +121,38 @@ func TestNewValidatesOptions(t *testing.T) {
 	t.Parallel()
 	_, err := New(&Options{})
 	assert.Error(t, err)
+}
+
+// An agent's token reaches the ticket rules as that agent: the rules that
+// tell the user apart from agents (only the user sets AutoMerge) hold over
+// the socket.
+func TestAnAgentTokenActsAsThatAgentOnTickets(t *testing.T) {
+	t.Parallel()
+	p := testPaths(t)
+	d := newDaemon(t, p)
+	run(t, d, p)
+	ctx := context.Background()
+	user := control.NewClient(p.Socket(), "")
+
+	var tk api.Ticket
+	require.NoError(t, user.Do(ctx, http.MethodPost, api.PathTickets, &api.NewTicket{Title: "t"}, &tk))
+	token, err := control.NewToken()
+	require.NoError(t, err)
+	_, err = d.state.Agents.Create(ctx, &state.NewAgent{
+		ID: "a1", Ticket: ident.TicketID(tk.ID), Harness: "claude-code", Driver: "stream-json",
+		Pool: state.PoolNormal, State: state.StateStarting, TokenHash: control.HashToken(token),
+	})
+	require.NoError(t, err)
+	agent := control.NewClient(p.Socket(), token)
+
+	on := true
+	err = agent.Do(ctx, http.MethodPatch, strings.Replace(api.PathTicket, "{id}", tk.ID, 1), &api.TicketChange{AutoMerge: &on}, nil)
+	var apiErr *control.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.Status)
+	assert.Contains(t, apiErr.Message, "only the user may set AutoMerge")
+
+	var c api.Comment
+	require.NoError(t, agent.Do(ctx, http.MethodPost, strings.Replace(api.PathTicketComments, "{id}", tk.ID, 1), &api.NewComment{Body: "decided"}, &c))
+	assert.Equal(t, api.Principal{Kind: "agent", Agent: "a1", Ticket: tk.ID}, c.Author)
 }

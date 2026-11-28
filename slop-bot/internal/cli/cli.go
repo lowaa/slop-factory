@@ -19,6 +19,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
 )
 
@@ -30,10 +31,17 @@ type Deps struct {
 	Env    *paths.Env
 	// Token is the agent token from the environment, "" for the user.
 	Token string
+	// ServiceRunner runs systemctl, loginctl and launchctl for `slop-bot
+	// service`.
+	ServiceRunner service.Runner
+	// FindBinary is the slop-bot binary the service should run.
+	FindBinary func() (string, error)
 
 	// daemonBuilt lets in-package tests see the daemon `slop-bot daemon`
 	// builds, to wait on its Ready.
 	daemonBuilt func(*daemon.Daemon)
+	// harnesses lets in-package tests run the daemon on a fake harness.
+	harnesses daemon.Harnesses
 }
 
 // FromOS is the real outside world.
@@ -42,7 +50,10 @@ func FromOS() (*Deps, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Deps{Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv)}, nil
+	return &Deps{
+		Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv),
+		ServiceRunner: service.ExecRunner{}, FindBinary: service.NewBinaryFinder().Find,
+	}, nil
 }
 
 // app holds what commands share once flags are parsed.
@@ -69,7 +80,10 @@ func New(deps *Deps) *cobra.Command {
 		a.pathsCmd(),
 		a.daemonCmd(),
 		a.healthCmd(),
+		a.serviceCmd(),
+		a.ticketCmd(),
 	)
+	root.AddCommand(a.agentCmds()...)
 	return root
 }
 
@@ -137,7 +151,16 @@ func (a *app) daemonCmd() *cobra.Command {
 				return err
 			}
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
-			d, err := daemon.New(&daemon.Options{Config: cfg, Paths: p, Logger: logger, Clock: clock.Real{}})
+			opts := &daemon.Options{
+				Config: cfg, Paths: p, Logger: logger, Clock: clock.Real{},
+				CLIReference: AgentReference(cmd.Root()),
+			}
+			// Only when set: a nil map in the interface would read as
+			// "no harnesses", not "build them from the config".
+			if a.deps.harnesses != nil {
+				opts.Harnesses = a.deps.harnesses
+			}
+			d, err := daemon.New(opts)
 			if err != nil {
 				return err
 			}

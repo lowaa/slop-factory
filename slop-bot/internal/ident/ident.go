@@ -24,8 +24,8 @@ const (
 )
 
 // Principal is who is making a call. The rules that tell the user and agents
-// apart (only the user may set AutoMerge, an agent may edit only its own
-// ticket's blockers, ...) key on it. They guard against a confused agent,
+// apart (only the user may set AutoMerge, an agent may remove only the
+// blockers it added, ...) key on it. They guard against a confused agent,
 // not a malicious one: agents run as the user's uid (see the design doc,
 // "Control socket").
 type Principal struct {

@@ -134,3 +134,18 @@ func mustRead(t *testing.T, name string) []byte {
 	require.NoError(t, err)
 	return b
 }
+
+func TestDurableSetsSynchronousFull(t *testing.T) {
+	t.Parallel()
+	for durable, want := range map[bool]int{false: 1, true: 2} { // NORMAL=1, FULL=2
+		db, err := sqlitex.Open(context.Background(), &sqlitex.Options{
+			Path: filepath.Join(t.TempDir(), "x.db"), Migrations: migrations(t),
+			Logger: slog.New(slog.DiscardHandler), Durable: durable,
+		})
+		require.NoError(t, err)
+		var got int
+		require.NoError(t, db.NewRaw("PRAGMA synchronous").Scan(context.Background(), &got))
+		assert.Equal(t, want, got, "durable=%v", durable)
+		require.NoError(t, db.Close())
+	}
+}

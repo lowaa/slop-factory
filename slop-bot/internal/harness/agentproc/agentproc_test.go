@@ -83,7 +83,7 @@ func TestAgentEnv(t *testing.T) {
 	t.Parallel()
 	base := []string{
 		"PATH=/bin", "HOME=/h", "GOPATH=/go", "SSH_AUTH_SOCK=/s",
-		"ANTHROPIC_API_KEY=sk", "OPENAI_API_KEY=ok", "GEMINI_API_KEY=g",
+		"ANTHROPIC_API_KEY=placeholder", "OPENAI_API_KEY=placeholder", "GEMINI_API_KEY=placeholder",
 		"CLAUDE_CODE_SESSION_ID=parent", "CLAUDECODE=1",
 		"SLOP_BOT_AGENT_TOKEN=someone-elses", "malformed",
 	}
@@ -98,6 +98,18 @@ func TestAgentEnv(t *testing.T) {
 	}, got, "the user's toolchain variables pass; API keys, a parent harness's variables and another token don't")
 
 	withKeys := AgentEnv(&EnvOptions{Base: base, APIKeyOptIn: true})
-	assert.Contains(t, withKeys, "ANTHROPIC_API_KEY=sk")
+	assert.Contains(t, withKeys, "ANTHROPIC_API_KEY=placeholder")
 	assert.NotContains(t, withKeys, "CLAUDECODE=1", "opting into API keys doesn't let the parent harness's variables through")
+}
+
+func TestWorkspaceEnvLayersTheWorkspaceOverTheHarness(t *testing.T) {
+	t.Parallel()
+	base := func() []string { return []string{"PATH=/bin", "OPENAI_API_KEY=placeholder", "MODE=user"} }
+	ws := &harness.Workspace{Env: map[string]string{"SLOP_BOT_AGENT_TOKEN": "tok", "MODE": "workspace"}}
+	got := WorkspaceEnv(base, ws, map[string]string{"MODE": "harness", "HARNESS_ONLY": "1"})
+	assert.Equal(t, []string{"PATH=/bin", "HARNESS_ONLY=1", "MODE=workspace", "SLOP_BOT_AGENT_TOKEN=tok"}, got)
+
+	ws.APIKeyOptIn = true
+	assert.Contains(t, WorkspaceEnv(base, ws, nil), "OPENAI_API_KEY=placeholder")
+	assert.NotEmpty(t, WorkspaceEnv(nil, &harness.Workspace{}, nil), "nil base is the process's own environment")
 }

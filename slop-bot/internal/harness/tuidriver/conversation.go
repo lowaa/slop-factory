@@ -123,6 +123,12 @@ type Conversation struct {
 	// readyCh closes once ready.
 	readyCh chan struct{}
 	inTurn  bool
+	// announced says TurnStarted went out for the running turn, which may
+	// have been opened by a submit before the harness reported it.
+	announced bool
+	// turnsStarted counts announced turns, so a submit can tell whether its
+	// turn has come and gone already.
+	turnsStarted uint64
 	// settled is closed and replaced whenever a turn ends, so Stop and
 	// Interrupt can wait for "not in a turn".
 	settled chan struct{}
@@ -338,12 +344,24 @@ func (c *Conversation) markReady() harness.Event {
 	return harness.Event{Kind: harness.Ready}
 }
 
+// openTurn marks a turn running without announcing it: the harness took a
+// prompt we typed, and its own turn start may still be on the way. A
+// graceful Stop landing in between would otherwise see no turn and quit
+// over it.
+func (c *Conversation) openTurn() {
+	if !c.inTurn {
+		c.inTurn = true
+		c.settled = make(chan struct{})
+	}
+}
+
 func (c *Conversation) turnStarted() []harness.Event {
-	if c.inTurn {
+	if c.announced {
 		return nil
 	}
-	c.inTurn = true
-	c.settled = make(chan struct{})
+	c.openTurn()
+	c.announced = true
+	c.turnsStarted++
 	c.signalSubmitted()
 	return []harness.Event{{Kind: harness.TurnStarted}}
 }
@@ -354,11 +372,18 @@ func (c *Conversation) turnEnded(outcome harness.TurnOutcome) []harness.Event {
 	}
 	c.inTurn = false
 	close(c.settled)
+	announced := c.announced
+	c.announced = false
 	if outcome == "" {
 		outcome = harness.TurnCompleted
 	}
 	if len(c.pending) > 0 {
 		c.spawnFlush()
+	}
+	// A turn opened for a prompt that never started one ends quietly: a
+	// TurnEnded without its TurnStarted would mislead the core.
+	if !announced {
+		return nil
 	}
 	return []harness.Event{{Kind: harness.TurnEnded, Outcome: outcome}}
 }
@@ -585,6 +610,7 @@ func (c *Conversation) finish(code int, exitErr error) {
 			c.inTurn = false
 			close(c.settled)
 		}
+		c.announced = false
 		c.exitErr = exitErr
 		c.mu.Unlock()
 		if !c.eventsClosed {
@@ -691,7 +717,7 @@ func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message)
 		return false, err
 	}
 	c.mu.Lock()
-	submitted := c.submitted
+	submitted, started := c.submitted, c.turnsStarted
 	c.mu.Unlock()
 	if err := c.host.Paste(ctx, c.opts.Session, text); err != nil {
 		return false, err
@@ -702,6 +728,14 @@ func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message)
 	err = c.confirmed(ctx, c.p.SubmitKey, submitted)
 	if errors.Is(err, ErrAttached) {
 		return true, ErrUnsubmitted
+	}
+	if err == nil {
+		c.mu.Lock()
+		// Unless its turn already started (and maybe ended) meanwhile.
+		if c.turnsStarted == started {
+			c.openTurn()
+		}
+		c.mu.Unlock()
 	}
 	return true, err
 }

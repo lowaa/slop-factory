@@ -19,6 +19,13 @@ type Controller struct {
 	dir      string
 	sessions chan *Session
 	wg       sync.WaitGroup
+
+	mu    sync.Mutex
+	conns []net.Conn
+	// closed ends readers stuck handing on reports nobody reads.
+	closed    chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewController listens on a fresh socket. Its path is short: socket paths
@@ -33,7 +40,7 @@ func NewController() (*Controller, error) {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	c := &Controller{l: l, dir: dir, sessions: make(chan *Session, 16)}
+	c := &Controller{l: l, dir: dir, sessions: make(chan *Session, 16), closed: make(chan struct{})}
 	c.wg.Add(1)
 	go c.accept()
 	return c, nil
@@ -49,11 +56,14 @@ func (c *Controller) accept() {
 		if err != nil {
 			return
 		}
+		c.mu.Lock()
+		c.conns = append(c.conns, conn)
+		c.mu.Unlock()
 		s := &Session{conn: conn, enc: json.NewEncoder(conn), reports: make(chan Report, 64), acks: make(chan Report, 1)}
 		c.wg.Add(1)
 		go func() {
 			defer c.wg.Done()
-			s.readReports(c.sessions)
+			s.readReports(c.sessions, c.closed)
 		}()
 	}
 }
@@ -69,10 +79,20 @@ func (c *Controller) Next(ctx context.Context) (*Session, error) {
 }
 
 // Close stops listening and disconnects every fake, which makes them exit.
+// Calling it again returns the first call's result.
 func (c *Controller) Close() error {
-	err := c.l.Close()
-	c.wg.Wait()
-	return errors.Join(err, os.RemoveAll(c.dir))
+	c.closeOnce.Do(func() {
+		err := c.l.Close()
+		close(c.closed)
+		c.mu.Lock()
+		for _, conn := range c.conns {
+			_ = conn.Close()
+		}
+		c.mu.Unlock()
+		c.wg.Wait()
+		c.closeErr = errors.Join(err, os.RemoveAll(c.dir))
+	})
+	return c.closeErr
 }
 
 // Session is one running fake harness.
@@ -91,7 +111,7 @@ type Session struct {
 	Resumed bool
 }
 
-func (s *Session) readReports(started chan<- *Session) {
+func (s *Session) readReports(started chan<- *Session, closed <-chan struct{}) {
 	defer func() { _ = s.conn.Close() }()
 	defer close(s.reports)
 	defer close(s.acks)
@@ -106,14 +126,22 @@ func (s *Session) readReports(started chan<- *Session) {
 		if first && r.Rep == RepStarted {
 			first = false
 			s.ID, s.Resumed = r.ID, r.Resumed
-			started <- s
+			select {
+			case started <- s:
+			case <-closed:
+				return
+			}
 			continue
 		}
+		to := s.reports
 		if r.Rep == RepAck || r.Rep == RepRan {
-			s.acks <- r
-			continue
+			to = s.acks
 		}
-		s.reports <- r
+		select {
+		case to <- r:
+		case <-closed:
+			return
+		}
 	}
 }
 

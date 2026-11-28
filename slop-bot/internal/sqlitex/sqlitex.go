@@ -45,6 +45,10 @@ type Options struct {
 	Migrations fs.FS
 	// Logger receives migration progress. Required.
 	Logger *slog.Logger
+	// Durable syncs every commit to disk (synchronous=FULL), for user data:
+	// a commit the event feed has already delivered must survive a power
+	// loss. Operational state can rebuild, so it keeps the faster NORMAL.
+	Durable bool
 }
 
 // DB is an open, migrated database. Close it when done.
@@ -63,7 +67,7 @@ func Open(ctx context.Context, opts *Options) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(opts.Path), 0o700); err != nil {
 		return nil, fmt.Errorf("sqlitex: creating %s: %w", filepath.Dir(opts.Path), err)
 	}
-	sqldb, err := sql.Open("sqlite", dsn(opts.Path))
+	sqldb, err := sql.Open("sqlite", dsn(opts.Path, opts.Durable))
 	if err != nil {
 		return nil, fmt.Errorf("sqlitex: opening %s: %w", opts.Path, err)
 	}
@@ -83,12 +87,16 @@ func (d *DB) Close() error { return d.DB.Close() }
 // first: foreign keys and busy_timeout are per connection in SQLite.
 // _txlock=immediate takes the write lock at BEGIN, so two write transactions
 // queue on busy_timeout instead of one failing at its first write.
-func dsn(path string) string {
+func dsn(path string, durable bool) string {
 	q := url.Values{}
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMillis))
-	q.Add("_pragma", "synchronous(NORMAL)")
+	sync := "NORMAL"
+	if durable {
+		sync = "FULL"
+	}
+	q.Add("_pragma", "synchronous("+sync+")")
 	q.Set("_txlock", "immediate")
 	return "file:" + path + "?" + q.Encode()
 }
