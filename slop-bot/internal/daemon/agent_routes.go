@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -22,6 +23,7 @@ var agentErrors = append([]control.ErrorMapping{
 	{Err: agents.ErrNotYourTicket, Status: http.StatusForbidden},
 	{Err: agents.ErrHasAutoMerge, Status: http.StatusConflict},
 	{Err: agents.ErrNotInDiscusson, Status: http.StatusConflict},
+	{Err: agents.ErrCantFinish, Status: http.StatusConflict},
 }, ticketErrors...)
 
 // agentRoutes is the agents' verbs, messaging, status and the event log.
@@ -56,6 +58,10 @@ func (ar *agentRoutes) tell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	by := control.PrincipalFrom(r.Context())
+	if in.All && in.Interrupt {
+		fail(w, errors.Join(errBadRequest, errors.New("--interrupt can't be combined with --all: a broadcast never interrupts")))
+		return
+	}
 	if in.All {
 		n, err := ar.d.agents.TellAll(r.Context(), by, in.Text)
 		if err != nil {
@@ -81,7 +87,8 @@ func apiMessages(msgs []state.Message) []api.Message {
 	return out
 }
 
-// inbox is the caller's unread messages, marked read as they're returned;
+// inbox is the caller's unread messages (an agent's: those not yet pushed
+// to it), marked read as they're returned;
 // with ?log, the history instead (user only).
 func (ar *agentRoutes) inbox(w http.ResponseWriter, r *http.Request) {
 	by := control.PrincipalFrom(r.Context())
@@ -105,7 +112,13 @@ func (ar *agentRoutes) inbox(w http.ResponseWriter, r *http.Request) {
 		control.WriteJSON(w, http.StatusOK, apiMessages(log))
 		return
 	}
-	unread, err := msgs.Unread(r.Context(), me)
+	// An agent has had its delivered messages pushed into its conversation;
+	// replaying them would repeat old instructions.
+	list := msgs.Unread
+	if !by.IsUser() {
+		list = msgs.Pending
+	}
+	unread, err := list(r.Context(), me)
 	if err != nil {
 		agentFail(w, err)
 		return
@@ -267,6 +280,11 @@ func (ar *agentRoutes) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	enc := json.NewEncoder(w)
 	flusher, _ := w.(http.Flusher)
+	// Send the headers now: a follower that has this response knows its
+	// starting point is fixed, even if no event comes for a while.
+	if flusher != nil {
+		flusher.Flush()
+	}
 	for {
 		var evs []state.Event
 		var err error

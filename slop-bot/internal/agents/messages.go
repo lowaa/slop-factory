@@ -35,20 +35,32 @@ const nudgeText = "You ended your turn without saying why. If the ticket needs y
 	"Otherwise say which: `ask` the user, `discuss` a risky decision, `ready-to-merge`, or `done`."
 
 // Tell is `slop-bot tell`. to is "user", an agent id, or a ticket id (its
-// live agent). Who sends it comes from the caller, never an argument.
+// live agent). Who sends it comes from the caller, never an argument. The
+// user telling an agent with open questions answers them.
 func (m *Manager) Tell(ctx context.Context, from ident.Principal, to, text string, interrupt bool) (*state.Message, error) {
-	if interrupt && !from.IsUser() {
+	return m.tell(ctx, &tellReq{from: from, to: to, text: text, interrupt: interrupt, answers: true})
+}
+
+// tellReq is one tell.
+type tellReq struct {
+	from      ident.Principal
+	to, text  string
+	interrupt bool
+	// answers is whether a user's tell answers the agent's open asks. A
+	// broadcast doesn't: "main is red" answers nobody's question.
+	answers bool
+}
+
+func (m *Manager) tell(ctx context.Context, req *tellReq) (*state.Message, error) {
+	from := req.from
+	if req.interrupt && !from.IsUser() {
 		return nil, fmt.Errorf("%w: --interrupt", ErrUserOnly)
 	}
 	sender := state.PartyOf(from)
-	if to == "user" {
-		msg, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{From: sender, To: state.UserParty, Kind: state.KindTell, Body: text})
-		if err == nil {
-			m.event(ctx, EventQueued, from.Agent, "", map[string]string{"to": string(state.UserParty)})
-		}
-		return msg, err
+	if req.to == "user" {
+		return m.tellTheUser(ctx, from, req.text)
 	}
-	a, err := m.resolveAgent(ctx, to)
+	a, err := m.resolveAgent(ctx, req.to)
 	if err != nil {
 		return nil, err
 	}
@@ -57,19 +69,13 @@ func (m *Manager) Tell(ctx context.Context, from ident.Principal, to, text strin
 			return nil, err
 		}
 	}
-	var msg *state.Message
-	if from.IsUser() && a.State == state.StateWaitingUser {
-		// The user telling an agent that is waiting on them is its answer.
-		msg, _, err = m.opts.State.Messages.Answer(ctx, &state.NewMessage{From: sender, To: state.AgentParty(a.ID), Kind: state.KindAnswer, Body: text})
-	} else {
-		msg, err = m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{From: sender, To: state.AgentParty(a.ID), Kind: state.KindTell, Body: text})
-	}
+	msg, err := m.enqueueTell(ctx, req, a.ID)
 	if err != nil {
 		return nil, err
 	}
 	m.event(ctx, EventQueued, a.ID, a.Ticket, map[string]string{"to": string(a.ID), "from": string(sender)})
 	if r, ok := m.runner(a.ID); ok {
-		if interrupt {
+		if req.interrupt {
 			if err := r.conv.Interrupt(ctx); err != nil {
 				m.opts.Logger.Warn("agents: interrupting", "agent", a.ID, "err", err)
 			}
@@ -79,7 +85,44 @@ func (m *Manager) Tell(ctx context.Context, from ident.Principal, to, text strin
 	return msg, nil
 }
 
-// TellAll is `slop-bot tell --all`: every live agent.
+// enqueueTell queues the tell for agent: as the answer to its open asks
+// when the user sends it to an agent that has some, mid-turn or waiting
+// (ask returns at once, so an answer can arrive before the turn ends).
+func (m *Manager) enqueueTell(ctx context.Context, req *tellReq, agent ident.AgentID) (*state.Message, error) {
+	n := &state.NewMessage{From: state.PartyOf(req.from), To: state.AgentParty(agent), Kind: state.KindTell, Body: req.text}
+	if req.from.IsUser() && req.answers {
+		asks, err := m.opts.State.Messages.OpenAsksFrom(ctx, agent)
+		if err != nil {
+			return nil, err
+		}
+		if len(asks) > 0 {
+			n.Kind = state.KindAnswer
+			msg, _, err := m.opts.State.Messages.Answer(ctx, n)
+			return msg, err
+		}
+	}
+	return m.opts.State.Messages.Enqueue(ctx, n)
+}
+
+// tellTheUser puts a message in the user's inbox. An agent's are rate
+// limited like any of its messages: the user is the easiest party to
+// flood.
+func (m *Manager) tellTheUser(ctx context.Context, from ident.Principal, text string) (*state.Message, error) {
+	sender := state.PartyOf(from)
+	if !from.IsUser() {
+		if err := m.loopGuard(ctx, sender, state.UserParty); err != nil {
+			return nil, err
+		}
+	}
+	msg, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{From: sender, To: state.UserParty, Kind: state.KindTell, Body: text})
+	if err == nil {
+		m.event(ctx, EventQueued, from.Agent, "", map[string]string{"to": string(state.UserParty)})
+	}
+	return msg, err
+}
+
+// TellAll is `slop-bot tell --all`: every live agent. A broadcast answers
+// no one's question.
 func (m *Manager) TellAll(ctx context.Context, from ident.Principal, text string) (int, error) {
 	m.mu.Lock()
 	ids := make([]ident.AgentID, 0, len(m.runners))
@@ -91,7 +134,7 @@ func (m *Manager) TellAll(ctx context.Context, from ident.Principal, text string
 	m.mu.Unlock()
 	n := 0
 	for _, id := range ids {
-		if _, err := m.Tell(ctx, from, string(id), text, false); err != nil {
+		if _, err := m.tell(ctx, &tellReq{from: from, to: string(id), text: text}); err != nil {
 			return n, err
 		}
 		n++
@@ -109,6 +152,8 @@ func (m *Manager) resolveAgent(ctx context.Context, to string) (*state.Agent, er
 	return nil, fmt.Errorf("%w: %q", ErrUnknownTarget, to)
 }
 
+// loopGuard refuses an agent's message past the limits. The user hears of
+// it once per window per pair, not on every refused retry.
 func (m *Manager) loopGuard(ctx context.Context, from, to state.Party) error {
 	now := m.opts.Clock.Now()
 	pair, err := m.opts.State.Messages.CountBetween(ctx, from, to, now.Add(-pairWindow))
@@ -119,12 +164,25 @@ func (m *Manager) loopGuard(ctx context.Context, from, to state.Party) error {
 	if err != nil {
 		return err
 	}
-	if pair >= pairLimit || sent >= sendLimit {
+	// The user answering isn't a ping-pong: only the send rate limits an
+	// agent's messages to them.
+	overPair := pair >= pairLimit && to != state.UserParty
+	if !overPair && sent < sendLimit {
+		return nil
+	}
+	key := string(from) + ">" + string(to)
+	m.mu.Lock()
+	last, told := m.guardTold[key]
+	notify := !told || now.Sub(last) >= pairWindow
+	if notify {
+		m.guardTold[key] = now
+	}
+	m.mu.Unlock()
+	if notify {
 		m.tellUser(ctx, ident.AgentID(from), fmt.Sprintf("the loop guard stopped %s messaging %s: %d messages between them in %s, %d sent in %s",
 			from, to, pair, pairWindow, sent, sendWindow))
-		return fmt.Errorf("%w: wait before messaging %s again", ErrLoopGuard, to)
 	}
-	return nil
+	return fmt.Errorf("%w: wait before messaging %s again", ErrLoopGuard, to)
 }
 
 // deliverNow delivers r's pending messages if it can now: mid-turn where
@@ -140,15 +198,40 @@ func (m *Manager) deliverNow(ctx context.Context, r *runner) {
 	m.deliverPending(ctx, r)
 }
 
+// enqueueNotice queues a notice from slop-bot for r, to go with its next
+// delivery.
+func (m *Manager) enqueueNotice(ctx context.Context, r *runner, text string) bool {
+	if _, err := m.opts.State.Messages.Enqueue(ctx, &state.NewMessage{
+		From: state.UserParty, To: state.AgentParty(r.id), Kind: state.KindSystem, Body: text,
+	}); err != nil {
+		m.opts.Logger.Warn("agents: queueing a notice", "agent", r.id, "err", err)
+		return false
+	}
+	return true
+}
+
+// notify sends r a notice from slop-bot: rendered as slop-bot's, so it
+// carries no one's authority, and never an answer to the agent's asks.
+func (m *Manager) notify(ctx context.Context, r *runner, text string) {
+	if m.enqueueNotice(ctx, r, text) {
+		m.deliverNow(ctx, r)
+	}
+}
+
 // deliverPending sends r its pending messages, as one message, and reports
 // whether there were any to handle. An idle agent with messages but no
 // free slot waits for one, ahead of new work.
 func (m *Manager) deliverPending(ctx context.Context, r *runner) bool {
+	r.deliverMu.Lock()
+	defer r.deliverMu.Unlock()
 	if r.state() == state.StateAttached {
 		return false
 	}
 	pending, err := m.opts.State.Messages.Pending(ctx, state.AgentParty(r.id))
 	if err != nil || len(pending) == 0 {
+		// Nothing to wait for: a slot queue entry would only hold up the
+		// pool.
+		m.unqueue(r.id)
 		return false
 	}
 	r.mu.Lock()
@@ -164,6 +247,9 @@ func (m *Manager) deliverPending(ctx context.Context, r *runner) bool {
 	}
 	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: render(pending)}); err != nil {
 		m.opts.Logger.Warn("agents: delivering", "agent", r.id, "err", err)
+		if !inTurn {
+			m.releaseSlot(r)
+		}
 		return false
 	}
 	for _, msg := range pending {
@@ -209,7 +295,7 @@ func (m *Manager) nudge(ctx context.Context, r *runner) {
 	if n > m.opts.Config.Agents.Nudges {
 		r.setState(ctx, state.StateStalled, fmt.Sprintf("stopped %d times without saying why", n))
 		m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) keeps stopping without saying why: it's stalled. "+
-			"`slop-bot tell %s ...` to steer it, or `slop-bot attach %s`.", r.id, r.ticket, r.id, r.id))
+			"`slop-bot tell %s ...` to steer it.", r.id, r.ticket, r.id))
 		return
 	}
 	r.setState(ctx, state.StateIdle, "nudged")

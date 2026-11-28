@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
@@ -54,7 +55,14 @@ type Options struct {
 	// CLIReference is the briefing's command list, generated from the CLI's
 	// command tree so it can't drift from it.
 	CLIReference string
+	// StartTimeout bounds starting or resuming one agent, git and the
+	// harness's handshake included; zero means DefaultStartTimeout.
+	StartTimeout time.Duration
 }
+
+// DefaultStartTimeout is Options.StartTimeout's default: generous, since a
+// harness's first start may install or update itself.
+const DefaultStartTimeout = 2 * time.Minute
 
 // Manager runs every agent. It is a lifecycle component: Start resumes the
 // agents that were running and starts scheduling; Stop drains them.
@@ -67,7 +75,35 @@ type Manager struct {
 	// in the order they started waiting: an answered agent goes ahead of
 	// new work.
 	wantSlot []ident.AgentID
-	stopping bool
+	// starting are tickets whose agent is being started or resumed off the
+	// scheduler goroutine, with the pool it starts in: each holds a slot and
+	// a live place until its start settles, so starts in flight can't
+	// overfill a pool.
+	starting map[ident.TicketID]state.Pool
+	// recoverAfter are agents whose harness died while a start for their
+	// ticket was still in flight (a resume, still delivering): each is
+	// recovered once that start settles, rather than lost.
+	recoverAfter map[ident.TicketID]*runner
+	stopping     bool
+	// guardTold is when the user was last told the loop guard stopped a
+	// pair, so a refused retry doesn't tell them again within the window.
+	guardTold map[string]time.Time
+
+	// syncMu serialises keeping an agent in step with its ticket: the
+	// scheduler does it on every ticket event, and a finished start does it
+	// once, and two at once would both send the same notice.
+	syncMu sync.Mutex
+
+	// base is cancelled by Stop, so a start in flight gives up rather than
+	// holding the stop.
+	base       context.Context
+	cancelBase context.CancelFunc
+	// starts are the goroutines starting or resuming agents; ends, those
+	// stopping and cleaning up finished ones. Stop waits for both. Each Add
+	// happens before Stop waits: starts under mu while not stopping, ends
+	// from the scheduler, a start or a runner, which Stop waits out first.
+	starts sync.WaitGroup
+	ends   sync.WaitGroup
 
 	kick chan struct{}
 	stop chan struct{}
@@ -80,16 +116,23 @@ func New(opts *Options) (*Manager, error) {
 		opts.Harnesses == nil || opts.Worktrees == nil || opts.Logger == nil || opts.Clock == nil {
 		return nil, errors.New("agents: New is missing a dependency")
 	}
+	base, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		opts:    opts,
-		runners: map[ident.AgentID]*runner{},
-		kick:    make(chan struct{}, 1),
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
+		opts:         opts,
+		runners:      map[ident.AgentID]*runner{},
+		starting:     map[ident.TicketID]state.Pool{},
+		recoverAfter: map[ident.TicketID]*runner{},
+		guardTold:    map[string]time.Time{},
+		base:         base,
+		cancelBase:   cancel,
+		kick:         make(chan struct{}, 1),
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
 	}, nil
 }
 
-// Start resumes live agents and starts the scheduler.
+// Start resumes live agents, each on its own goroutine, and starts the
+// scheduler.
 func (m *Manager) Start(ctx context.Context) error {
 	if err := m.resumeAll(ctx); err != nil {
 		return err
@@ -100,8 +143,9 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 // Stop drains: each agent finishes its current turn and stops, so it can be
-// resumed by id when the daemon starts again. ctx bounds the wait; past it,
-// agents are killed.
+// resumed by id when the daemon starts again. Starts in flight are
+// abandoned. ctx bounds the wait: past it, agents are killed and Stop
+// returns ctx's error without waiting for the rest.
 func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	if m.stopping {
@@ -109,22 +153,123 @@ func (m *Manager) Stop(ctx context.Context) error {
 		return nil
 	}
 	m.stopping = true
-	runners := make([]*runner, 0, len(m.runners))
+	// Marked now, so a turn that ends from here on starts nothing new;
+	// adopt marks the runners that starts in flight bring.
 	for _, r := range m.runners {
 		r.mu.Lock()
 		r.stopping = true
 		r.mu.Unlock()
-		runners = append(runners, r)
 	}
 	m.mu.Unlock()
 	close(m.stop)
-	<-m.done
+	m.cancelBase()
+	if err := waitCtx(ctx, m.done); err != nil {
+		return err
+	}
+	if err := waitGroup(ctx, &m.starts); err != nil {
+		return err
+	}
+	// Only now is the set of runners final: a start that was in flight has
+	// adopted its runner, or given up.
+	m.mu.Lock()
+	runners := make([]*runner, 0, len(m.runners))
+	for _, r := range m.runners {
+		runners = append(runners, r)
+	}
+	m.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, r := range runners {
 		wg.Go(func() { r.shutdown(ctx) })
 	}
 	wg.Wait()
-	return nil
+	// An agent that finished during the drain is cleaned up before the
+	// daemon closes the databases under it.
+	return waitGroup(ctx, &m.ends)
+}
+
+// startTimeout is Options.StartTimeout, defaulted.
+func (m *Manager) startTimeout() time.Duration {
+	if m.opts.StartTimeout > 0 {
+		return m.opts.StartTimeout
+	}
+	return DefaultStartTimeout
+}
+
+// goStart runs start on its own goroutine, holding a place for ticket's
+// agent in pool until it returns, with a context Stop cancels and
+// startTimeout bounds. When admit is set it first checks the pool has room
+// (see admits), and reports false, starting nothing, when it hasn't, or
+// when the manager is stopping.
+func (m *Manager) goStart(ticket ident.TicketID, pool state.Pool, admit bool, start func(context.Context)) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.goStartLocked(ticket, pool, admit, start)
+}
+
+// goStartLocked is goStart, holding mu.
+func (m *Manager) goStartLocked(ticket ident.TicketID, pool state.Pool, admit bool, start func(context.Context)) bool {
+	if m.stopping {
+		return false
+	}
+	if _, busy := m.starting[ticket]; busy || (admit && !m.admitsLocked(pool)) {
+		return false
+	}
+	m.starting[ticket] = pool
+	m.starts.Go(func() {
+		defer m.settled(ticket)
+		ctx, cancel := context.WithTimeout(m.base, m.startTimeout())
+		defer cancel()
+		start(ctx)
+	})
+	return true
+}
+
+func (m *Manager) settled(ticket ident.TicketID) {
+	m.mu.Lock()
+	delete(m.starting, ticket)
+	if r, ok := m.recoverAfter[ticket]; ok {
+		delete(m.recoverAfter, ticket)
+		m.goStartLocked(ticket, r.pool, false, func(ctx context.Context) { m.recover(ctx, r.id) })
+	}
+	m.mu.Unlock()
+	m.Kick()
+}
+
+// goRecover recovers r, whose harness died, on its own goroutine: now, or
+// once a start in flight for its ticket settles. A daemon stopping leaves
+// it to the next start.
+func (m *Manager) goRecover(r *runner) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.goStartLocked(r.ticket, r.pool, false, func(ctx context.Context) { m.recover(ctx, r.id) }) || m.stopping {
+		return
+	}
+	m.recoverAfter[r.ticket] = r
+}
+
+func (m *Manager) isStarting(ticket ident.TicketID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.starting[ticket]
+	return ok
+}
+
+func waitCtx(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func waitGroup(ctx context.Context, wg *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	return waitCtx(ctx, done)
 }
 
 // Kick asks the scheduler to look again.
@@ -198,6 +343,7 @@ const (
 	EventNudged       = "agent.nudged"
 	EventUserTold     = "user.told"
 	EventFinished     = "agent.finished"
+	EventReleased     = "agent.released"
 	EventSpawnFailed  = "agent.spawn_failed"
 	EventMisconfigure = "ticket.misconfigured"
 )
