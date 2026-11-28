@@ -133,7 +133,7 @@ func (d Duration) D() time.Duration { return time.Duration(d) }
 
 // Load reads, defaults and validates the config at path. home expands "~".
 func Load(path, home string) (*Config, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- the user names their own config file
 	if err != nil {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}

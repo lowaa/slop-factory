@@ -1,1 +1,15 @@
-# <file> <symbol> #<reason>
+# <file> <symbol> #36 (the tracking issue); the plan task that wires each is in the issue
+# Delete the line when that task lands.
+internal/control/auth.go PrincipalFrom #36
+internal/control/client.go Client.Stream #36
+internal/control/http.go DecodeJSON #36
+internal/control/http.go StatusFor #36
+internal/control/server.go Server.Handle #36
+internal/daemon/daemon.go Daemon.Ready #36
+internal/ident/ident.go AgentPrincipal #36
+internal/paths/paths.go Paths.AgentDir #36
+internal/paths/paths.go Paths.DefaultBriefing #36
+internal/paths/paths.go Paths.TranscriptsDir #36
+internal/sqlitex/ package #36
+internal/sqlitex/sqlitextest/ package #36
+internal/control/auth.go NewToken #36

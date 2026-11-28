@@ -34,7 +34,7 @@ func Listen(path string, logger *slog.Logger) (*Listener, error) {
 	}
 	// MkdirAll leaves an existing directory's mode alone, and a loosened one
 	// would let other users reach the socket.
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- a directory needs its execute bit; 0700 is owner-only
 		return nil, fmt.Errorf("control: securing %s: %w", dir, err)
 	}
 	if err := removeStale(path); err != nil {

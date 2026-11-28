@@ -1,0 +1,117 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
+	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
+)
+
+type harness struct {
+	deps          *Deps
+	out, err      *bytes.Buffer
+	home, runtime string
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	home := t.TempDir()
+	rt, err := os.MkdirTemp("", "sbcli")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(rt) })
+	h := &harness{out: &bytes.Buffer{}, err: &bytes.Buffer{}, home: home, runtime: rt}
+	vars := map[string]string{"XDG_RUNTIME_DIR": rt}
+	h.deps = &Deps{
+		Stdout: h.out, Stderr: h.err,
+		Env: &paths.Env{
+			Lookup: func(k string) (string, bool) { v, ok := vars[k]; return v, ok },
+			Home:   home, UID: os.Getuid(), GOOS: "linux",
+		},
+	}
+	return h
+}
+
+func (h *harness) run(t *testing.T, args ...string) int {
+	t.Helper()
+	h.out.Reset()
+	h.err.Reset()
+	return Execute(context.Background(), h.deps, args)
+}
+
+func TestVersion(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	require.Equal(t, 0, h.run(t, "version"))
+	assert.Equal(t, "dev\n", h.out.String())
+}
+
+func TestPathsShowsEveryLocationAndWhereItCameFrom(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	require.Equal(t, 0, h.run(t, "paths"))
+	out := h.out.String()
+	assert.Contains(t, out, filepath.Join(h.runtime, "slop-bot", "slop-bot.sock"))
+	assert.Contains(t, out, filepath.Join(h.home, ".local", "state", "slop-bot", "state.db"))
+	assert.Contains(t, out, "default ($XDG_CONFIG_HOME unset)")
+	assert.Contains(t, out, "$XDG_RUNTIME_DIR")
+	assert.Contains(t, out, "user briefing")
+	assert.Contains(t, out, "(none)")
+}
+
+func TestABrokenConfigIsReportedNotDefaulted(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	cfg := filepath.Join(h.home, "bad.yaml")
+	require.NoError(t, os.WriteFile(cfg, []byte("workspace_dri: x\n"), 0o600))
+	assert.Equal(t, 1, h.run(t, "--config", cfg, "daemon"))
+	assert.Contains(t, h.err.String(), "workspace_dri")
+}
+
+func TestAnExplicitMissingConfigIsAnError(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	assert.Equal(t, 1, h.run(t, "--config", filepath.Join(h.home, "nope.yaml"), "daemon"))
+	assert.Contains(t, h.err.String(), "nope.yaml")
+}
+
+func TestHealthWithoutADaemonNamesTheSocket(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	assert.Equal(t, 1, h.run(t, "health"))
+	assert.Contains(t, h.err.String(), "can't reach the slop-bot daemon at "+filepath.Join(h.runtime, "slop-bot", "slop-bot.sock"))
+}
+
+func TestHealthAgainstARunningDaemon(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	ready := make(chan *daemon.Daemon, 1)
+	h.deps.daemonBuilt = func(d *daemon.Daemon) { ready <- d }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	daemonDeps := *h.deps
+	daemonDeps.Stdout, daemonDeps.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	go func() { done <- Execute(ctx, &daemonDeps, []string{"daemon"}) }()
+	d := <-ready
+	<-d.Ready()
+
+	require.Equal(t, 0, h.run(t, "health"), h.err.String())
+	assert.True(t, strings.HasPrefix(h.out.String(), "daemon dev running"), h.out.String())
+
+	cancel()
+	assert.Equal(t, 0, <-done)
+}
+
+func TestUnknownCommandFails(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	assert.Equal(t, 1, h.run(t, "frobnicate"))
+	assert.Contains(t, h.err.String(), "unknown command")
+}

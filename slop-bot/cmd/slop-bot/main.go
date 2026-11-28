@@ -2,17 +2,24 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/lowaa/slop-factory/slop-bot/internal/version"
+	"github.com/lowaa/slop-factory/slop-bot/internal/cli"
 )
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "version" {
-		fmt.Println(version.String())
-		return
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	deps, err := cli.FromOS()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "slop-bot:", err)
+		stop()
+		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, "usage: slop-bot version")
-	os.Exit(2)
+	code := cli.Execute(ctx, deps, os.Args[1:])
+	stop()
+	os.Exit(code)
 }

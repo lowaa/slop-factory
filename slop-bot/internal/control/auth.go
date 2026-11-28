@@ -15,7 +15,7 @@ import (
 
 // TokenEnv is the environment variable an agent's token reaches its harness
 // in, and from there every `slop-bot` call the agent makes.
-const TokenEnv = "SLOP_BOT_AGENT_TOKEN"
+const TokenEnv = "SLOP_BOT_AGENT_TOKEN" // #nosec G101 -- the variable's name, not a credential
 
 // ErrUnknownToken is a token no live agent holds: a stale token from an
 // ended agent, or a made-up one. It is refused, never treated as the user.
