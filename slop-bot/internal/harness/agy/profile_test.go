@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,6 +82,8 @@ func TestParseHook(t *testing.T) {
 		HookPreToolUse: {
 			ConversationID: conversationID,
 			Events:         []harness.Event{{Kind: harness.ToolStarted, Tool: "run_command"}},
+			// For the merge guard: run_command is agy's shell.
+			Tool: &tuidriver.ToolCall{Name: "run_command", Command: "sleep 12; echo done", Cwd: "/home/user/slop-bot/workspace/t7-repo"},
 		},
 		HookPostToolUse: {
 			ConversationID: conversationID,
@@ -324,13 +327,19 @@ func TestANonPermissiveWorkspaceAlwaysAsks(t *testing.T) {
 	pre := commandFor(t, events, HookPreToolUse)
 
 	heard := make(chan string, 1)
+	var answer atomic.Value
+	answer.Store(allow)
 	unroute, err := hub.Route(session, func(_ context.Context, event string, _ []byte) ([]byte, error) {
 		heard <- event
-		return []byte(allow), nil
+		return []byte(answer.Load().(string)), nil
 	})
 	require.NoError(t, err)
 	assert.JSONEq(t, ask, runHook(t, pre, env), "slop-bot's allow is not passed on")
 	assert.Equal(t, HookPreToolUse, <-heard, "slop-bot still hears of the call")
+	// The merge guard's refusal narrows what the person may approve: it is.
+	answer.Store(string(deny("a merge")))
+	assert.JSONEq(t, `{"decision":"deny","reason":"a merge"}`, runHook(t, pre, env))
+	<-heard
 	unroute()
 	assert.JSONEq(t, ask, runHook(t, pre, env), "unreachable")
 }

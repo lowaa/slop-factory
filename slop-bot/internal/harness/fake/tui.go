@@ -203,7 +203,7 @@ func (t *tui) command(c *Command) (int, bool) {
 		t.endTurn(outcomeOr(c.Outcome))
 	case CmdToolStart:
 		t.status = "tool: " + c.Tool
-		t.hook(HookToolStart, &HookPayload{Tool: c.Tool})
+		t.hook(HookToolStart, &HookPayload{Tool: c.Tool, Text: c.Text})
 	case CmdToolEnd:
 		t.status = ""
 		t.hook(HookToolEnd, &HookPayload{Tool: c.Tool})

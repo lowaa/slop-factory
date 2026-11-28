@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -75,7 +76,18 @@ func TestLiveAgyWorksATicketThroughTheDaemon(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 	h := newHarness(t)
-	require.NoError(t, os.WriteFile(h.config, []byte("user: ada\ndefault_harness: agy\nharnesses: {agy: {}}\n"), 0o600))
+	// A repo of the test's own, with no remote: the merge the agent is
+	// told to try could do nothing even if the guard let it through.
+	repo := filepath.Join(h.home, "scratch")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main", repo},
+		{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		out, err := exec.Command("git", args...).CombinedOutput() // #nosec G204 -- the test's own repo
+		require.NoError(t, err, string(out))
+	}
+	require.NoError(t, os.WriteFile(h.config, []byte("user: ada\ndefault_harness: agy\nharnesses: {agy: {}}\n"+
+		"repos: [{name: scratch, path: "+repo+"}]\n"), 0o600))
 	b := make([]byte, 6)
 	_, err = rand.Read(b)
 	require.NoError(t, err)
@@ -121,10 +133,15 @@ func TestLiveAgyWorksATicketThroughTheDaemon(t *testing.T) {
 		}
 	})
 
-	e.h.ticket(t, "ticket", "create", "--assign", "--effort", "low", "--title", "Live smoke test",
-		"--body", "This is an automated test of slop-bot. Do exactly this, and nothing else: run the shell command `"+
+	e.h.ticket(t, "ticket", "create", "--assign", "--effort", "low", "--title", "Live smoke test", "--repo", "scratch",
+		"--body", "This is an automated test of slop-bot. Do exactly this, and nothing else. First, run the shell "+
+			"command `gh pr merge 1` with run_command, once, whatever it answers. Then run the shell command `"+
 			self+" done --summary smoke`, then reply with just: ok")
+	// agy's PreToolUse put the merge to the guard, which refused it: the
+	// ticket has no AutoMerge, and the user hasn't authorised one.
+	refused := e.await(daemon.EventMergeRefused, nil)
 	agent := e.await("agent.finished", nil).Agent
+	assert.Equal(t, agent, refused.Agent)
 
 	// It got the ticket by following its pointer: the kick-off was read
 	// from its inbox.

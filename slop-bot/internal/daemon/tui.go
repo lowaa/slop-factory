@@ -143,8 +143,10 @@ func (d *Daemon) tuiKit(cliPath string) (*tuidriver.Sessions, error) {
 	d.host, d.hub = host, newHookHub(cliPath)
 	return &tuidriver.Sessions{
 		Host: host, Hub: d.hub, Logger: d.opts.Logger, Clock: d.opts.Clock,
-		// The manager exists by the time a conversation types a pointer.
+		// The manager exists by the time a conversation types a pointer,
+		// and the guard by the time its hooks run.
 		Pointer: func(msgs []*harness.Message) string { return d.agents.Pointer(msgs) },
+		Guard:   d.tuiGuard,
 	}, nil
 }
 

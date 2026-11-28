@@ -10,6 +10,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
 	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
@@ -43,21 +44,38 @@ func (ar *agentRoutes) preTool(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	by := control.PrincipalFrom(r.Context())
-	v := ar.d.guard.Check(r.Context(), by, &mergeguard.Call{Tool: in.Tool, Command: in.Command, Cwd: in.Cwd})
+	v := ar.d.checkTool(r.Context(), &mergeguard.Call{Tool: in.Tool, Command: in.Command, Cwd: in.Cwd})
 	out := api.PreToolVerdict{Allow: v.Allow, Reason: v.Reason}
 	if v.Finding != nil {
 		out.Merge = string(v.Finding.Kind)
 	}
+	control.WriteJSON(w, http.StatusOK, out)
+}
+
+// checkTool is the guard's verdict on a tool call by the caller ctx
+// carries, the refusal recorded: for `slop-bot hook pre-tool`, and for a
+// TUI harness's pre-tool hook, relayed by `slop-bot hook tui`.
+func (d *Daemon) checkTool(ctx context.Context, call *mergeguard.Call) *mergeguard.Verdict {
+	by := control.PrincipalFrom(ctx)
+	v := d.guard.Check(ctx, by, call)
 	if !v.Allow {
 		payload, _ := json.Marshal(map[string]string{"kind": string(v.Finding.Kind), "detail": v.Finding.Detail})
-		if _, err := ar.d.state.Events.Append(r.Context(), &state.NewEvent{
+		if _, err := d.state.Events.Append(ctx, &state.NewEvent{
 			Type: EventMergeRefused, Agent: by.Agent, Ticket: by.Ticket, Payload: payload,
 		}); err != nil {
-			ar.d.opts.Logger.Warn("daemon: recording a refused merge", "err", err)
+			d.opts.Logger.Warn("daemon: recording a refused merge", "err", err)
 		}
 	}
-	control.WriteJSON(w, http.StatusOK, out)
+	return v
+}
+
+// tuiGuard is the TUI kit's Guard: the merge guard, as for any harness.
+func (d *Daemon) tuiGuard(ctx context.Context, call *tuidriver.ToolCall) string {
+	v := d.checkTool(ctx, &mergeguard.Call{Tool: call.Name, Command: call.Command, Cwd: call.Cwd})
+	if v.Allow {
+		return ""
+	}
+	return v.Reason
 }
 
 // authoriseMerge is tell's --merge: the user's go-ahead, recorded before

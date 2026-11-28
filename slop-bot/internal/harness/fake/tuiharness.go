@@ -67,7 +67,11 @@ func (h *TUIHarness) Profile() *tuidriver.Profile {
 		Quit:      []tuidriver.Input{{Text: "/quit", Keys: []string{"Enter"}}},
 		ParseHook: parseHook,
 		Reply:     replyHook,
-		Injects:   true,
+		Deny: func(reason string) []byte {
+			b, _ := json.Marshal(HookReply{Deny: reason})
+			return b
+		},
+		Injects: true,
 	}
 }
 
@@ -103,6 +107,8 @@ func parseHook(event string, payload []byte) (*tuidriver.HookCall, error) {
 		}
 	case HookToolStart:
 		call.Events = []harness.Event{{Kind: harness.ToolStarted, Tool: p.Tool}}
+		// The call's input is its command line, as for a shell tool.
+		call.Tool = &tuidriver.ToolCall{Name: p.Tool, Command: p.Text}
 	case HookToolEnd:
 		call.Events = []harness.Event{{Kind: harness.ToolEnded, Tool: p.Tool}}
 	case HookText:

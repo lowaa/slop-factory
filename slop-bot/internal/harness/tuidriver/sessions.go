@@ -29,6 +29,8 @@ type Sessions struct {
 	HookTrust      time.Duration
 	ConfirmTimeout time.Duration
 	RenderTimeout  time.Duration
+	// Guard is Options.Guard.
+	Guard Guard
 }
 
 // Options are p's for the session named session.
@@ -37,6 +39,7 @@ func (s *Sessions) Options(p *Profile, session string) *Options {
 		Profile: p, Host: s.Host, Hub: s.Hub, Session: session,
 		Pointer: s.Pointer, Logger: s.Logger, Clock: s.Clock,
 		PollInterval: s.PollInterval, HookTrust: s.HookTrust, ConfirmTimeout: s.ConfirmTimeout, RenderTimeout: s.RenderTimeout,
+		Guard: s.Guard,
 	}
 }
 

@@ -78,8 +78,9 @@ type Classifier struct {
 // directory, for the current branch and the remote's default branch.
 func NewClassifier(git Git) *Classifier { return &Classifier{git: git} }
 
-// shellTools are the tool names harnesses give their shell.
-var shellTools = []string{"bash", "shell", "exec_command", "local_shell"}
+// shellTools are the tool names harnesses give their shell (agy's is
+// run_command).
+var shellTools = []string{"bash", "shell", "exec_command", "local_shell", "run_command"}
 
 // mergeTool matches an MCP tool whose own name (the part after the server)
 // is a merging verb: GitHub's merge_pull_request, GitLab's

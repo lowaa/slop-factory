@@ -67,7 +67,9 @@ is told). A `preparing` or `open` ticket is then parked as `misconfigured`,
 so a new agent isn't started into the same failure. A harness that fails to
 start is treated the same way. `slop-bot ticket set <id> --status preparing`
 puts a parked ticket back in line. On a daemon restart, live agents are
-resumed by their conversation id.
+resumed by their conversation id; a TUI agent's (agy's) session outlives the
+daemon instead, and is taken back as it runs. `slop-bot uninstall` ends
+those sessions.
 
 ## Declarations, nudges and stalls
 
@@ -157,6 +159,14 @@ pick them up: `preparing`, then the work.
   config default
 
 ## Attach and hand-back
+
+A TUI harness (agy) is **joined** rather than handed over: `attach` runs
+`tmux attach` on the agent's own session, which runs on. Messages are held
+while you're in it, your turns leave the agent `attached`, and detaching
+(`Ctrl-b d`, or `slop-bot detach`) hands it back with the held messages.
+Quitting agy ends the session, and the hand-back resumes the conversation.
+`--no-resume` isn't available for a joined session. The rest of this
+section is the hand-over, for the other harnesses.
 
 `slop-bot attach <agent|ticket>` lets a person take over an agent's session.
 It stops the programmatic session at the end of the agent's turn (with
@@ -280,7 +290,7 @@ and the risk is accepted**. It stops mistakes, not malice.
 - The merge flag is policy in the briefing, backed where a harness has a
   pre-tool hook by a guard that refuses obvious merges (`gh pr merge`, a
   push to the default branch) on a ticket without `AutoMerge` until you
-  run `slop-bot tell <agent> --merge`. Claude Code and pi have the guard.
+  run `slop-bot tell <agent> --merge`. Claude Code, pi and agy have the guard.
   Codex doesn't. The guard is advisory: an agent with a shell can get round
   it. See [merge_guard.md](merge_guard.md).
 - `agy` runs on a Google sign-in whose consumer terms may forbid driving it

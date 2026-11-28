@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -264,6 +265,75 @@ func TestARestartLeavesSessionsItDoesntKnow(t *testing.T) {
 	names, err := e.host.List(e.ctx())
 	require.NoError(t, err)
 	assert.Contains(t, names, "agy-t9-abcdef")
+}
+
+// toolReply runs a shell tool call in the fake, mid-turn, and returns what
+// its pre-tool hook answered: a refusal's reason, or "" when it may run.
+func (e *tuiE2E) toolReply(s *fake.Session, command string) string {
+	e.t.Helper()
+	e.do2(s, fake.Command{Cmd: fake.CmdToolStart, Tool: "bash", Text: command})
+	for {
+		r, err := s.Await(e.ctx(), fake.RepHook)
+		require.NoError(e.t, err)
+		if r.Event != fake.HookToolStart {
+			continue
+		}
+		var reply fake.HookReply
+		require.NoError(e.t, json.Unmarshal([]byte(r.Reply), &reply), r.Reply)
+		e.do2(s, fake.Command{Cmd: fake.CmdToolEnd, Tool: "bash"})
+		return reply.Deny
+	}
+}
+
+func (e *tuiE2E) do2(s *fake.Session, c fake.Command) {
+	e.t.Helper()
+	_, err := s.Do(e.ctx(), c)
+	require.NoError(e.t, err)
+}
+
+func TestTheMergeGuardRefusesATUIAgentsMergeUntilAuthorised(t *testing.T) {
+	t.Parallel()
+	e := newTUIE2E(t)
+	s, agent := e.spawned("Add export")
+	e.do(s, fake.CmdTurnStart)
+
+	assert.Empty(t, e.toolReply(s, "go test ./..."), "ordinary work runs")
+	reason := e.toolReply(s, "gh pr merge 12 --squash")
+	assert.Contains(t, reason, "merge guard refused this")
+	assert.Contains(t, reason, "has no AutoMerge")
+	refused := e.await(daemon.EventMergeRefused, nil)
+	assert.Equal(t, agent, refused.Agent)
+
+	e.h.ok(t, "tell", agent, "--merge")
+	assert.Empty(t, e.toolReply(s, "gh pr merge 12 --squash"), "authorised, the merge runs")
+}
+
+func TestATUIHookAnswersForTheDaemonWhenItsAway(t *testing.T) {
+	t.Parallel()
+	e := newTUIE2E(t)
+	s, agent := e.spawned("t")
+	e.stop()
+	// What agy would pass, for agy's session: the hook answers as agy's
+	// profile does, refusing a merge, which nothing can authorise now.
+	session := "agy-" + agent
+	pre := func(command string) *fake.Report {
+		payload, err := json.Marshal(map[string]any{"cwd": "/", "toolCall": map[string]any{
+			"name": "run_command", "args": map[string]string{"CommandLine": command},
+		}})
+		require.NoError(t, err)
+		r, err := s.Do(e.ctx(), fake.Command{Cmd: fake.CmdRun, Argv: []string{
+			"/usr/bin/env", fakeReexec + "=", cliReexec + "=1",
+			"/bin/sh", "-c", `printf '%s' "$1" | "$0" hook tui "$2" PreToolUse`, e.self, string(payload), session,
+		}})
+		require.NoError(t, err)
+		require.Equal(t, 0, r.Code, "it answers rather than fails: %s", r.Stderr)
+		return r
+	}
+	assert.JSONEq(t, `{"decision":"allow"}`, pre("go test ./...").Stdout)
+	var out struct{ Decision, Reason string }
+	require.NoError(t, json.Unmarshal([]byte(pre("gh pr merge 12").Stdout), &out))
+	assert.Equal(t, "deny", out.Decision)
+	assert.Contains(t, out.Reason, "daemon couldn't be asked")
 }
 
 func TestStoppingTheDaemonWithAPersonJoinedLeavesTheSession(t *testing.T) {

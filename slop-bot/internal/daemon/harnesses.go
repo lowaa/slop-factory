@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
@@ -54,6 +55,16 @@ var builders = map[[2]string]func(o *buildOptions) harness.AIHarness{
 		}
 		return &agy.Harness{Sessions: *o.tui}
 	},
+}
+
+// TUIProfile is the profile of the TUI harness a session is named for, so
+// `slop-bot hook tui` can answer a hook itself when the daemon can't
+// (tuidriver.Profile.Offline).
+func TUIProfile(session string) (*tuidriver.Profile, bool) {
+	if strings.HasPrefix(session, agy.SessionPrefix) {
+		return (&agy.Harness{}).Profile(), true
+	}
+	return nil, false
 }
 
 // needsTUI says whether any configured harness runs under the tui driver.

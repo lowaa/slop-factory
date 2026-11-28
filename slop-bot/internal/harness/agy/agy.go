@@ -21,8 +21,9 @@ import (
 // Name is the harness, as the config and tickets spell it.
 const Name = "agy"
 
-// sessionPrefix names agy's sessions on the host, so Adopt finds its own.
-const sessionPrefix = "agy-"
+// SessionPrefix starts the names of agy's sessions on the host: an
+// agent's is SessionPrefix and its id (tuidriver.SessionName).
+const SessionPrefix = "agy-"
 
 // Harness runs agy.
 type Harness struct {
@@ -47,12 +48,12 @@ func (h *Harness) Capabilities() harness.Capabilities {
 
 // Start implements harness.AIHarness.
 func (h *Harness) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
-	return h.Sessions.Start(ctx, h.Profile(), sessionPrefix, ws, resume)
+	return h.Sessions.Start(ctx, h.Profile(), SessionPrefix, ws, resume)
 }
 
 // AdoptAgent implements harness.Adopter.
 func (h *Harness) AdoptAgent(ctx context.Context, agent ident.AgentID) (harness.Conversation, error) {
-	return h.Adopt(ctx, h.Profile(), sessionPrefix, agent)
+	return h.Adopt(ctx, h.Profile(), SessionPrefix, agent)
 }
 
 // ForgetWorkspace removes what Start wrote for ws, its sidecar folder, once

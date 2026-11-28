@@ -74,6 +74,8 @@ func (h *Harness) Profile() *tuidriver.Profile {
 		ParseHook: parseHook,
 		Reply:     reply,
 		Injects:   true,
+		Deny:      deny,
+		Default:   func(event string) []byte { return []byte(defaultReply(event)) },
 	}
 }
 
@@ -209,22 +211,35 @@ func installHooks(ws *harness.Workspace, _ *harness.LaunchSpec, hook []string) e
 	return os.WriteFile(filepath.Join(sidecar(ws), ".agents", "hooks.json"), b, 0o600)
 }
 
-// hookCommand runs the bridge, answering for it when it fails. A hook that
-// fires while slop-bot is unreachable (the daemon restarting, say) must
-// still answer: agy reads a failed PreToolUse as a refusal, which would
-// fail the agent's tool calls for as long as the daemon is away. The
-// fallback says nothing beyond agy's defaults, so nothing is lost but the
-// hook's news, which the screen and transcript carry too.
+// hookCommand runs the bridge, answering for it when it fails. The bridge
+// answers for itself when the daemon is away (the profile's Offline reply,
+// which still refuses a merge), so this fallback is only for slop-bot not
+// running at all. A hook must still answer then: agy reads a failed
+// PreToolUse as a refusal, which would fail every tool call. It says
+// nothing beyond agy's defaults, which can't tell a merge from any other
+// command: what the merge guard covers needs slop-bot to run.
 func hookCommand(hook []string, event string) string {
 	return bridge(hook, event) + " || printf '%s' " + shellQuote(defaultReply(event))
 }
 
-// askCommand is a non-permissive workspace's PreToolUse: slop-bot still
-// hears of the call, but agy's own prompt decides it, whatever the bridge
-// answers or however it fails, so no answer of slop-bot's can widen the
-// user's permissions.
+// askCommand is a non-permissive workspace's PreToolUse: agy's own prompt
+// decides the call, whatever the bridge answers or however it fails, so no
+// answer of slop-bot's can widen the user's permissions; but a refusal (the
+// merge guard's) is passed on, so none can narrow them less either.
 func askCommand(hook []string) string {
-	return bridge(hook, HookPreToolUse) + " >/dev/null 2>&1; printf '%s' " + shellQuote(ask)
+	return "r=$(" + bridge(hook, HookPreToolUse) + " 2>/dev/null); case $r in *'\"decision\":\"deny\"'*) printf '%s' \"$r\" ;; *) printf '%s' " + shellQuote(ask) + " ;; esac"
+}
+
+// deny is PreToolUse's refusal, with the reason agy gives the model.
+func deny(reason string) []byte {
+	b, err := json.Marshal(struct {
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}{"deny", reason})
+	if err != nil {
+		return []byte(`{"decision":"deny"}`)
+	}
+	return b
 }
 
 func bridge(hook []string, event string) string {
@@ -250,9 +265,16 @@ func shellQuote(s string) string {
 // payload is what agy passes every hook, as far as slop-bot reads it.
 type payload struct {
 	ConversationID string `json:"conversationId"`
+	// Cwd is the workspace's primary folder.
+	Cwd string `json:"cwd"`
 	// ToolCall is on PreToolUse and PostToolUse.
 	ToolCall *struct {
 		Name string `json:"name"`
+		// Args are run_command's CommandLine and Cwd, among others.
+		Args struct {
+			CommandLine string `json:"CommandLine"`
+			Cwd         string `json:"Cwd"`
+		} `json:"args"`
 	} `json:"toolCall"`
 	// Error is on PostToolUse and Stop.
 	Error string `json:"error"`
@@ -279,6 +301,13 @@ func parseHook(event string, data []byte) (*tuidriver.HookCall, error) {
 		call.Inject = tuidriver.InjectMidTurn
 	case HookPreToolUse:
 		call.Events = []harness.Event{{Kind: harness.ToolStarted, Tool: toolName(&p)}}
+		if p.ToolCall != nil {
+			cwd := p.ToolCall.Args.Cwd
+			if cwd == "" {
+				cwd = p.Cwd
+			}
+			call.Tool = &tuidriver.ToolCall{Name: p.ToolCall.Name, Command: p.ToolCall.Args.CommandLine, Cwd: cwd}
+		}
 	case HookPostToolUse:
 		call.Events = []harness.Event{{Kind: harness.ToolEnded, Tool: toolName(&p)}}
 	case HookStop:

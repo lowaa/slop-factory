@@ -67,6 +67,9 @@ type Options struct {
 	// RenderTimeout bounds the wait for a paste to show on screen, and a
 	// graceful Stop's wait for the idle prompt before it types the quit.
 	RenderTimeout time.Duration
+	// Guard, optional, is put every tool call a pre-tool hook asks about,
+	// where the profile can refuse one (the daemon's merge guard).
+	Guard Guard
 }
 
 func (o *Options) normalised() (*Options, error) {
@@ -439,6 +442,9 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 	})
 	// Also retries a tag that failed before.
 	c.recordID(ctx)
+	if refusal, refused := c.guard(ctx, call); refused {
+		return refusal, nil // a pre-tool hook carries no messages
+	}
 	reply, err := c.p.Reply(call, inject)
 	if err != nil && len(inject) > 0 {
 		// Not delivered: hold them again. A turn end this hook would have
@@ -448,6 +454,19 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 		c.mu.Unlock()
 	}
 	return reply, err
+}
+
+// guard puts a pre-tool hook's tool call to the Guard, and returns the
+// profile's refusal if it says no.
+func (c *Conversation) guard(ctx context.Context, call *HookCall) ([]byte, bool) {
+	if call.Tool == nil || c.p.Deny == nil || c.opts.Guard == nil {
+		return nil, false
+	}
+	why := c.opts.Guard(ctx, call.Tool)
+	if why == "" {
+		return nil, false
+	}
+	return c.p.Deny(why), true
 }
 
 // hookEvents applies a hook's events to the turn state; c.mu is held.
