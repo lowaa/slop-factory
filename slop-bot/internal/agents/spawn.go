@@ -96,6 +96,10 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 	r, err := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool,
 		started: &started{conv: conv, caps: h.Capabilities(), dir: ws.Dir}, st: state.StateStarting})
 	if err != nil {
+		// Turned away by the drain's fence (adopt stopped the conversation):
+		// a start cut short by the stop, so released and cleaned up without
+		// parking the ticket, which a live record left behind would block.
+		m.failStart(ctx, id, t, err)
 		return err
 	}
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})

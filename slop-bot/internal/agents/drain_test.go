@@ -225,3 +225,33 @@ func TestASweepOutlivingTheDrainIsReportedAndExitedWaitsForIt(t *testing.T) {
 	close(release)
 	<-f.mgr.Exited()
 }
+
+// A spawn the fence turns away has made its agent's record and worktrees
+// already: it is cleaned up as a start cut short by the stop is, released
+// with its worktrees removed and its ticket not parked, or the record would
+// keep the ticket from ever getting an agent.
+func TestASpawnTurnedAwayByTheFenceLeavesNoLiveAgent(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	entered, release := make(chan struct{}), make(chan struct{})
+	f.hooks.set(func(h *harnessHooks) {
+		h.ignoresCancel = true
+		h.start = func(context.Context, *harness.Workspace, *harness.ConversationRef) error {
+			close(entered)
+			<-release
+			return nil
+		}
+	})
+	tk := f.file("t", nil)
+	<-entered
+	require.ErrorContains(t, f.stopPastTheGrace(), "starts still in flight")
+	close(release)
+	f.mgr.WaitStarts()
+
+	f.noLiveAgent(tk.ID)
+	f.wts.mu.Lock()
+	cleaned := append([]ident.TicketID(nil), f.wts.cleanups...)
+	f.wts.mu.Unlock()
+	assert.Equal(t, []ident.TicketID{tk.ID}, cleaned, "its worktrees were cleaned up")
+	assert.NotEqual(t, tickets.StatusMisconfigured, f.ticket(tk.ID).Status, "not a ticket that can't run")
+}
