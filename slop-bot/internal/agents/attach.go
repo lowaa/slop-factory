@@ -373,6 +373,13 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 			decl = declAsk
 		}
 	}
+	return m.resumeHandedBack(ctx, r, why, decl, summary)
+}
+
+// resumeHandedBack resumes a handed-back agent's conversation in place of
+// its attached runner r, carrying what it declared from the TUI.
+func (m *Manager) resumeHandedBack(ctx context.Context, r *runner, why string, decl declared, summary string) (HandBackOutcome, error) {
+	id := r.id
 	a, err := m.opts.State.Agents.Get(ctx, id)
 	if err != nil {
 		return "", err
@@ -388,17 +395,7 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 	defer done()
 	s, err := m.startConversation(startCtx, a)
 	if err != nil {
-		if m.base.Err() != nil {
-			// The daemon is stopping: the next start resumes it (see resume).
-			return "", fmt.Errorf("agents: handing back %s: %w", id, err)
-		}
-		r.setState(ctx, state.StateCrashed, "couldn't resume after an attach: "+err.Error())
-		m.tellUser(ctx, id, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after its attach: %v; slop-bot is retrying", id, a.Ticket, err))
-		m.forget(id)
-		// Like a harness that died: retried, then given up on, never left
-		// live with nothing running it.
-		m.goRecover(r)
-		return "", err
+		return "", m.handBackFailed(ctx, r, err)
 	}
 	payload := map[string]string{"why": why, "outcome": string(Resumed)}
 	// A harness whose protocol reports the id (Codex, pi) could hand back a
@@ -421,6 +418,20 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 	nr.setState(ctx, state.StateStarting, "handed back: "+why)
 	m.deliverPending(ctx, nr)
 	return Resumed, nil
+}
+
+// handBackFailed handles a hand-back whose resume failed: like a harness
+// that died, it is retried, then given up on, never left live with nothing
+// running it. A daemon stopping leaves it for the next start (see resume).
+func (m *Manager) handBackFailed(ctx context.Context, r *runner, err error) error {
+	if m.base.Err() != nil {
+		return fmt.Errorf("agents: handing back %s: %w", r.id, err)
+	}
+	r.setState(ctx, state.StateCrashed, "couldn't resume after an attach: "+err.Error())
+	m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) couldn't be resumed after its attach: %v; slop-bot is retrying", r.id, r.ticket, err))
+	m.forget(r.id)
+	m.goRecover(r)
+	return err
 }
 
 // claimStart holds ticket's start place for a start run on the caller's
