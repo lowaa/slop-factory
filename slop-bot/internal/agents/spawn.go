@@ -100,8 +100,9 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 		// a start cut short by the stop, so released and cleaned up without
 		// parking the ticket, which a live record left behind would block.
 		// One whose harness wouldn't stop keeps its record and worktrees:
-		// cleaning up under it would delete what it is working in. The next
-		// start releases the record (it has no conversation to resume).
+		// cleaning up under it would delete what it is working in. adopt
+		// recorded its conversation, so the next start resumes it, or adopts
+		// its session where the harness's outlive the daemon.
 		if !errors.Is(err, errStillRunning) {
 			m.failStart(ctx, id, t, err)
 		}
@@ -307,6 +308,13 @@ func (m *Manager) adopt(ctx context.Context, a *adoption) (*runner, error) {
 		m.mu.Unlock()
 		if err := stopLate(conv); err != nil {
 			m.opts.Logger.Error("agents: a start outlived the drain, and its conversation wouldn't stop", "agent", id, "err", err)
+			// The record it keeps says which conversation runs, so the next
+			// start resumes it (or adopts a lasting session) rather than
+			// taking it for one that never started and cleaning up the
+			// worktrees its harness may still be in.
+			if serr := m.opts.State.Agents.SetConversation(context.WithoutCancel(ctx), id, conv.Ref().ID, a.dir); serr != nil {
+				m.opts.Logger.Error("agents: recording a fenced conversation that wouldn't stop", "agent", id, "err", serr)
+			}
 			return nil, fmt.Errorf("%w: %w: %w", errFenced, errStillRunning, err)
 		}
 		m.opts.Logger.Warn("agents: a start outlived the drain; its conversation was stopped", "agent", id)

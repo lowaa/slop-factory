@@ -302,3 +302,41 @@ func TestAFencedStartWhoseHarnessWontStopKeepsItsWorktrees(t *testing.T) {
 	_ = f.agentFor(tk.ID) // its record is left live, for the next start
 	<-f.mgr.Exited()
 }
+
+// The record a fenced start keeps for a harness that wouldn't stop says
+// which conversation it is, so the next start resumes it (or adopts a
+// lasting session) instead of taking it for one that never started and
+// cleaning up the worktrees the harness may still be in.
+func TestARestartResumesAFencedStartWhoseHarnessWouldntStop(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	entered, release := make(chan struct{}), make(chan struct{})
+	f.hooks.set(func(h *harnessHooks) {
+		h.ignoresCancel = true
+		h.start = func(_ context.Context, _ *harness.Workspace, resume *harness.ConversationRef) error {
+			if resume == nil {
+				close(entered)
+				<-release
+			}
+			return nil
+		}
+		h.forceFails = func() error { return errors.New("the kill timed out") }
+	})
+	tk := f.file("t", nil)
+	<-entered
+	require.ErrorContains(t, f.stopPastTheGrace(), "starts still in flight")
+	close(release)
+	late := f.session()
+	f.mgr.WaitStarts()
+
+	f.hooks.set(func(h *harnessHooks) { h.forceFails, h.start = nil, nil })
+	f.startAgain()
+	resumed := f.session()
+	assert.True(t, resumed.Resumed)
+	assert.Equal(t, late.ID, resumed.ID, "the conversation the fenced start left running")
+	f.wts.mu.Lock()
+	cleaned := append([]ident.TicketID(nil), f.wts.cleanups...)
+	f.wts.mu.Unlock()
+	assert.Empty(t, cleaned, "its worktrees weren't cleaned up")
+	assert.Nil(t, f.agentFor(tk.ID).EndedAt)
+}
