@@ -29,6 +29,13 @@ const recoveryLimit = 3
 // spec: t's own, resolved, or the fallback specFor chose. It runs
 // on its own goroutine (goStart), under a context Stop cancels.
 func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool, spec tickets.AgentSpec) {
+	// Read again now this start holds the ticket's place: the scheduler's
+	// list can predate a start that settled meanwhile, such as a failed one
+	// that parked the ticket as misconfigured.
+	t, err := m.opts.Tickets.Get(ctx, t.ID)
+	if err != nil || !m.wantsAgent(ctx, t) {
+		return
+	}
 	if err := m.spawnAgent(ctx, t, pool, spec); err != nil && !errors.Is(err, errMisconfigured) {
 		m.opts.Logger.Warn("agents: spawning", "ticket", t.ID, "err", err)
 	}

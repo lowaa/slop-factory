@@ -232,17 +232,25 @@ func (m *Manager) eligible(ctx context.Context) []*tickets.Ticket {
 		}
 		return nil
 	}
-	return slices.DeleteFunc(ts, func(t *tickets.Ticket) bool {
-		if t.Status == tickets.StatusOpen && len(t.BlockedBy) > 0 {
-			return true
-		}
-		if _, err := m.opts.State.Agents.LiveForTicket(ctx, t.ID); err == nil {
-			return true
-		}
-		// A person took the ticket over with `attach --no-resume`.
-		released, err := m.opts.State.Agents.ReleasedForTicket(ctx, t.ID)
-		return err != nil || released
-	})
+	return slices.DeleteFunc(ts, func(t *tickets.Ticket) bool { return !m.wantsAgent(ctx, t) })
+}
+
+// wantsAgent reports whether t, as read, should have an agent started:
+// being prepared, or open and unblocked, with no live agent, and not taken
+// over by a person.
+func (m *Manager) wantsAgent(ctx context.Context, t *tickets.Ticket) bool {
+	switch {
+	case t.Status != tickets.StatusPreparing && t.Status != tickets.StatusOpen:
+		return false
+	case t.Status == tickets.StatusOpen && len(t.BlockedBy) > 0:
+		return false
+	}
+	if _, err := m.opts.State.Agents.LiveForTicket(ctx, t.ID); err == nil {
+		return false
+	}
+	// A person took the ticket over with `attach --no-resume`.
+	released, err := m.opts.State.Agents.ReleasedForTicket(ctx, t.ID)
+	return err == nil && !released
 }
 
 func (m *Manager) admits(pool state.Pool) bool {
