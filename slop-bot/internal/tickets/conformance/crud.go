@@ -232,11 +232,11 @@ func refIDs(ts []*tickets.Ticket) []ident.TicketID {
 }
 
 // An agent's ticket records who filed it and from which ticket, and
-// inherits that ticket's AutoMerge.
+// inherits that ticket's AutoMerge, and its repos unless it names its own.
 func testAgentCreated(t *testing.T, nb NewBackend) {
 	f := newFixture(t, nb)
 	for _, autoMerge := range []bool{true, false} {
-		home := f.create(user, &tickets.NewTicket{Title: "home", Status: tickets.StatusOpen, AutoMerge: autoMerge})
+		home := f.create(user, &tickets.NewTicket{Title: "home", Status: tickets.StatusOpen, AutoMerge: autoMerge, Repos: []string{"app", "lib"}})
 		f.reach(home.ID, tickets.StatusInProgress)
 		a := ident.AgentPrincipal("builder", home.ID)
 
@@ -246,7 +246,13 @@ func testAgentCreated(t *testing.T, nb NewBackend) {
 		assert.Equal(t, home.ID, filed.Parent)
 		assert.Equal(t, autoMerge, filed.AutoMerge, "inherits the creating ticket's AutoMerge")
 		assert.Equal(t, tickets.StatusPreparing, filed.Status)
+		assert.Equal(t, []string{"app", "lib"}, filed.Repos, "inherits the creating ticket's repos")
+
+		own := f.create(a, &tickets.NewTicket{Title: "elsewhere", Repos: []string{"docs"}})
+		assert.Equal(t, []string{"docs"}, own.Repos, "a filing that names its repos keeps them")
 	}
+	mine := f.create(user, &tickets.NewTicket{Title: "the user's"})
+	assert.Empty(t, mine.Repos, "the user's filing has the repos it was given")
 }
 
 // Autonomy on assigns an agent's ticket to the bot's user; off leaves it
