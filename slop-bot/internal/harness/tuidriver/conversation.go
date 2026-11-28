@@ -176,6 +176,7 @@ func Start(ctx context.Context, opts *Options, ws *harness.Workspace, resume *ha
 	}
 	// Routed before the session starts, so its first hook isn't missed.
 	if err := c.route(); err != nil {
+		c.cancel()
 		return nil, err
 	}
 	err = o.Host.Start(ctx, &sessionhost.StartSpec{
@@ -183,6 +184,7 @@ func Start(ctx context.Context, opts *Options, ws *harness.Workspace, resume *ha
 	})
 	if err != nil {
 		c.unroute()
+		c.cancel()
 		return nil, err
 	}
 	c.watch()
@@ -215,6 +217,7 @@ func Adopt(ctx context.Context, opts *Options) (*Conversation, error) {
 	c := newConversation(o)
 	c.id = id
 	if err := c.route(); err != nil {
+		c.cancel()
 		return nil, err
 	}
 	c.apply(func() []harness.Event {
@@ -366,7 +369,15 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 			c.opts.Logger.Warn("tuidriver: recording the conversation id", "err", err)
 		}
 	}
-	return c.p.Reply(call, inject)
+	reply, err := c.p.Reply(call, inject)
+	if err != nil && len(inject) > 0 {
+		// Not delivered: hold them again. A turn end this hook would have
+		// continued is then left to the screen to report.
+		c.mu.Lock()
+		c.pending = append(inject, c.pending...)
+		c.mu.Unlock()
+	}
+	return reply, err
 }
 
 // hookEvents applies a hook's events to the turn state; c.mu is held.
@@ -803,6 +814,12 @@ func (c *Conversation) Close() error {
 		c.mu.Unlock()
 		c.unroute()
 		c.cancel()
+		// A hook in flight may be blocked handing an event to a consumer
+		// that has stopped reading; drain, so it, and so Close, can finish.
+		go func() {
+			for range c.events {
+			}
+		}()
 		c.wg.Wait()
 		c.emitMu.Lock()
 		if !c.eventsClosed {
