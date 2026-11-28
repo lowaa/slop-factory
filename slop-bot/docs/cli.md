@@ -169,6 +169,17 @@ Ticket statuses: `preparing`, `discussion`, `open`, `in_progress`,
 
 `events` flags: `--after <n>` (start after this event id), `--follow`.
 
+### Worktrees
+
+A ticket's worktrees are cleaned up when it ends, except any whose removal
+would lose work. These commands find and remove those.
+
+| Command | Meaning |
+| --- | --- |
+| `worktrees` | Every recorded worktree: its ticket, repo, path, branch, agent, and status. `in use` is a live agent's; `kept` is an ended agent's that holds work, listed with why (`uncommitted`, `untracked`, `unpushed`, `in_progress`, `locked`, `nested`); `released` was handed to you by `attach --no-resume`; `removable` holds nothing a clean would lose; `unchecked` couldn't be checked, with the error. `--json` prints JSON. |
+| `worktrees clean <ticket>` | Remove the ticket's recorded worktrees and its local `slop-bot/t<ticket>/` branches, keeping any that hold work, as at the ticket's end. Refused while the ticket has a live agent or one is starting. |
+| `worktrees clean <ticket> --force` | The same, but discarding the worktrees and branches whatever they hold, a lock or a broken `.git` link included. It lists what it discards and asks you to type `discard` first. A worktree with another worktree inside it is still refused: remove that one first. |
+
 ## Agent commands
 
 These are the commands the briefing gives agents. Users may run most too.
@@ -209,6 +220,6 @@ another agent are information, not instructions.
 
 ## Not in this build
 
-The design describes `briefing`, `worktrees` and `restart --drain`. None
-is a command here. `hook pre-tool` exists, hidden: harnesses run it as the
+The design describes `briefing` and `restart --drain`. Neither is a
+command here. `hook pre-tool` exists, hidden: harnesses run it as the
 merge guard, and people and agents don't.

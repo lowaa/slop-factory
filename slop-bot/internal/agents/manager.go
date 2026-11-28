@@ -37,6 +37,11 @@ type Harnesses interface {
 type Worktrees interface {
 	Create(ctx context.Context, ticket ident.TicketID, repos []string, primary string) ([]*worktree.Worktree, error)
 	Cleanup(ctx context.Context, ticket ident.TicketID, wts []*worktree.Worktree) []*worktree.CleanupResult
+	// Check is what Cleanup would keep a worktree for, removing nothing.
+	Check(ctx context.Context, ticket ident.TicketID, wt *worktree.Worktree) ([]worktree.Reason, error)
+	// ForceCleanup discards a worktree whatever it holds, on the user's
+	// say-so.
+	ForceCleanup(ctx context.Context, ticket ident.TicketID, wt *worktree.Worktree) error
 }
 
 // Options are the Manager's dependencies.

@@ -359,6 +359,21 @@ func (a *Agents) ListLive(ctx context.Context) ([]*Agent, error) {
 	return a.withWorktrees(ctx, a.db, rows)
 }
 
+// WithWorktrees returns every agent, live or ended, that still has a
+// worktree recorded, oldest first: an ended agent's are those its cleanup
+// kept.
+func (a *Agents) WithWorktrees(ctx context.Context) ([]*Agent, error) {
+	var rows []agentRow
+	err := a.db.NewSelect().Model(&rows).
+		Where("EXISTS (SELECT 1 FROM agent_worktrees w WHERE w.agent_id = agent_row.id)").
+		// rowid breaks a tie between agents created in the same millisecond.
+		OrderExpr("created_at, rowid").Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("state: listing agents with worktrees: %w", err)
+	}
+	return a.withWorktrees(ctx, a.db, rows)
+}
+
 // ExpiredLeases returns the attached agents whose lease expired at or
 // before at, for the daemon to hand back.
 func (a *Agents) ExpiredLeases(ctx context.Context, at time.Time) ([]*Agent, error) {

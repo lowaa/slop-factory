@@ -63,7 +63,7 @@ the user is told. slop-bot then resumes it by its conversation id, up to 3
 times in a row. The count resets only when a turn completes: a failed turn
 doesn't reset it. Past 3, or when a resume fails, the agent is `released`
 and its worktrees are cleaned up (any holding work are kept, and the user
-is told). A `preparing` or `open` ticket is then parked as `misconfigured`,
+is told; `slop-bot worktrees` lists them, and `worktrees clean` removes them). A `preparing` or `open` ticket is then parked as `misconfigured`,
 so a new agent isn't started into the same failure. A harness that fails to
 start is treated the same way. `slop-bot ticket set <id> --status preparing`
 puts a parked ticket back in line. On a daemon restart, live agents are

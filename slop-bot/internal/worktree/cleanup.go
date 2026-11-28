@@ -135,6 +135,26 @@ func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Wor
 	return true, nil, m.deleteBranches(ctx, wt.RepoPath, st.branches)
 }
 
+// Check reports what Cleanup would keep wt for, removing nothing: none means
+// Cleanup would remove it. As Cleanup does, it first saves a deleted
+// worktree's detached HEAD to a ticket branch, so the two agree on commits
+// only that HEAD held.
+func (m *Manager) Check(ctx context.Context, ticket ident.TicketID, wt *Worktree) ([]Reason, error) {
+	if err := m.owns(ctx, ticket, wt); err != nil {
+		return nil, err
+	}
+	unlock, err := m.lockRepo(ctx, wt.RepoPath)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	st, err := m.inspect(ctx, ticket, wt, true)
+	if err != nil {
+		return nil, err
+	}
+	return m.atRisk(ctx, wt.RepoPath, st)
+}
+
 // nested are the registered worktrees of repoPath inside path.
 func (m *Manager) nested(ctx context.Context, repoPath, path string) ([]string, error) {
 	regs, err := m.registrations(ctx, repoPath)

@@ -224,25 +224,22 @@ func (m *Manager) end(ctx context.Context, r *runner, force bool, reason string)
 	})
 }
 
-// removalAdvice is how to remove a worktree Cleanup kept, by hand, once the
-// person has looked: a plain forced remove fails on a locked worktree, and
-// deletes the files of any worktree nested in it.
-func removalAdvice(res *worktree.CleanupResult) string {
-	repo, path := res.Worktree.RepoPath, res.Worktree.Path
-	remove := fmt.Sprintf("git -C %s worktree remove --force %s", repo, path)
+// removalAdvice is how to remove a worktree Cleanup kept, once the person
+// has looked: `slop-bot worktrees clean --force` takes a locked one too, but
+// refuses one holding another worktree, whose files it would delete.
+func removalAdvice(ticket ident.TicketID, res *worktree.CleanupResult) string {
+	clean := fmt.Sprintf("`slop-bot worktrees clean %s` removes it once nothing in it is at risk, "+
+		"and `slop-bot worktrees clean %s --force` discards it", ticket, ticket)
 	var first []string
 	for _, r := range res.Reasons {
-		switch r.Kind {
-		case worktree.Nested:
-			first = append(first, "deal with the worktrees inside it ("+r.Detail+")")
-		case worktree.Locked:
-			first = append(first, fmt.Sprintf("git -C %s worktree unlock %s", repo, path))
+		if r.Kind == worktree.Nested {
+			first = append(first, "deal with the worktree inside it ("+r.Detail+")")
 		}
 	}
 	if len(first) == 0 {
-		return remove
+		return clean
 	}
-	return "first " + strings.Join(first, ", then ") + ", then " + remove
+	return "first " + strings.Join(first, ", then ") + "; then " + clean
 }
 
 // cleanup removes an agent's recorded worktrees.
@@ -270,8 +267,8 @@ func (m *Manager) reportCleanup(ctx context.Context, id ident.AgentID, ticket id
 			for _, reason := range res.Reasons {
 				why = append(why, fmt.Sprintf("%s %s", reason.Kind, reason.Detail))
 			}
-			m.tellUser(ctx, id, fmt.Sprintf("kept %s (ticket %s), which holds work: %s. Once you've looked, remove it by hand: %s",
-				res.Worktree.Path, ticket, strings.Join(why, "; "), removalAdvice(res)))
+			m.tellUser(ctx, id, fmt.Sprintf("kept %s (ticket %s), which holds work: %s. Once you've looked, %s.",
+				res.Worktree.Path, ticket, strings.Join(why, "; "), removalAdvice(ticket, res)))
 		}
 	}
 }

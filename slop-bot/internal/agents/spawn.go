@@ -68,7 +68,7 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 				// run: the next start tries again.
 				return fmt.Errorf("agents: creating worktrees for ticket %s: %w", t.ID, err)
 			}
-			return m.misconfigure(ctx, t, fmt.Errorf("creating worktrees: %w", err))
+			return m.misconfigure(ctx, t, fmt.Errorf("creating worktrees: %w%s", err, brokenHint(t.ID, err)))
 		}
 	}
 	if _, err := m.opts.State.Agents.Create(ctx, &state.NewAgent{

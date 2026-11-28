@@ -284,6 +284,7 @@ func (d *Daemon) routes() {
 	d.agentRoutes.register(d.server)
 	d.attachRoutes.register(d.server)
 	(&observeRoutes{d: d}).register(d.server)
+	(&worktreeRoutes{d: d}).register(d.server)
 	d.server.HandleFunc("GET "+api.PathHealth, func(w http.ResponseWriter, _ *http.Request) {
 		control.WriteJSON(w, http.StatusOK, api.Health{
 			Version:   version.String(),
