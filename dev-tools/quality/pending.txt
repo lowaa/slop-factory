@@ -1,0 +1,20 @@
+# Projects in dev-tools/lint/projects.txt without a quality.sh yet. This
+# list only shrinks: a new project gets its quality.sh when it lands, and a
+# project that gets one leaves the list (spec/every_project_spec.sh).
+artifact-store
+go-auth
+go-clock
+go-db
+go-db/e2e_test
+go-llm-usage
+go-privacy
+go-settings
+go-web
+js-components
+slop-haus/frontend
+slop-haus/harness_e2e
+slop-haus/server
+slop-haus/supervisor
+slop-haus/token
+slop-review
+slop-review/report

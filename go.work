@@ -10,6 +10,7 @@ go 1.27.4
 
 use (
 	./artifact-store
+	./dev-tools/quality
 	./go-auth
 	./go-clock
 	./go-db
@@ -18,7 +19,7 @@ use (
 	./go-settings
 	./go-web
 	./slop-bot
+	./slop-haus/server
 	./slop-review
 	./slop-review/report
-	./slop-haus/server
 )

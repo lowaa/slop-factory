@@ -1,0 +1,89 @@
+{
+  "functions": 75,
+  "cyclomatic": {
+    "threshold": 15,
+    "mean": 3.4,
+    "p90": 9,
+    "max": 11,
+    "over_threshold": 0
+  },
+  "cognitive": {
+    "threshold": 20,
+    "mean": 2.88,
+    "p90": 10,
+    "max": 18,
+    "over_threshold": 0
+  },
+  "longest": [
+    {
+      "file": "internal/coverage/coverage.go",
+      "function": "(*Metric).snapshot",
+      "lines": 43,
+      "cyclomatic": 11,
+      "cognitive": 18
+    },
+    {
+      "file": "internal/complexity/complexity.go",
+      "function": "(*Metric).sourceDirs",
+      "lines": 39,
+      "cyclomatic": 11,
+      "cognitive": 15
+    },
+    {
+      "file": "cmd/quality/app.go",
+      "function": "(*App).measure",
+      "lines": 38,
+      "cyclomatic": 10,
+      "cognitive": 10
+    },
+    {
+      "file": "cmd/quality/app.go",
+      "function": "(*App).parseMeasure",
+      "lines": 34,
+      "cyclomatic": 9,
+      "cognitive": 7
+    },
+    {
+      "file": "internal/complexity/complexity.go",
+      "function": "(*Metric).measureDir",
+      "lines": 33,
+      "cyclomatic": 7,
+      "cognitive": 10
+    },
+    {
+      "file": "internal/ratchet/ratchet.go",
+      "function": "Run",
+      "lines": 32,
+      "cyclomatic": 10,
+      "cognitive": 10
+    },
+    {
+      "file": "internal/coverage/coverage.go",
+      "function": "(*Metric).Decode",
+      "lines": 31,
+      "cyclomatic": 9,
+      "cognitive": 12
+    },
+    {
+      "file": "internal/testtime/testtime.go",
+      "function": "(*Metric).Measure",
+      "lines": 30,
+      "cyclomatic": 10,
+      "cognitive": 12
+    },
+    {
+      "file": "internal/ratchet/ratchet.go",
+      "function": "(*Runner).write",
+      "lines": 26,
+      "cyclomatic": 7,
+      "cognitive": 6
+    },
+    {
+      "file": "internal/complexity/complexity.go",
+      "function": "summarise",
+      "lines": 24,
+      "cyclomatic": 4,
+      "cognitive": 5
+    }
+  ]
+}

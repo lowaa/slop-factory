@@ -1,0 +1,55 @@
+{
+  "wall_seconds": 1.21,
+  "slowest": [
+    {
+      "package": "./internal/coverage",
+      "test": "TestGoConverterReadsARealCoverDir",
+      "seconds": 0.19
+    },
+    {
+      "package": "./internal/coverage",
+      "test": "TestGoConverterReportsTheToolsError",
+      "seconds": 0.05
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestPruneHintAndPrune",
+      "seconds": 0.01
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestRebaselineThenCheck",
+      "seconds": 0.01
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestReportWritesEveryReportAndNeverFails",
+      "seconds": 0.01
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestCheckWithoutABaselineIsAnError",
+      "seconds": 0
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestFailuresPrintsFailedTestOutput",
+      "seconds": 0
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestOnlyRunsTheNamedMeasures",
+      "seconds": 0
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestTesttimeIsSkippedWithoutTestOutput",
+      "seconds": 0
+    },
+    {
+      "package": "./cmd/quality",
+      "test": "TestUsageErrors",
+      "seconds": 0
+    }
+  ]
+}
