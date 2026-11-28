@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -34,6 +35,8 @@ type terminal struct {
 
 	mu  sync.Mutex
 	out bytes.Buffer
+	// wrote is signalled whenever the terminal shows more.
+	wrote chan struct{}
 	// read is closed once the terminal has nothing left to show.
 	read   chan struct{}
 	exited chan int
@@ -42,11 +45,13 @@ type terminal struct {
 func (e *e2e) attachTerminal(args ...string) *terminal {
 	e.t.Helper()
 	cmd := exec.Command(e.self, append([]string{"attach"}, args...)...) // #nosec G204 -- the test binary
+	// TERM: a joined attach runs a tmux client, which needs one, and the
+	// test's own environment may have none.
 	cmd.Env = append(os.Environ(), cliReexec+"=1", fakeReexec+"=", control.TokenEnv+"=",
-		"HOME="+e.h.home, "XDG_RUNTIME_DIR="+e.h.runtime, "GORACE=atexit_sleep_ms=0")
+		"HOME="+e.h.home, "XDG_RUNTIME_DIR="+e.h.runtime, "GORACE=atexit_sleep_ms=0", "TERM=xterm-256color")
 	f, err := pty.Start(cmd)
 	require.NoError(e.t, err)
-	term := &terminal{t: e.t, cmd: cmd, pty: f, read: make(chan struct{}), exited: make(chan int, 1)}
+	term := &terminal{t: e.t, cmd: cmd, pty: f, read: make(chan struct{}), exited: make(chan int, 1), wrote: make(chan struct{}, 1)}
 	go func() {
 		defer close(term.read)
 		_, _ = io.Copy(term, f)
@@ -70,7 +75,23 @@ func (e *e2e) attachTerminal(args ...string) *terminal {
 func (term *terminal) Write(p []byte) (int, error) {
 	term.mu.Lock()
 	defer term.mu.Unlock()
+	select {
+	case term.wrote <- struct{}{}:
+	default:
+	}
 	return term.out.Write(p)
+}
+
+// shows waits for the terminal to show text.
+func (term *terminal) shows(ctx context.Context, text string) {
+	term.t.Helper()
+	for !strings.Contains(term.screen(), text) {
+		select {
+		case <-term.wrote:
+		case <-ctx.Done():
+			require.FailNow(term.t, "the terminal never showed "+text, term.screen())
+		}
+	}
 }
 
 // typeLine types a line at whatever runs in the terminal.

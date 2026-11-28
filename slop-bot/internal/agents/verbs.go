@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
@@ -225,10 +226,43 @@ func (m *Manager) end(ctx context.Context, r *runner, force bool, reason string)
 // cleanup removes an agent's recorded worktrees.
 func (m *Manager) cleanup(ctx context.Context, id ident.AgentID, ticket ident.TicketID) {
 	a, err := m.opts.State.Agents.Get(ctx, id)
-	if err != nil || len(a.Worktrees) == 0 {
+	if err != nil {
+		return
+	}
+	m.forgetWorkspace(a)
+	if len(a.Worktrees) == 0 {
 		return
 	}
 	m.reportCleanup(ctx, id, ticket, m.opts.Worktrees.Cleanup(ctx, ticket, m.worktreesOf(a)))
+}
+
+// workspaceForgetter is a harness that keeps something of its own per
+// workspace outside it (agy's sidecar folder, Codex's trust entries), to
+// remove once the agent is done with it.
+type workspaceForgetter interface {
+	ForgetWorkspace(ws *harness.Workspace) error
+}
+
+// forgetWorkspace has a's harness remove what it kept for a's workspace.
+// Its folders are slop-bot's own (worktrees, or the agent's directory), so
+// nothing the user made is touched.
+func (m *Manager) forgetWorkspace(a *state.Agent) {
+	h, ok := m.opts.Harnesses.Harness(a.Harness)
+	f, forgets := h.(workspaceForgetter)
+	if !ok || !forgets {
+		return
+	}
+	ws := &harness.Workspace{Agent: a.ID, Ticket: a.Ticket, Dir: m.opts.Paths.AgentDir(string(a.ID))}
+	for _, w := range a.Worktrees {
+		if w.Primary {
+			ws.Dir = w.Path
+		} else {
+			ws.ExtraDirs = append(ws.ExtraDirs, w.Path)
+		}
+	}
+	if err := f.ForgetWorkspace(ws); err != nil {
+		m.opts.Logger.Warn("agents: removing what the harness kept for a workspace", "agent", a.ID, "err", err)
+	}
 }
 
 // reportCleanup forgets the worktrees a cleanup removed, and tells the user

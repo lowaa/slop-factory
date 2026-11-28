@@ -111,6 +111,9 @@ func (m *Manager) kickOff(ctx context.Context, r *runner, t *tickets.Ticket) err
 		if r.state() != state.StateAttached {
 			r.setState(ctx, state.StateIdle, "a person is in its session")
 		}
+		if errors.Is(err, harness.ErrAttached) {
+			m.redeliverLater(r)
+		}
 		return nil
 	}
 	return err
@@ -412,6 +415,16 @@ func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
 			m.opts.Logger.Warn("agents: recording an attach", "agent", a.ID, "err", err)
 		}
 	}
+	// A person joined to a TUI session that outlived the daemon: the
+	// session is taken back as it runs, still attached.
+	if conv, caps, ok := m.adoptSession(ctx, a); ok {
+		r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps,
+			st: state.StateAttached, decl: declared(a.Declared), summary: a.DeclaredSummary})
+		r.mu.Lock()
+		r.joinable = true
+		r.mu.Unlock()
+		return
+	}
 	r := &runner{m: m, id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, st: state.StateAttached,
 		decl: declared(a.Declared), summary: a.DeclaredSummary, exited: make(chan struct{})}
 	close(r.exited)
@@ -432,15 +445,23 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error
 		}
 		a.State = state.StateStarting
 	}
-	conv, caps, err := m.startConversation(ctx, a)
-	if err != nil {
-		return err
+	// A session that outlived the daemon is taken back as it is: its turn
+	// wasn't cut short, but whatever it told slop-bot meanwhile was lost.
+	conv, caps, adopted := m.adoptSession(ctx, a)
+	if !adopted {
+		var err error
+		if conv, caps, err = m.startConversation(ctx, a); err != nil {
+			return err
+		}
 	}
 	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps, st: a.State})
 	st, cutShort := resumedState(a.State)
 	r.setState(ctx, st, "resumed")
-	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
-	if cutShort || note == recoveredNote {
+	m.event(ctx, EventResumed, a.ID, a.Ticket, map[string]bool{"adopted": adopted})
+	switch {
+	case adopted && cutShort:
+		r.m.enqueueNotice(ctx, r, adoptedNote)
+	case !adopted && (cutShort || note == recoveredNote):
 		r.m.enqueueNotice(ctx, r, note)
 	}
 	m.sync(ctx, a.Ticket)

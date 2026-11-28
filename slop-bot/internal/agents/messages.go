@@ -276,6 +276,9 @@ func (m *Manager) deliverPending(ctx context.Context, r *runner) bool {
 			m.releaseSlot(r)
 			r.setState(ctx, state.StateIdle, "a person is in its session")
 		}
+		if errors.Is(err, harness.ErrAttached) {
+			m.redeliverLater(r)
+		}
 		return true
 	default:
 		m.opts.Logger.Warn("agents: delivering", "agent", r.id, "err", err)
@@ -289,6 +292,43 @@ func (m *Manager) deliverPending(ctx context.Context, r *runner) bool {
 	}
 	m.event(ctx, EventDelivered, r.id, r.ticket, map[string]any{"count": len(pending), "path": string(path)})
 	return true
+}
+
+// heldRetry is how often messages held for a person in an agent's TUI
+// session are tried again. Nothing says when they leave: tmux signals no
+// detach, and one attached without slop-bot has no hand-back.
+const heldRetry = 2 * time.Second
+
+// redeliverLater tries r's delivery again after heldRetry, once at a time,
+// until it goes or r stops. One that slop-bot's attach holds isn't tried:
+// its hand-back delivers.
+func (m *Manager) redeliverLater(r *runner) {
+	r.mu.Lock()
+	if r.redelivering {
+		r.mu.Unlock()
+		return
+	}
+	r.redelivering = true
+	r.mu.Unlock()
+	go func() {
+		select {
+		case <-m.opts.Clock.After(heldRetry):
+		case <-r.exited:
+		case <-m.stop:
+		}
+		r.mu.Lock()
+		r.redelivering = false
+		gone := r.stopping || r.ending
+		r.mu.Unlock()
+		select {
+		case <-r.exited:
+			gone = true
+		default:
+		}
+		if !gone {
+			m.deliverPending(context.Background(), r)
+		}
+	}()
 }
 
 // send puts msgs in front of r's model as one message, and marks them

@@ -60,5 +60,6 @@ func (a *app) hookCmd() *cobra.Command {
 			})
 		},
 	})
+	c.AddCommand(a.hookTUICmd())
 	return c
 }

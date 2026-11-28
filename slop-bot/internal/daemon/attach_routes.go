@@ -355,6 +355,7 @@ func apiAttachment(att *agents.Attachment) *api.Attachment {
 	out := &api.Attachment{
 		Agent: string(att.Agent.ID), Ticket: string(att.Agent.Ticket), Title: att.Title,
 		State: string(att.Agent.State), Note: att.Agent.ProgressNote, Held: apiMessages(att.Held), Released: att.Released,
+		Join: att.Join,
 	}
 	if c := att.Command; c != nil {
 		out.Command = &api.Command{Path: c.Path, Args: c.Args, Env: c.Env, Dir: c.Dir}

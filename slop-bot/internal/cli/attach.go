@@ -378,6 +378,9 @@ func (at *attachRun) show(att *api.Attachment) {
 	if att.Released {
 		fmt.Fprintf(&b, "Released: slop-bot no longer runs this agent, and ticket %s stays assigned to you.\n", att.Ticket)
 		b.WriteString("The agent's own slop-bot commands (ask, done, ...) no longer work from this TUI.\n")
+	} else if att.Join {
+		b.WriteString("Joining the agent's running session. Detaching from it (Ctrl-b d) hands the agent back to slop-bot;\n" +
+			"quitting the harness ends the session, and slop-bot resumes the conversation once you're out.\n")
 	} else {
 		b.WriteString("Quitting the TUI hands the agent back to slop-bot.\n")
 	}

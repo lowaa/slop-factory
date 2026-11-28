@@ -51,6 +51,10 @@ type Attachment struct {
 	Command *harness.LaunchSpec
 	// Released is set for NoResume: there is no hand-back.
 	Released bool
+	// Join says the person joins the agent's running session (Command is
+	// a tmux attach): detaching hands it back, and quitting the harness
+	// ends the session, which slop-bot then resumes.
+	Join bool
 }
 
 // HandBackOutcome is what became of an agent when its attach ended.
@@ -143,15 +147,22 @@ func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, plan 
 		m.event(ctx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "released": true})
 		return att, nil
 	}
-	token, err := m.rotateToken(ctx, a.ID)
-	if err != nil {
-		m.dropLease(ctx, a.ID, req.Holder)
-		m.abandonAttach(ctx, r, "the attach failed: "+err.Error())
-		return nil, err
+	if plan.Kind == harness.Join {
+		// The person joins the session as it runs: its environment keeps
+		// the agent's token, and the attach command (tmux) needs none.
+		att.Command, att.Join = plan.Command, true
+	} else {
+		token, err := m.rotateToken(ctx, a.ID)
+		if err != nil {
+			m.dropLease(ctx, a.ID, req.Holder)
+			m.abandonAttach(ctx, r, "the attach failed: "+err.Error())
+			return nil, err
+		}
+		att.Command = withEnv(plan.Command, control.TokenEnv, token)
 	}
 	r.setState(ctx, state.StateAttached, "attached by "+req.Holder)
 	r.setAttaching(false)
-	att.Command = withEnv(plan.Command, control.TokenEnv, token)
+	var err error
 	att.Held, err = m.opts.State.Messages.Pending(ctx, state.AgentParty(a.ID))
 	if err != nil {
 		m.opts.Logger.Warn("agents: reading held messages", "agent", a.ID, "err", err)
@@ -174,8 +185,11 @@ func (m *Manager) stopForAttach(ctx context.Context, r *runner, a *state.Agent, 
 	}
 	m.event(ctx, EventAttaching, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "now": req.Now})
 	plan, err := r.conv.AttachPlan(ctx)
+	if err == nil && plan.Kind == harness.Join {
+		return m.joinForAttach(ctx, r, a, plan, req)
+	}
 	if err == nil && (plan.Kind != harness.HandOver || plan.Command == nil) {
-		err = fmt.Errorf("%w: %s attaches by joining its session, which isn't supported yet", ErrNoHandOver, a.Harness)
+		err = fmt.Errorf("%w: %s has no TUI to hand over to", ErrNoHandOver, a.Harness)
 	}
 	if err != nil {
 		r.setAttaching(false)
@@ -374,6 +388,9 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 		if open, err := m.opts.State.Messages.OpenAsksFrom(ctx, id); err == nil && len(open) > 0 {
 			decl = declAsk
 		}
+	}
+	if r.joined() {
+		return m.rejoin(ctx, r, decl, summary, why), nil
 	}
 	a, err := m.opts.State.Agents.Get(ctx, id)
 	if err != nil {

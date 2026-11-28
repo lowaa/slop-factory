@@ -134,10 +134,11 @@ func TestTmuxOnlyWhenATUIDriverIsConfigured(t *testing.T) {
 	assert.Equal(t, doctor.Skip, f.result(f.run(), "prerequisites", "tmux").Level)
 
 	f.config("harnesses: {claude-code: {}, agy: {}}\n")
+	f.opts.Implemented = func(name, _ string) bool { return name != "agy" }
 	assert.Equal(t, doctor.Skip, f.result(f.run(), "prerequisites", "tmux").Level,
 		"no tmux for a tui harness this build can't run")
 
-	f.opts.Implemented = func(string, string) bool { return true }
+	f.opts.Implemented = nil // this build's own: it runs agy
 	res := f.result(f.run(), "prerequisites", "tmux")
 	assert.Equal(t, doctor.Fail, res.Level)
 	assert.Contains(t, res.Detail, "the tui driver (agy)")
@@ -580,6 +581,8 @@ func TestProbesGetTheAgentsEnvironment(t *testing.T) {
 func TestUnimplementedHarness(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "linux")
+	// A harness still to come; agy stands in for it.
+	f.opts.Implemented = func(name, _ string) bool { return name != "agy" }
 	f.config("harnesses: {claude-code: {}, agy: {}}\n")
 	res := f.result(f.run(), "harness agy", "implemented")
 	assert.Equal(t, doctor.Warn, res.Level, "only agy's tickets are parked")

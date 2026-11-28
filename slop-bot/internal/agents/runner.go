@@ -68,6 +68,11 @@ type runner struct {
 	// holdsSlot carries an attached agent's slot into its first turn after
 	// the hand-back, so it can't lose it to new work in between.
 	holdsSlot bool
+	// joinable says a person attaches by joining conv's session (a TUI),
+	// which runs on through the attach instead of stopping.
+	joinable bool
+	// redelivering is a held delivery's retry, waiting (redeliverLater).
+	redelivering bool
 	// exited is closed when the conversation's events end.
 	exited chan struct{}
 }
@@ -171,7 +176,9 @@ func (r *runner) run(ctx context.Context) {
 			r.handle(ctx, &ev)
 		case <-stall:
 			stall = r.m.opts.Clock.After(stallAfter)
-			if r.active() && r.state() != state.StateStalled {
+			// A person in a joined session is the one at work: quiet isn't
+			// stalled.
+			if st := r.state(); r.active() && st != state.StateStalled && st != state.StateAttached {
 				r.setState(ctx, state.StateStalled, fmt.Sprintf("no activity for %s", stallAfter))
 				r.m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s) has gone quiet for %s mid-turn: `slop-bot events` shows its last activity, "+
 					"and `slop-bot tell --interrupt %s ...` stops the turn and steers it.", r.id, r.ticket, stallAfter, r.id))
@@ -204,7 +211,10 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		r.mu.Lock()
 		r.inTurn = true
 		r.mu.Unlock()
-		r.setState(ctx, r.workingState(ctx), "turn started")
+		// A person's turn in a joined session leaves the agent attached.
+		if r.state() != state.StateAttached {
+			r.setState(ctx, r.workingState(ctx), "turn started")
+		}
 	case harness.ToolStarted, harness.ToolEnded, harness.Text:
 		if r.state() == state.StateStalled {
 			r.setState(ctx, r.workingState(ctx), "active again")

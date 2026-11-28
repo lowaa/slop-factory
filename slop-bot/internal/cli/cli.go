@@ -20,6 +20,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
 	"github.com/lowaa/slop-factory/slop-bot/internal/doctor"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
@@ -50,6 +51,10 @@ type Deps struct {
 	daemonBuilt func(*daemon.Daemon)
 	// harnesses lets in-package tests run the daemon on a fake harness.
 	harnesses daemon.Harnesses
+	// tuiHarnesses and tmuxSocket let them run a TUI fake on the daemon's
+	// own tmux server (one per test) and hook hub.
+	tuiHarnesses func(kit *tuidriver.Sessions) daemon.Harnesses
+	tmuxSocket   string
 	// clock lets in-package tests run the daemon on a fake clock.
 	clock clock.Clock
 	// tuiGrace shortens the daemon's wait for a hung-up TUI in tests.
@@ -182,6 +187,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 			opts := &daemon.Options{
 				Config: cfg, Paths: p, Logger: logger, Clock: clock.Or(a.deps.clock), TUIGrace: a.deps.tuiGrace,
+				TUIHarnesses: a.deps.tuiHarnesses, TmuxSocket: a.deps.tmuxSocket,
 				CLIReference: AgentReference(cmd.Root()),
 			}
 			// Only when set: a nil map in the interface would read as

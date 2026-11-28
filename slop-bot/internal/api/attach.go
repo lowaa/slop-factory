@@ -51,6 +51,9 @@ type Attachment struct {
 	Command *Command `json:"command,omitempty"`
 	// Released: slop-bot no longer runs the agent, and nothing hands back.
 	Released bool `json:"released,omitempty"`
+	// Join: Command joins the agent's running session (tmux), and
+	// detaching from it hands the agent back.
+	Join bool `json:"join,omitempty"`
 }
 
 // Command is a process for the CLI to run in the person's terminal.
