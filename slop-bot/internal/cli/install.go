@@ -280,19 +280,8 @@ func (a *app) uninstall(cmd *cobra.Command, purge, yes bool) error {
 	// service goes: the unit is the record of where its data is.
 	var targets []string
 	if purge {
-		if targets, err = a.purgeTargets(out, m, p); err != nil {
+		if targets, err = a.confirmPurge(cmd, out, m, p, yes); err != nil {
 			return err
-		}
-		if _, err := m.ServiceEnv(); errors.Is(err, service.ErrNotInstalled) && a.daemonAnswers(cmd.Context(), p.Socket()) {
-			// No service to stop, so the daemon was started by hand: say so
-			// before asking, rather than after.
-			return fmt.Errorf("a slop-bot daemon is still running at %s; stop it, then purge", p.Socket())
-		}
-		if len(targets) > 0 && !yes {
-			out.printf("type 'purge' to delete them: ")
-			if !confirmed(cmd.Context(), a.deps.Stdin, "purge") {
-				return errNotConfirmed
-			}
 		}
 	}
 	switch err := m.Uninstall(cmd.Context()); {
@@ -307,9 +296,41 @@ func (a *app) uninstall(cmd *cobra.Command, purge, yes bool) error {
 		out.printf("kept slop-bot's files (config, tickets, state); `slop-bot uninstall --purge` deletes them\n")
 		return out.err
 	}
-	// The service's daemon is stopped now. One that still answers was
-	// started by hand, and would go on writing into what's deleted.
-	if len(targets) > 0 && a.daemonAnswers(cmd.Context(), p.Socket()) {
+	if err := a.purgeAll(cmd.Context(), out, p, targets); err != nil {
+		return err
+	}
+	return out.err
+}
+
+// confirmPurge lists what purge deletes and has the user confirm it,
+// unless yes.
+func (a *app) confirmPurge(cmd *cobra.Command, out *errWriter, m service.Manager, p *paths.Paths, yes bool) ([]string, error) {
+	targets, err := a.purgeTargets(out, m, p)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := m.ServiceEnv(); errors.Is(err, service.ErrNotInstalled) && a.daemonAnswers(cmd.Context(), p.Socket()) {
+		// No service to stop, so the daemon was started by hand: say so
+		// before asking, rather than after.
+		return nil, fmt.Errorf("a slop-bot daemon is still running at %s; stop it, then purge", p.Socket())
+	}
+	if len(targets) > 0 && !yes {
+		out.printf("type 'purge' to delete them: ")
+		if !confirmed(cmd.Context(), a.deps.Stdin, "purge") {
+			return nil, errNotConfirmed
+		}
+	}
+	return targets, nil
+}
+
+// purgeAll deletes targets, once the service (and its daemon) is gone.
+func (a *app) purgeAll(ctx context.Context, out *errWriter, p *paths.Paths, targets []string) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	// One that still answers was started by hand, and would go on writing
+	// into what's deleted.
+	if a.daemonAnswers(ctx, p.Socket()) {
 		return fmt.Errorf("a slop-bot daemon started by hand is still running at %s, so nothing was deleted; "+
 			"stop it, then run `slop-bot uninstall --purge` again", p.Socket())
 	}
@@ -318,10 +339,8 @@ func (a *app) uninstall(cmd *cobra.Command, purge, yes bool) error {
 			return fmt.Errorf("purging %s: %w", t, err)
 		}
 	}
-	if len(targets) > 0 {
-		out.printf("deleted %d directories\n", len(targets))
-	}
-	return out.err
+	out.printf("deleted %d directories\n", len(targets))
+	return nil
 }
 
 // errNotConfirmed is a purge the user didn't confirm.
