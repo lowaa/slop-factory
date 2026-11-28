@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,23 +141,16 @@ func (a *app) followInbox(cmd *cobra.Command, asJSON bool) error {
 	if err := a.printInbox(cmd, api.PathInbox, asJSON, false); err != nil {
 		return err
 	}
-	sc := bufio.NewScanner(body)
-	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
-	for sc.Scan() {
-		var ev api.Event
-		if json.Unmarshal(sc.Bytes(), &ev) != nil {
-			continue
-		}
+	err = eachEvent(body, func(ev *api.Event) error {
 		if ev.Type == "message.queued" || ev.Type == "user.told" || ev.Type == "agent.asked" {
-			if err := a.printInbox(cmd, api.PathInbox, asJSON, false); err != nil {
-				return err
-			}
+			return a.printInbox(cmd, api.PathInbox, asJSON, false)
 		}
-	}
+		return nil
+	})
 	if cmd.Context().Err() != nil {
 		return nil
 	}
-	return sc.Err()
+	return err
 }
 
 func (a *app) askCmd() *cobra.Command {

@@ -1,0 +1,12 @@
+pool 3/4, urgent 0/1 | autonomy on, agent-filed 2/10 | plan: n/a
+ [1mTICKET[m  [1mTITLE [m  [1mSTATUS[m  [1mAGENT [m  [1mHARNE…[m  [1mMODEL [m  [1mPOOL  [m  [1mBLOCK…[m  [1mNOTE  [m 
+ 1       Fix l…  prepa…  waiti…  claud…  -       urgent  -       -      
+ 2       Add t…  in_pr…  worki…  claud…  opus/…  normal  -       writi… 
+ 3       Block…  open    idle …  codex   gpt     normal  1,2     -      
+                                                                        
+                                                                        
+                                                                        
+                                                                        
+                                                                        
+                                                                        
+page 1/1  ←/→ page  q quit

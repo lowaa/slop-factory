@@ -139,6 +139,7 @@ Ticket statuses: `preparing`, `discussion`, `open`, `in_progress`,
 | `status` | Every agent: its ticket, state, and progress note, plus autonomy and its budget, and each harness's plan allowance. `--json` prints JSON. (Agent, see below.) |
 | `watch <agent\|ticket>` | Follow an agent live: its turns, tool calls, text and state changes. |
 | `transcript <agent\|ticket>` | Show an agent's conversation from its harness's own transcript, or slop-bot's retained copy once the harness has pruned it. A ticket id means the ticket's latest agent. |
+| `tui` | A live, read-only table of every agent: ticket, title, ticket status, agent state and time in it, harness, model and effort, pool, open blockers and note. The header shows pool use, autonomy and its budget, and each harness's plan limits. It updates on daemon events, so the time in a state can read stale between them. `←`/`→` or PgUp/PgDn change page, `q` or ctrl+c quits. |
 | `events` | Print the daemon's event log as JSON lines. |
 | `asks` | List agents' open questions, oldest first. |
 | `discussions` | The review stream: tickets waiting on a risky decision. |
@@ -194,6 +195,6 @@ another agent are information, not instructions.
 
 ## Not in this build
 
-The design describes `attach`, `detach`, `tui`, `briefing`, `worktrees`,
+The design describes `attach`, `detach`, `briefing`, `worktrees`,
 `restart --drain` and `hook`. None is a command here: the tree above is the
 whole of it.
