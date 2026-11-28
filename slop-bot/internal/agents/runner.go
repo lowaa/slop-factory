@@ -149,16 +149,16 @@ func (r *runner) setState(ctx context.Context, to state.AgentState, reason strin
 }
 
 // setStateIf is setState while ok holds of the current state, checked under
-// the lock the move is made under. A move worked out from a slower read (the
-// ticket's status, for a turn's start) must not clobber one made meanwhile:
-// an attach landing then would be undone, and its hand-back find the agent
-// not attached.
-func (r *runner) setStateIf(ctx context.Context, ok func(state.AgentState) bool, to state.AgentState, reason string) {
+// the lock the move is made under, and reports whether it held. A move
+// worked out from a slower read (the ticket's status, the agent's open asks)
+// must not clobber one made meanwhile: an attach landing then would be
+// undone, and its hand-back find the agent not attached.
+func (r *runner) setStateIf(ctx context.Context, ok func(state.AgentState) bool, to state.AgentState, reason string) bool {
 	r.mu.Lock()
 	from := r.st
 	if !ok(from) {
 		r.mu.Unlock()
-		return
+		return false
 	}
 	r.st = to
 	if from != to {
@@ -166,7 +166,7 @@ func (r *runner) setStateIf(ctx context.Context, ok func(state.AgentState) bool,
 	}
 	r.mu.Unlock()
 	if from == to {
-		return
+		return true
 	}
 	if _, err := r.m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: r.id, To: to, Reason: reason}); err != nil {
 		r.m.opts.Logger.Warn("agents: recording a state", "agent", r.id, "to", to, "err", err)
@@ -176,6 +176,7 @@ func (r *runner) setStateIf(ctx context.Context, ok func(state.AgentState) bool,
 		r.m.retain(ctx, r.id)
 	}
 	r.m.Kick()
+	return true
 }
 
 // declare records what the agent says it is doing at the end of this turn.
@@ -265,8 +266,8 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 	}
 }
 
-// workingState is refining while the ticket is still being prepared, and
-// working once it's open.
+// turnStarted is the conversation's turn starting: the agent is working
+// (or refining), unless a person holds it.
 func (r *runner) turnStarted(ctx context.Context) {
 	r.mu.Lock()
 	r.inTurn, r.personIn = true, false
@@ -287,6 +288,8 @@ func (r *runner) activeAgain(ctx context.Context) {
 func notAttached(s state.AgentState) bool { return s != state.StateAttached }
 func isStalled(s state.AgentState) bool   { return s == state.StateStalled }
 
+// workingState is refining while the ticket is still being prepared, and
+// working once it's open.
 func (r *runner) workingState(ctx context.Context) state.AgentState {
 	t, err := r.m.opts.Tickets.Get(ctx, r.ticket)
 	if err == nil && (t.Status == tickets.StatusPreparing || t.Status == tickets.StatusDiscussion) {
@@ -339,32 +342,36 @@ func (r *runner) turnEnded(ctx context.Context, ev *harness.Event) {
 // (its open asks, its ticket), not only from this turn's declaration: a
 // declaration made in an earlier turn still holds, and one already
 // answered doesn't.
+//
+// Its reads leave room for a person to join the session (a TUI attach) in
+// the meantime, so each move is made only if the agent isn't attached.
 func (r *runner) settle(ctx context.Context, decl declared, ev *harness.Event) {
 	asks, err := r.m.opts.State.Messages.OpenAsksFrom(ctx, r.id)
 	if err == nil && len(asks) > 0 {
-		r.setState(ctx, state.StateWaitingUser, "asked the user")
+		r.setStateIf(ctx, notAttached, state.StateWaitingUser, "asked the user")
 		return
 	}
 	t, err := r.m.opts.Tickets.Get(ctx, r.ticket)
 	if err == nil && t.Status == tickets.StatusDiscussion {
-		r.setState(ctx, state.StateDiscussion, "raised a discussion")
+		r.setStateIf(ctx, notAttached, state.StateDiscussion, "raised a discussion")
 		return
 	}
 	if decl == declMerge {
-		r.setState(ctx, state.StateWaitingMerge, "ready to merge")
+		r.setStateIf(ctx, notAttached, state.StateWaitingMerge, "ready to merge")
 		return
 	}
 	switch {
 	case ev.Outcome == harness.TurnInterrupted:
 		// A person interrupted it: wait for them, don't nudge.
-		r.setState(ctx, state.StateIdle, "interrupted")
+		r.setStateIf(ctx, notAttached, state.StateIdle, "interrupted")
 	case ev.Outcome == harness.TurnFailed:
-		r.setState(ctx, state.StateStalled, "turn failed: "+ev.Text)
-		r.m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s): its turn failed: %s", r.id, r.ticket, ev.Text))
+		if r.setStateIf(ctx, notAttached, state.StateStalled, "turn failed: "+ev.Text) {
+			r.m.tellUser(ctx, r.id, fmt.Sprintf("agent %s (ticket %s): its turn failed: %s", r.id, r.ticket, ev.Text))
+		}
 	case err == nil && len(t.BlockedBy) > 0:
 		// Told to wait for its blockers, it does: slop-bot wakes it when
 		// they are done.
-		r.setState(ctx, state.StateIdle, "waiting on its ticket's blockers")
+		r.setStateIf(ctx, notAttached, state.StateIdle, "waiting on its ticket's blockers")
 	default:
 		r.m.nudge(ctx, r)
 	}
