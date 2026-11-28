@@ -157,3 +157,32 @@ func TestCloseStopsARunningFeed(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// Only the canonical spelling of a positive integer names a ticket.
+func TestGetRefusesNonCanonicalIDs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newBackend(t, &tickets.Config{}).open(t)
+	created, err := s.Create(ctx, ident.UserPrincipal(), &tickets.NewTicket{Title: "x"})
+	require.NoError(t, err)
+	require.Equal(t, ident.TicketID("1"), created.ID)
+
+	for _, id := range []ident.TicketID{"0", "-1", "01", "+1", "1 ", "", "x"} {
+		_, err := s.Get(ctx, id)
+		assert.ErrorIs(t, err, tickets.ErrNotFound, "%q", id)
+	}
+	_, err = s.Get(ctx, "1")
+	require.NoError(t, err)
+}
+
+// The zero cursor spelt out is the start of the feed, like the empty one.
+func TestStartAcceptsTheZeroPaddedZeroCursor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newBackend(t, &tickets.Config{}).open(t)
+	_, err := s.Create(ctx, ident.UserPrincipal(), &tickets.NewTicket{Title: "x"})
+	require.NoError(t, err)
+	require.NoError(t, s.Start(ctx, "00000000000000000000"))
+	ev := <-s.Events()
+	assert.Equal(t, tickets.EventCreated, ev.Kind)
+}
