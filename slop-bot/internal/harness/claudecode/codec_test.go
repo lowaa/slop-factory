@@ -151,11 +151,11 @@ func TestCommonFlags(t *testing.T) {
 
 func TestEnvDisablesBackgroundTasksAndKeepsAPIKeysOut(t *testing.T) {
 	t.Parallel()
-	h := &Harness{Environ: func() []string { return []string{"PATH=/bin", "ANTHROPIC_API_KEY=sk"} }}
+	h := &Harness{Environ: func() []string { return []string{"PATH=/bin", "ANTHROPIC_API_KEY=placeholder"} }}
 	env := h.env(&harness.Workspace{Env: map[string]string{"SLOP_BOT_AGENT_TOKEN": "tok"}})
 	assert.Contains(t, env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
 	assert.Contains(t, env, "SLOP_BOT_AGENT_TOKEN=tok")
-	assert.NotContains(t, env, "ANTHROPIC_API_KEY=sk", "an API key would silently switch billing off the subscription")
+	assert.NotContains(t, env, "ANTHROPIC_API_KEY=placeholder", "an API key would silently switch billing off the subscription")
 	opted := h.env(&harness.Workspace{APIKeyOptIn: true})
-	assert.Contains(t, opted, "ANTHROPIC_API_KEY=sk")
+	assert.Contains(t, opted, "ANTHROPIC_API_KEY=placeholder")
 }
