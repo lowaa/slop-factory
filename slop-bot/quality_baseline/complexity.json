@@ -1,0 +1,33 @@
+{
+  "functions": 2,
+  "cyclomatic": {
+    "threshold": 15,
+    "mean": 2,
+    "p90": 3,
+    "max": 3,
+    "over_threshold": 0
+  },
+  "cognitive": {
+    "threshold": 20,
+    "mean": 1,
+    "p90": 2,
+    "max": 2,
+    "over_threshold": 0
+  },
+  "longest": [
+    {
+      "file": "cmd/slop-bot/main.go",
+      "function": "main",
+      "lines": 8,
+      "cyclomatic": 3,
+      "cognitive": 2
+    },
+    {
+      "file": "internal/version/version.go",
+      "function": "String",
+      "lines": 1,
+      "cyclomatic": 1,
+      "cognitive": 0
+    }
+  ]
+}
