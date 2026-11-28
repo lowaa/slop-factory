@@ -293,24 +293,7 @@ type scannedBody struct {
 func (at *attachRun) follow(ctx context.Context, body *scannedBody, out chan<- api.AttachFrame) {
 	defer close(out)
 	for {
-		sb := body
-		for sb.sc.Scan() {
-			var f api.AttachFrame
-			if json.Unmarshal(sb.sc.Bytes(), &f) != nil {
-				continue
-			}
-			if f.Type == api.FrameEnded {
-				at.ending.Store(true)
-			}
-			select {
-			case out <- f:
-			case <-ctx.Done():
-				_ = body.Close()
-				return
-			}
-		}
-		_ = body.Close()
-		if ctx.Err() != nil || at.ending.Load() {
+		if !at.relay(ctx, body, out) || ctx.Err() != nil || at.ending.Load() {
 			return
 		}
 		at.say("\r\nslop-bot: lost the daemon; reconnecting (your TUI keeps running)...")
@@ -329,6 +312,27 @@ func (at *attachRun) follow(ctx context.Context, body *scannedBody, out chan<- a
 		at.say("\r\nslop-bot: reconnected.")
 		at.launched(ctx)
 	}
+}
+
+// relay passes one stream's frames on until it ends, then closes it. It
+// reports false when ctx ended first.
+func (at *attachRun) relay(ctx context.Context, body *scannedBody, out chan<- api.AttachFrame) bool {
+	defer func() { _ = body.Close() }()
+	for body.sc.Scan() {
+		var f api.AttachFrame
+		if json.Unmarshal(body.sc.Bytes(), &f) != nil {
+			continue
+		}
+		if f.Type == api.FrameEnded {
+			at.ending.Store(true)
+		}
+		select {
+		case out <- f:
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
 }
 
 // reconnect retries the attach as this holder until the daemon answers.
