@@ -198,9 +198,14 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		r.mu.Lock()
 		r.inTurn = false
 		r.mu.Unlock()
-		// A finished turn shows the harness works again after a recovery.
-		if err := r.m.opts.State.Agents.ResetRecoveries(ctx, r.id); err != nil {
-			r.m.opts.Logger.Debug("agents: resetting recoveries", "agent", r.id, "err", err)
+		// A completed turn shows the harness works again after a recovery.
+		// A failed one doesn't: a resume that can't find its session reports
+		// one (Claude Code does) just before it exits, and counting that as
+		// working would resume the agent for ever.
+		if ev.Outcome == harness.TurnCompleted {
+			if err := r.m.opts.State.Agents.ResetRecoveries(ctx, r.id); err != nil {
+				r.m.opts.Logger.Debug("agents: resetting recoveries", "agent", r.id, "err", err)
+			}
 		}
 		r.turnEnded(ctx, ev)
 	case harness.Exited:

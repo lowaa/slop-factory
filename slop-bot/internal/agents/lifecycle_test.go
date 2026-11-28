@@ -133,6 +133,31 @@ func TestAnAgentThatKeepsCrashingIsReleased(t *testing.T) {
 	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
 }
 
+// A resume that fails reports a failed turn before its harness exits:
+// Claude Code does for a session it can't find. A failed turn shows nothing
+// works again, so it mustn't end the run of crashes, or such an agent is
+// resumed for ever.
+func TestAFailedTurnDoesNotEndTheRunOfCrashes(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	tk := f.file("t", nil)
+	s := f.session()
+	f.user(s)
+	for range 3 {
+		f.do(s, fake.Command{Cmd: fake.CmdExit, Code: 1})
+		s = f.session()
+		require.True(t, s.Resumed)
+		f.user(s)
+		f.do(s, fake.Command{Cmd: fake.CmdTurnEnd, Outcome: string(harness.TurnFailed)})
+		// Settled after the turn's end, so its effect on the count is in.
+		f.await(agents.EventState, toState(state.StateStalled))
+	}
+	f.do(s, fake.Command{Cmd: fake.CmdExit, Code: 1})
+	released := f.await(agents.EventReleased, nil)
+	assert.Contains(t, reason(released), "died 4 times")
+	f.noLiveAgent(tk.ID)
+}
+
 func TestMarkingTheTicketDoneEndsItsAgent(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "")

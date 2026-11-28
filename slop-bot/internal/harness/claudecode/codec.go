@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -83,10 +84,13 @@ type record struct {
 		} `json:"content"`
 	} `json:"message"`
 	// result
-	IsError        bool    `json:"is_error"`
-	Result         string  `json:"result"`
-	TerminalReason string  `json:"terminal_reason"`
-	TotalCostUSD   float64 `json:"total_cost_usd"`
+	IsError bool   `json:"is_error"`
+	Result  string `json:"result"`
+	// Errors carries the reason when there is no result text, as for a
+	// resume of a session Claude Code can't find.
+	Errors         []string `json:"errors"`
+	TerminalReason string   `json:"terminal_reason"`
+	TotalCostUSD   float64  `json:"total_cost_usd"`
 	Usage          struct {
 		InputTokens              int64 `json:"input_tokens"`
 		OutputTokens             int64 `json:"output_tokens"`
@@ -181,7 +185,11 @@ func turnEnded(r *record) harness.Event {
 	case r.TerminalReason == "aborted_tools" || r.TerminalReason == "aborted_streaming":
 		return harness.Event{Kind: harness.TurnEnded, Outcome: harness.TurnInterrupted}
 	default:
-		return harness.Event{Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: r.Result}
+		text := r.Result
+		if text == "" {
+			text = strings.Join(r.Errors, "; ")
+		}
+		return harness.Event{Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: text}
 	}
 }
 

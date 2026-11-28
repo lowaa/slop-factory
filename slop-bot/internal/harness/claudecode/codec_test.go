@@ -111,6 +111,18 @@ func TestTurnOutcomes(t *testing.T) {
 	}
 }
 
+// Claude Code 2.1.332 answers `--resume` of a session it can't find with
+// this record alone, then exits 1: the reason is only in errors.
+func TestAFailedResumeIsAFailedTurnThatSaysWhy(t *testing.T) {
+	t.Parallel()
+	evs := decodeAll(t, &codec{}, `{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,`+
+		`"errors":["No conversation found with session ID: 6a1f0c2e"]}`)
+	last := evs[len(evs)-1]
+	assert.Equal(t, harness.TurnEnded, last.Kind)
+	assert.Equal(t, harness.TurnFailed, last.Outcome)
+	assert.Equal(t, "No conversation found with session ID: 6a1f0c2e", last.Text)
+}
+
 func TestInitStartsOneTurnNotOnePerRecord(t *testing.T) {
 	t.Parallel()
 	c := &codec{}
