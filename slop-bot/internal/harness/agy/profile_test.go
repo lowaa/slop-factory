@@ -102,9 +102,21 @@ func TestParseHook(t *testing.T) {
 
 func TestParseHookFailedTurnAndUnknownEvent(t *testing.T) {
 	t.Parallel()
-	got, err := parseHook(HookStop, []byte(`{"conversationId":"c1","error":"quota exhausted"}`))
+	for payload, want := range map[string]harness.Event{
+		`{"error":"quota exhausted","terminationReason":"ERROR"}`: {Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: "quota exhausted"},
+		`{"terminationReason":"ERROR"}`:                           {Kind: harness.TurnEnded, Outcome: harness.TurnFailed},
+		`{"terminationReason":"USER_CANCELED"}`:                   {Kind: harness.TurnEnded, Outcome: harness.TurnInterrupted},
+	} {
+		got, err := parseHook(HookStop, []byte(payload))
+		require.NoError(t, err)
+		assert.Equal(t, want, got.Events[0], payload)
+		// Kept going, a held message would carry a failure past the core,
+		// or a cancel past its cancel.
+		assert.Equal(t, tuidriver.InjectNone, got.Inject, payload)
+	}
+	got, err := parseHook(HookStop, []byte(`{"terminationReason":"MAX_INVOCATIONS"}`))
 	require.NoError(t, err)
-	assert.Equal(t, harness.Event{Kind: harness.TurnEnded, Outcome: harness.TurnFailed, Text: "quota exhausted"}, got.Events[0])
+	assert.Equal(t, tuidriver.InjectTurnEnd, got.Inject, "a turn that ended on its own can be kept going")
 
 	_, err = parseHook("PostInvocation", []byte(`{}`))
 	assert.Error(t, err, "not installed, so never expected")
@@ -205,7 +217,11 @@ func TestTheSidecarSortsAfterItsWorktree(t *testing.T) {
 
 func installed(t *testing.T, hook []string) (*harness.Workspace, map[string]json.RawMessage) {
 	t.Helper()
-	ws := workspace(t)
+	return installedIn(t, workspace(t), hook)
+}
+
+func installedIn(t *testing.T, ws *harness.Workspace, hook []string) (*harness.Workspace, map[string]json.RawMessage) {
+	t.Helper()
 	h := &Harness{Binary: "/bin/agy"}
 	spec, err := h.command(ws, nil)
 	require.NoError(t, err)
@@ -289,4 +305,53 @@ func TestTheHookBridgeAnswersWhenSlopBotIsAway(t *testing.T) {
 	// slop-bot gone altogether.
 	require.NoError(t, hub.Close())
 	assert.JSONEq(t, allow, runHook(t, commandFor(t, events, HookPreToolUse), env))
+}
+
+// Without permissive mode, agy's own prompt decides every tool call: no
+// answer of slop-bot's, nor its absence, can allow one.
+func TestANonPermissiveWorkspaceAlwaysAsks(t *testing.T) {
+	t.Parallel()
+	self, err := os.Executable()
+	require.NoError(t, err)
+	hub, err := fake.NewHookHub(self)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hub.Close() })
+	const session = "agy-a1"
+	ws := workspace(t)
+	ws.Permissive = false
+	_, events := installedIn(t, ws, hub.Command(session))
+	env := append(os.Environ(), "SLOP_BOT_FAKE_REEXEC=1")
+	pre := commandFor(t, events, HookPreToolUse)
+
+	heard := make(chan string, 1)
+	unroute, err := hub.Route(session, func(_ context.Context, event string, _ []byte) ([]byte, error) {
+		heard <- event
+		return []byte(allow), nil
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, ask, runHook(t, pre, env), "slop-bot's allow is not passed on")
+	assert.Equal(t, HookPreToolUse, <-heard, "slop-bot still hears of the call")
+	unroute()
+	assert.JSONEq(t, ask, runHook(t, pre, env), "unreachable")
+}
+
+func TestTheBriefingSaysWhereCommandsStart(t *testing.T) {
+	t.Parallel()
+	h := &Harness{Binary: "/bin/agy"}
+	ws := workspace(t)
+	ws.ExtraDirs = []string{ws.Dir + "-z", filepath.Join(filepath.Dir(ws.Dir), "t7-api")}
+	_, err := h.command(ws, nil)
+	require.NoError(t, err)
+	briefing, err := os.ReadFile(filepath.Join(sidecar(ws), "AGENTS.md"))
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(briefing), "Be terse."))
+	assert.Contains(t, string(briefing), "your commands start in "+ws.ExtraDirs[1]+", not your primary worktree")
+	assert.Contains(t, string(briefing), "Run every command from "+ws.Dir)
+
+	ws.ExtraDirs = ws.ExtraDirs[:1]
+	_, err = h.command(ws, nil)
+	require.NoError(t, err)
+	briefing, err = os.ReadFile(filepath.Join(sidecar(ws), "AGENTS.md"))
+	require.NoError(t, err)
+	assert.Equal(t, "Be terse.", string(briefing), "the worktree sorts first: nothing to say")
 }

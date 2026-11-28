@@ -60,7 +60,8 @@ type Options struct {
 	// ConfirmTimeout is how long a submit, cancel or quit waits for the
 	// harness to act before it is retried or given up on.
 	ConfirmTimeout time.Duration
-	// RenderTimeout bounds the wait for a paste to show on screen.
+	// RenderTimeout bounds the wait for a paste to show on screen, and a
+	// graceful Stop's wait for the idle prompt before it types the quit.
 	RenderTimeout time.Duration
 }
 
@@ -497,6 +498,11 @@ func (c *Conversation) readScreen(ctx context.Context) {
 	}
 	st := c.p.Markers.classify(screen)
 	cancelled := c.p.Markers.interrupted(screen)
+	if st == screenUnknown && cancelled {
+		// A cancel can hide the idle footer (agy moves a queued message
+		// into the prompt): the cancel itself says the turn is over.
+		st = screenIdle
+	}
 	c.apply(func() []harness.Event {
 		// A hook during the read, or just before it, may not have reached
 		// the screen yet: the hook is the better witness.
@@ -940,7 +946,13 @@ func (c *Conversation) beginQuit() bool {
 
 // quit types the quit sequence; c.keys is held.
 func (c *Conversation) quit(ctx context.Context) error {
+	if err := c.notAttached(ctx); err != nil {
+		return err // not delayed: a person's typing can keep the screen busy
+	}
 	c.awaitIdleScreen(ctx)
+	if err := c.usable(); err != nil {
+		return err // closed or exited during the wait: type nothing
+	}
 	for _, in := range c.p.Quit {
 		if err := c.notAttached(ctx); err != nil {
 			return err
@@ -978,8 +990,8 @@ func (c *Conversation) awaitIdleScreen(ctx context.Context) {
 		}
 		select {
 		case <-tick.C:
-		case <-c.exited:
-			return
+		case <-c.bg.Done():
+			return // closed or exited
 		case <-ctx.Done():
 			c.opts.Logger.Info("tuidriver: quitting without an idle screen", "screen", lastLine(screen))
 			return

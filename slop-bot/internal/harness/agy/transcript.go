@@ -72,16 +72,24 @@ func (r *TranscriptReader) Parse(data []byte) ([]transcript.Entry, error) {
 // stepParser turns steps into entries, in order.
 type stepParser struct {
 	out []transcript.Entry
-	// A tool's result follows its call without naming it: calls wait here
-	// for their results, in order.
+	// A tool's result follows its call without naming it: the last model
+	// call's tool calls wait here for their results, in order. A cancelled
+	// call never gets one, so the next model call starts afresh.
 	calls []string
+	// booting is the boot prompt's turn, the harness's start-up rather
+	// than anything a person sent: its text is left out, its usage kept.
+	booting bool
 }
 
 func (p *stepParser) add(s *step) {
 	at := transcript.ParseTime(s.CreatedAt)
 	switch s.Type {
 	case "USER_INPUT":
-		p.out = append(p.out, transcript.Entry{At: at, Kind: transcript.User, Text: userRequest(s.Content)})
+		text := userRequest(s.Content)
+		if p.booting = len(p.out) == 0 && text == bootPrompt; p.booting {
+			return
+		}
+		p.out = append(p.out, transcript.Entry{At: at, Kind: transcript.User, Text: text})
 	case "SYSTEM_MESSAGE":
 		if text, ok := injected(s.Content); ok {
 			p.out = append(p.out, transcript.Entry{At: at, Kind: transcript.User, Text: text})
@@ -100,7 +108,8 @@ func (p *stepParser) add(s *step) {
 
 // response is one model call: its text, its tool calls and its usage.
 func (p *stepParser) response(at time.Time, s *step) {
-	if strings.TrimSpace(s.Content) != "" {
+	p.calls = nil
+	if strings.TrimSpace(s.Content) != "" && !p.booting {
 		p.out = append(p.out, transcript.Entry{At: at, Kind: transcript.Assistant, Text: s.Content})
 	}
 	for _, c := range s.ToolCalls {

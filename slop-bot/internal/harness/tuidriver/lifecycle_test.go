@@ -196,6 +196,8 @@ type laggingHost struct {
 	lag    atomic.Bool
 	typed  atomic.Int32
 	lagged chan struct{}
+	// shown, when set, is the screen shown while lagging instead.
+	shown string
 }
 
 func (h *laggingHost) Capture(ctx context.Context, session string) (string, error) {
@@ -203,6 +205,9 @@ func (h *laggingHost) Capture(ctx context.Context, session string) (string, erro
 		select {
 		case h.lagged <- struct{}{}:
 		default:
+		}
+		if h.shown != "" {
+			return h.shown, nil
 		}
 		return "[fake] busy (esc to cancel)", nil
 	}
@@ -247,4 +252,45 @@ func TestStopQuitsOnceTheScreenIsIdle(t *testing.T) {
 	host.lag.Store(false)
 	require.NoError(t, <-stopped)
 	assert.Equal(t, 0, next(r.ctx, t, r.conv, harness.Exited).ExitCode)
+}
+
+// Close lets go of the session for Adopt: a Stop waiting on the screen then
+// types nothing into it.
+func TestCloseDuringStopsWaitTypesNothing(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	host := &laggingHost{Tmux: r.Host, lagged: make(chan struct{}, 1)}
+	r.Harness.Host = host
+	r.conv = r.launch(t, nil)
+
+	host.lag.Store(true)
+	stopped := make(chan error, 1)
+	go func() { stopped <- r.conv.Stop(r.ctx, false) }()
+	<-host.lagged
+	require.NoError(t, r.conv.Close())
+	assert.ErrorIs(t, <-stopped, tuidriver.ErrClosed)
+	assert.Zero(t, host.typed.Load())
+	st, err := r.Host.Status(r.ctx, fake.SessionName("a1"))
+	require.NoError(t, err)
+	assert.False(t, st.Dead, "the session lives on")
+}
+
+// A cancel can hide the idle footer (agy moves a queued message into the
+// prompt): the cancel on screen still ends the turn.
+func TestACancelWithoutAnIdleFooterEndsTheTurn(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	host := &laggingHost{Tmux: r.Host, lagged: make(chan struct{}, 1), shown: "interrupted\n> a queued message\n"}
+	r.Harness.Host = host
+	r.conv = r.launch(t, nil)
+	r.do(t, fake.Command{Cmd: fake.CmdQuietCancel, On: true})
+	r.inTurn(t)
+
+	interrupted := make(chan error, 1)
+	go func() { interrupted <- r.conv.Interrupt(r.ctx) }()
+	r.await(t, fake.RepInterrupt)
+	host.lag.Store(true)
+	r.clk.Advance(poll)
+	assert.Equal(t, harness.TurnInterrupted, next(r.ctx, t, r.conv, harness.TurnEnded).Outcome)
+	require.NoError(t, <-interrupted)
 }

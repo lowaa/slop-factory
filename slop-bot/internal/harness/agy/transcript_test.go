@@ -3,6 +3,7 @@ package agy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,6 +81,43 @@ func TestParseTheStepLog(t *testing.T) {
 	require.Equal(t, transcript.UsageKind, entries[3].Kind)
 	assert.Equal(t, &transcript.Usage{Input: 10590, Output: 304}, entries[3].Usage)
 	assert.Contains(t, kinds, transcript.UsageKind)
+}
+
+func TestAResultIsPairedWithItsOwnModelCallsTools(t *testing.T) {
+	t.Parallel()
+	log := strings.Join([]string{
+		`{"type":"PLANNER_RESPONSE","tool_calls":[{"name":"run_command","args":{"CommandLine":"sleep 9731"}}]}`,
+		// Cancelled: no result, and the next model call follows.
+		`{"type":"PLANNER_RESPONSE","tool_calls":[{"name":"view_file","args":{}},{"name":"grep_search","args":{}}]}`,
+		`{"type":"GENERIC","source":"MODEL","content":"file body"}`,
+		`{"type":"GENERIC","source":"MODEL","content":"grep hits"}`,
+	}, "\n") + "\n"
+	entries, err := (&TranscriptReader{}).Parse([]byte(log))
+	require.NoError(t, err)
+	var results []string
+	for _, e := range entries {
+		if e.Kind == transcript.ToolResult {
+			results = append(results, e.Tool+": "+e.Text)
+		}
+	}
+	assert.Equal(t, []string{"view_file: file body", "grep_search: grep hits"}, results)
+}
+
+func TestTheBootTurnIsNotTheUsers(t *testing.T) {
+	t.Parallel()
+	log := strings.Join([]string{
+		`{"type":"USER_INPUT","content":"<USER_REQUEST>\n` + bootPrompt + `\n</USER_REQUEST>"}`,
+		`{"type":"PLANNER_RESPONSE","content":"ready","input_tokens":10,"output_tokens":1}`,
+		`{"type":"USER_INPUT","content":"<USER_REQUEST>\nhello\n</USER_REQUEST>"}`,
+		`{"type":"PLANNER_RESPONSE","content":"hi"}`,
+	}, "\n") + "\n"
+	entries, err := (&TranscriptReader{}).Parse([]byte(log))
+	require.NoError(t, err)
+	assert.Equal(t, []transcript.Entry{
+		{Kind: transcript.UsageKind, Usage: &transcript.Usage{Input: 10, Output: 1}},
+		{Kind: transcript.User, Text: "hello"},
+		{Kind: transcript.Assistant, Text: "hi"},
+	}, entries)
 }
 
 func TestParseKeepsAHalfWrittenLineForLater(t *testing.T) {

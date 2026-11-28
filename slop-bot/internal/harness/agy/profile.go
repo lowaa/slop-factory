@@ -36,9 +36,14 @@ var efforts = []string{"low", "medium", "high", "xhigh", "max"}
 // tuidriver.HookCall.Events).
 const bootPrompt = "You are starting up. Reply with just: ready"
 
-// allow is PreToolUse's answer. agy reads any other answer, an empty one
-// or a failed hook included, as a refusal (the TUI spike).
+// allow is PreToolUse's answer in a permissive workspace. agy refuses the
+// call on an empty answer or a failed hook (the TUI spike, and this
+// package's live test), so it is always given explicitly.
 const allow = `{"decision":"allow"}`
+
+// ask is PreToolUse's answer otherwise: agy's own permission prompt,
+// "respects Always Allow" (agy's hook docs). A person answers it.
+const ask = `{"decision":"ask"}`
 
 // Screen markers (agy 1.5.18, the TUI spike and this package's testdata).
 // The footer is the screen's last line and starts at column 0, where the
@@ -83,14 +88,19 @@ func (h *Harness) command(ws *harness.Workspace, resume *harness.ConversationRef
 		return nil, fmt.Errorf("agy: effort %q is not one of %v", ws.Effort, efforts)
 	}
 	side := sidecar(ws)
-	if err := writeBriefing(side, ws.Briefing); err != nil {
-		return nil, err
-	}
+	briefing := ws.Briefing
 	if before := sortsBefore(ws); len(before) > 0 {
 		// agy's primary folder is the first of its folders in sorted order,
-		// not its cwd: it runs commands there.
+		// not its cwd: it runs commands there, and the briefing says the
+		// worktree is where the agent works.
 		h.logger().Warn("agy: extra folders sort before the primary worktree, and agy will work in the first",
 			"agent", ws.Agent, "primary", ws.Dir, "before", before)
+		briefing += fmt.Sprintf("\n\nNote: your commands start in %s, not your primary worktree. "+
+			"Run every command from %s (cd there first, or give it as the command's working directory) "+
+			"unless it is meant for another worktree.\n", before[0], ws.Dir)
+	}
+	if err := writeBriefing(side, briefing); err != nil {
+		return nil, err
 	}
 	args := []string{}
 	if ws.Permissive {
@@ -134,7 +144,8 @@ func sidecar(ws *harness.Workspace) string {
 	return filepath.Clean(ws.Dir) + ".slop-bot-agy"
 }
 
-// sortsBefore are ws's extra folders that agy would take as primary.
+// sortsBefore are ws's extra folders that sort before the worktree, first
+// the one agy takes as primary.
 func sortsBefore(ws *harness.Workspace) []string {
 	var out []string
 	for _, d := range ws.ExtraDirs {
@@ -142,6 +153,7 @@ func sortsBefore(ws *harness.Workspace) []string {
 			out = append(out, d)
 		}
 	}
+	slices.Sort(out)
 	return out
 }
 
@@ -184,9 +196,12 @@ func installHooks(ws *harness.Workspace, _ *harness.LaunchSpec, hook []string) e
 	for _, ev := range []string{HookSessionStart, HookPreInvocation, HookStop} {
 		events[ev] = []hookSpec{{Type: "command", Command: hookCommand(hook, ev)}}
 	}
-	for _, ev := range []string{HookPreToolUse, HookPostToolUse} {
-		events[ev] = []toolHookGroup{{Matcher: ".*", Hooks: []hookSpec{{Type: "command", Command: hookCommand(hook, ev)}}}}
+	pre := hookCommand(hook, HookPreToolUse)
+	if !ws.Permissive {
+		pre = askCommand(hook)
 	}
+	events[HookPreToolUse] = []toolHookGroup{{Matcher: ".*", Hooks: []hookSpec{{Type: "command", Command: pre}}}}
+	events[HookPostToolUse] = []toolHookGroup{{Matcher: ".*", Hooks: []hookSpec{{Type: "command", Command: hookCommand(hook, HookPostToolUse)}}}}
 	b, err := json.MarshalIndent(map[string]any{"slop-bot": events}, "", "  ")
 	if err != nil {
 		return err
@@ -201,12 +216,24 @@ func installHooks(ws *harness.Workspace, _ *harness.LaunchSpec, hook []string) e
 // fallback says nothing beyond agy's defaults, so nothing is lost but the
 // hook's news, which the screen and transcript carry too.
 func hookCommand(hook []string, event string) string {
+	return bridge(hook, event) + " || printf '%s' " + shellQuote(defaultReply(event))
+}
+
+// askCommand is a non-permissive workspace's PreToolUse: slop-bot still
+// hears of the call, but agy's own prompt decides it, whatever the bridge
+// answers or however it fails, so no answer of slop-bot's can widen the
+// user's permissions.
+func askCommand(hook []string) string {
+	return bridge(hook, HookPreToolUse) + " >/dev/null 2>&1; printf '%s' " + shellQuote(ask)
+}
+
+func bridge(hook []string, event string) string {
 	argv := append(slices.Clone(hook), event)
 	quoted := make([]string, len(argv))
 	for i, a := range argv {
 		quoted[i] = shellQuote(a)
 	}
-	return strings.Join(quoted, " ") + " || printf '%s' " + shellQuote(defaultReply(event))
+	return strings.Join(quoted, " ")
 }
 
 func defaultReply(event string) string {
@@ -229,6 +256,10 @@ type payload struct {
 	} `json:"toolCall"`
 	// Error is on PostToolUse and Stop.
 	Error string `json:"error"`
+	// TerminationReason is on Stop: NO_TOOL_CALL for a turn that ended
+	// normally; also ERROR, USER_CANCELED, MAX_INVOCATIONS and others
+	// (agy's TERMINATION_REASON_* names, without the prefix).
+	TerminationReason string `json:"terminationReason"`
 }
 
 func parseHook(event string, data []byte) (*tuidriver.HookCall, error) {
@@ -252,12 +283,18 @@ func parseHook(event string, data []byte) (*tuidriver.HookCall, error) {
 		call.Events = []harness.Event{{Kind: harness.ToolEnded, Tool: toolName(&p)}}
 	case HookStop:
 		ended := harness.Event{Kind: harness.TurnEnded, Outcome: harness.TurnCompleted}
-		if p.Error != "" {
+		switch {
+		case p.Error != "" || p.TerminationReason == "ERROR":
 			ended.Outcome, ended.Text = harness.TurnFailed, p.Error
+		case p.TerminationReason == "USER_CANCELED":
+			ended.Outcome = harness.TurnInterrupted
+		default:
+			// Only a turn that ended on its own is kept going: a failure
+			// must reach the core, and a cancel must stay cancelled.
+			call.Inject = tuidriver.InjectTurnEnd
 		}
 		// Ready: the boot prompt's turn has ended (after that, a repeat).
 		call.Events = []harness.Event{ended, {Kind: harness.Ready}}
-		call.Inject = tuidriver.InjectTurnEnd
 	default:
 		return nil, fmt.Errorf("agy: unknown hook %q", event)
 	}
