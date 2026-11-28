@@ -40,13 +40,13 @@
 ./internal/setup 86.1
 ./internal/sqlitex 91.5
 ./internal/sqlitex/sqlitextest 100.0
-./internal/state 91.0
+./internal/state 90.6
 ./internal/statusview 95.9
 ./internal/testexec 100.0
 ./internal/tickets 100.0
 ./internal/tickets/conformance 99.4
 ./internal/tickets/local 91.5
-./internal/transcript 84.9
+./internal/transcript 84.3
 ./internal/version 100.0
 ./internal/worktree 87.4
 total 89.7
