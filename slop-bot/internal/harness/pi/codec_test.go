@@ -325,6 +325,36 @@ func TestAPromptThatStartsNoRunStillEndsATurn(t *testing.T) {
 		decodeAll(t, c, w, `{"type":"compaction_end","reason":"threshold","aborted":false}`)
 		assert.Equal(t, []string{"hi"}, messages(t, &buf))
 	})
+	// The Send opened a turn in rpcdriver, and no run will close it: without
+	// a turn end, a graceful Stop (attach --now) waits for ever.
+	t.Run("held while compacting outside a run, then interrupted, ends the turn", func(t *testing.T) {
+		t.Parallel()
+		c := testCodec()
+		var buf bytes.Buffer
+		w := rpcdriver.NewWire(&buf)
+		evs := decodeAll(t, c, w, `{"type":"compaction_start","reason":"threshold"}`,
+			response(sent(t, c), `"success":false,"error":"Cannot submit a prompt while compaction is in progress"`),
+			`{"type":"compaction_end","reason":"threshold","aborted":true}`)
+		require.Equal(t, []harness.EventKind{harness.TurnStarted, harness.TurnEnded}, kinds(evs))
+		assert.Equal(t, harness.TurnInterrupted, evs[1].Outcome)
+		assert.Empty(t, buf.String(), "an interrupt doesn't restart the agent")
+
+		assert.Empty(t, decodeAll(t, c, w, settled), "the abort's settle comes outside any turn")
+		require.NoError(t, c.Send(context.Background(), w, &harness.Message{Text: "next"}, false))
+		assert.Equal(t, []string{"hi", "next"}, messages(t, &buf), "the held message goes first")
+	})
+	// A message held after a run settled opened no turn, so an aborted
+	// compaction after it has none to end.
+	t.Run("an aborted compaction ends no turn it didn't hold open", func(t *testing.T) {
+		t.Parallel()
+		c := testCodec()
+		var buf bytes.Buffer
+		w := rpcdriver.NewWire(&buf)
+		decodeAll(t, c, w, agentStart, response(sent(t, c), `"success":false,"error":"busy"`), settled)
+		decodeAll(t, c, w, response(lastCommand(t, &buf).ID, `"success":false,"error":"busy"`))
+		assert.Empty(t, decodeAll(t, c, w, `{"type":"compaction_start","reason":"threshold"}`,
+			`{"type":"compaction_end","reason":"threshold","aborted":true}`))
+	})
 	t.Run("started and queued are left to the run's own events", func(t *testing.T) {
 		t.Parallel()
 		c := testCodec()
