@@ -16,7 +16,8 @@ Usage: review.sh [-m|--model <slug>] [slop-review flags...]
                  [--reason=...] [--fixed-in=<commit>]   (needs SLOP_REVIEW_REPORT_URL and a token)
 
   --provider <name>   Where the review model runs. Also settable as
-                      SLOP_REVIEW_PROVIDER (e.g. in the repo-root .env).
+                      SLOP_REVIEW_PROVIDER (in the environment or the .env:
+                      see "Settings" below).
                         chatgpt     OpenAI's Responses API through
                                     a ChatGPT subscription, logged in with
                                     pi. Local machines only, never CI.
@@ -45,8 +46,10 @@ Usage: review.sh [-m|--model <slug>] [slop-review flags...]
                       _REASONING_EFFORT, and that config may name a
                       fallback. --provider, --model or --reasoning-effort
                       on the command line make the run a local one-off
-                      that ignores it. Without a fallback, a failing
-                      provider fails the run, which says so.
+                      that ignores it. Without a central config, the
+                      fallback is the local one (--fallback-provider
+                      below). Without a fallback, a failing provider fails
+                      the run, which says so.
   -m, --model <slug>  Model to review with. Defaults to the provider's own:
                         chatgpt, openai: gpt-5.6-luna
                         openrouter:      openai/gpt-5.6-luna
@@ -73,6 +76,32 @@ Usage: review.sh [-m|--model <slug>] [slop-review flags...]
                       (choose a -pro slug on OpenRouter for more). An
                       empty effort in the central config gets the same
                       default.
+  --fallback-provider <name>, --fallback-model <slug>,
+  --fallback-reasoning-effort <level>
+                      A provider to redo a session on when the primary
+                      fails it with one of --fallback-on: the local
+                      counterpart of the central config's fallback, and
+                      only used when no central config applies. Also
+                      SLOP_REVIEW_FALLBACK_PROVIDER, _FALLBACK_MODEL and
+                      _FALLBACK_REASONING_EFFORT. Model and effort default
+                      as for the primary; the provider must differ from it.
+                      A one-off run (--provider, --model or
+                      --reasoning-effort given) runs without the
+                      SLOP_REVIEW_FALLBACK_* settings, which were chosen to
+                      back up SLOP_REVIEW_PROVIDER; give --fallback-provider
+                      on the command line too for a fallback, which is then
+                      taken from the command line alone.
+  --fallback-on <classes>
+                      Comma-separated failure classes that take the
+                      fallback: usage_limit, credits, auth, backend.
+                      Default usage_limit (also SLOP_REVIEW_FALLBACK_ON).
+                      A primary that can't start (lost login: auth) goes
+                      straight to the fallback if auth is listed. Other
+                      failures (a config mistake, running out of turns, an
+                      error not recognised as one of these) never take
+                      it. When it is taken, stderr, .meta.fell_back (from,
+                      to, class), each session's provider and a review
+                      warning say so.
   --intent <file>     What the change is meant to do, typically the PR
                       description (also SLOP_REVIEW_INTENT; read up to 32 KiB).
                       Every session is told it is the author's claim to
@@ -125,10 +154,24 @@ Prerequisites per provider:
               Code's sandbox tools (bwrap and socat on Linux). The run is
               refused rather than made unsandboxed.
 A missing or lost login fails the run saying so (a configured fallback on
-auth takes it); slop-review never switches provider by itself.
-To change provider: SLOP_REVIEW_PROVIDER=<name> (e.g. in the repo-root
-.env), or --provider=<name> for one run. A machine that reports to a report
-server takes the provider from the server's central config instead.
+auth takes it); slop-review never switches provider by itself, only to a
+fallback someone configured.
+To change provider: SLOP_REVIEW_PROVIDER=<name> (e.g. in the .env), or
+--provider=<name> for one run. A machine that reports to a report server
+takes the provider from the server's central config instead.
+
+Settings: every SLOP_REVIEW_* variable but SLOP_REVIEW_INTENT (one change's,
+not a standing setting) may also be set in a .env file. This
+script reads the one at the root of its own checkout (in a linked worktree,
+which has no copy of the git-ignored file, the main worktree's), never the
+reviewed repository's, and passes it as --env-file=<path>; give
+--env-file=<path> to read another, or --env-file= for none. Only
+SLOP_REVIEW_* lines are read: KEY=VALUE, an optional "export ", # comments,
+and values optionally in '' or "" (taken literally: no escapes or $VAR
+expansion). The file is parsed, never sourced, and its values are never
+logged; stderr names the keys a run took from it. Precedence: command-line
+flags, then the environment (a variable set and non-empty), then the .env,
+then the defaults.
 
 Needs git 2.40 or newer on PATH (for `git check-attr --source`, used to
 tell whether a changed file was already generated). slop-review fails
@@ -139,9 +182,9 @@ repo -- unset, nothing is sent anywhere):
   --report-to <url>              also settable as SLOP_REVIEW_REPORT_URL.
                                   Must be https, unless the host is loopback
                                   (127.0.0.0/8, ::1, localhost).
-  SLOP_REVIEW_REPORT_TOKEN       the ingest token. Env-var-only, like the
-                                  provider API keys -- there is no flag for
-                                  it, so it can't land in shell history.
+  SLOP_REVIEW_REPORT_TOKEN       the ingest token, from the environment or
+                                  the .env. There is no flag for it, so it
+                                  can't land in shell history.
   --report-token-command <cmd>   also settable as SLOP_REVIEW_REPORT_TOKEN_COMMAND:
                                   for a token that expires. An executable
                                   (a path, or a name on PATH) whose stdout,
@@ -185,11 +228,36 @@ warning notes when a run wasn't reported. This script passes --tool-version
 EOF
 }
 
+# env_file prints the .env slop-review reads its SLOP_REVIEW_* settings
+# from, if there is one: at the root of the checkout this script is in, or,
+# in a linked worktree (which has no copy of the git-ignored file), at the
+# main worktree's root. Never the reviewed repository's: a change under
+# review must not choose its own reviewer or where its report goes.
+env_file() {
+  local top common
+  top="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2> /dev/null)" || return 0
+  if [[ -f "$top/.env" ]]; then
+    printf '%s\n' "$top/.env"
+    return 0
+  fi
+  common="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2> /dev/null)" || return 0
+  if [[ -f "$(dirname "$common")/.env" ]]; then
+    printf '%s\n' "$(dirname "$common")/.env"
+  fi
+}
+# First among the arguments, so an explicit --env-file later wins.
+ENV_FILE_ARGS=()
+ENV_FILE="$(env_file)"
+if [[ -n "$ENV_FILE" ]]; then
+  ENV_FILE_ARGS+=("--env-file=$ENV_FILE")
+fi
+
 # `label` is a subcommand, not a review: none of the review-only flags added
 # below apply to it.
 if [[ "${1:-}" == "label" ]]; then
+  shift
   cd "$SCRIPT_DIR"
-  exec go run ./cmd/slop-review "$@"
+  exec go run ./cmd/slop-review label ${ENV_FILE_ARGS+"${ENV_FILE_ARGS[@]}"} "$@"
 fi
 
 # absolute_path makes a path relative to the caller's directory absolute.
@@ -268,5 +336,6 @@ exec go run ./cmd/slop-review \
   --persona-dir="$SCRIPT_DIR/personas" \
   --source-dir="$SCRIPT_DIR" \
   --repo-root="$INVOKED_FROM" \
+  ${ENV_FILE_ARGS+"${ENV_FILE_ARGS[@]}"} \
   ${TOOL_VERSION_ARGS+"${TOOL_VERSION_ARGS[@]}"} \
   ${args+"${args[@]}"}

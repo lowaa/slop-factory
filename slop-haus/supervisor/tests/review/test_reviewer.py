@@ -145,8 +145,9 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual(("request_changes", 1, True), (result.run.verdict, result.run.findings, result.run.reported))
         self.assertEqual([PERSONA], [p.name for p in self.record.iterdir()], "the one persona, and no other, ran")
         self.assertEqual(
-            [f"--persona={PERSONA} --intent {self.state}"], [line.split("/agent-1/")[0] for line in self.recorded("argv").splitlines()],
-            "exactly one process",
+            [f"--env-file= --persona={PERSONA} --intent {self.state}"],
+            [line.split("/agent-1/")[0] for line in self.recorded("argv").splitlines()],
+            "exactly one process, never reading review.sh's own checkout's .env",
         )
         self.assertIn(f"--from-commit-hash={self.base}", self.recorded("argv"))
         self.assertEqual(BRANCH + "\n", self.recorded("branch"), "slop-review files the run under the branch's name")

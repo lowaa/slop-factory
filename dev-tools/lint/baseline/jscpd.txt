@@ -30,7 +30,6 @@ slop-haus/server/internal/codehost/github/changes.go clone slop-haus/server/inte
 slop-haus/server/internal/conductor/store.go clone slop-haus/server/internal/conductor/store.go
 slop-haus/server/internal/conductor/store_events.go clone slop-haus/server/internal/conductor/store_events.go
 slop-haus/server/internal/conductor/store_events.go clone slop-haus/server/internal/conductor/store_events.go
-slop-haus/server/internal/config/config.go clone slop-review/internal/config/config.go
 slop-haus/server/internal/db/db.go clone slop-haus/server/internal/db/db.go
 slop-haus/server/internal/evalset/service.go clone slop-haus/server/internal/ticket/replay_batch.go
 slop-haus/server/internal/fleetinstructions/fleetinstructions.go clone slop-haus/server/internal/variant/variant.go
