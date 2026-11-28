@@ -99,7 +99,12 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 		// Turned away by the drain's fence (adopt stopped the conversation):
 		// a start cut short by the stop, so released and cleaned up without
 		// parking the ticket, which a live record left behind would block.
-		m.failStart(ctx, id, t, err)
+		// One whose harness wouldn't stop keeps its record and worktrees:
+		// cleaning up under it would delete what it is working in. The next
+		// start releases the record (it has no conversation to resume).
+		if !errors.Is(err, errStillRunning) {
+			m.failStart(ctx, id, t, err)
+		}
 		return err
 	}
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
@@ -280,6 +285,10 @@ type adoption struct {
 // look at the runners: nothing would stop it, so it isn't adopted.
 var errFenced = errors.New("agents: the drain has finished, so the conversation was stopped")
 
+// errStillRunning is a fenced conversation that wouldn't stop: its harness
+// may still be working in the agent's worktrees.
+var errStillRunning = errors.New("agents: a fenced conversation didn't stop")
+
 // adopt takes a conversation on as id's runner, or, once the drain has
 // taken its final look at the runners (fenced), stops it and refuses
 // (errFenced): a start that outlived the drain's grace mustn't leave a
@@ -296,7 +305,10 @@ func (m *Manager) adopt(ctx context.Context, a *adoption) (*runner, error) {
 	m.mu.Lock()
 	if m.fenced {
 		m.mu.Unlock()
-		stopLate(conv)
+		if err := stopLate(conv); err != nil {
+			m.opts.Logger.Error("agents: a start outlived the drain, and its conversation wouldn't stop", "agent", id, "err", err)
+			return nil, fmt.Errorf("%w: %w: %w", errFenced, errStillRunning, err)
+		}
 		m.opts.Logger.Warn("agents: a start outlived the drain; its conversation was stopped", "agent", id)
 		return nil, errFenced
 	}
@@ -311,16 +323,28 @@ func (m *Manager) adopt(ctx context.Context, a *adoption) (*runner, error) {
 }
 
 // stopLate forces a conversation no runner will own, within
-// ForceStopGrace. Its events are drained meanwhile: a driver's exit waits
-// for them to be read.
-func stopLate(conv harness.Conversation) {
+// ForceStopGrace, and reports whether it is gone: its Stop succeeded and
+// its events have ended. Its events are drained meanwhile: a driver's exit
+// waits for them to be read. A forced Stop can fail with the session still
+// there (a kill that timed out), so only gone is safe to clean up after.
+func stopLate(conv harness.Conversation) error {
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		for range conv.Events() {
 		}
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), ForceStopGrace)
 	defer cancel()
-	_ = conv.Stop(ctx, true)
+	if err := conv.Stop(ctx, true); err != nil {
+		return err
+	}
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("its events didn't end: %w", ctx.Err())
+	}
 }
 
 // started is a harness session the Manager started, new or resumed.

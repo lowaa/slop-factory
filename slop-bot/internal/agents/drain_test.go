@@ -255,3 +255,50 @@ func TestASpawnTurnedAwayByTheFenceLeavesNoLiveAgent(t *testing.T) {
 	assert.Equal(t, []ident.TicketID{tk.ID}, cleaned, "its worktrees were cleaned up")
 	assert.NotEqual(t, tickets.StatusMisconfigured, f.ticket(tk.ID).Status, "not a ticket that can't run")
 }
+
+// A late start the fence turns away whose conversation won't stop (the
+// driver's kill failed, the harness still there) keeps its worktrees: they
+// aren't cleaned up under a harness still working in them, and its record
+// is left for the next start. Exited waits while the start is still stopping
+// its conversation.
+func TestAFencedStartWhoseHarnessWontStopKeepsItsWorktrees(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	entered, release := make(chan struct{}), make(chan struct{})
+	killing, failKill := make(chan struct{}), make(chan struct{})
+	f.hooks.set(func(h *harnessHooks) {
+		h.ignoresCancel = true
+		h.start = func(context.Context, *harness.Workspace, *harness.ConversationRef) error {
+			close(entered)
+			<-release
+			return nil
+		}
+		h.forceFails = func() error {
+			close(killing)
+			<-failKill
+			return errors.New("the kill timed out")
+		}
+	})
+	tk := f.file("t", nil)
+	<-entered
+	require.ErrorContains(t, f.stopPastTheGrace(), "starts still in flight")
+	close(release)
+	s := f.session()
+	<-killing
+	select {
+	case <-f.mgr.Exited():
+		require.FailNow(t, "exited while the late start was still stopping its conversation")
+	default:
+	}
+	close(failKill)
+	f.mgr.WaitStarts()
+
+	f.wts.mu.Lock()
+	cleaned := append([]ident.TicketID(nil), f.wts.cleanups...)
+	f.wts.mu.Unlock()
+	assert.Empty(t, cleaned, "no cleanup under a harness still running")
+	_, err := s.Do(f.ctx(), fake.Command{Cmd: fake.CmdText, Text: "still here"})
+	require.NoError(t, err, "the harness is still there")
+	_ = f.agentFor(tk.ID) // its record is left live, for the next start
+	<-f.mgr.Exited()
+}

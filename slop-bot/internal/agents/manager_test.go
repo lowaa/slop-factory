@@ -86,6 +86,18 @@ type harnessHooks struct {
 	// ignoresCancel makes a start carry on past its context's end, as a
 	// harness's handshake that doesn't watch it would.
 	ignoresCancel bool
+	// forceFails, when set, runs in place of a forced Stop and is what it
+	// returns: a driver whose kill timed out, the session still there.
+	forceFails func() error
+}
+
+func (h *harnessHooks) forceFailing() func() error {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.forceFails
 }
 
 func (h *harnessHooks) ignoringCancel() bool {
@@ -207,6 +219,9 @@ func (c *hookedConversation) Undelivered() []*harness.Message {
 
 func (c *hookedConversation) Stop(ctx context.Context, force bool) error {
 	c.hooks.onStop(c.agent)
+	if fails := c.hooks.forceFailing(); force && fails != nil {
+		return fails()
+	}
 	if c.hooks.isAttached() && !force {
 		return harness.ErrAttached
 	}
