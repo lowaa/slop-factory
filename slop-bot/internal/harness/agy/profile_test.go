@@ -321,7 +321,7 @@ func TestTheHookBridgeAnswersWhenSlopBotIsAway(t *testing.T) {
 	const session = "agy-a'1"
 	_, events := installed(t, hub.Command(session))
 	assert.Len(t, events, 5)
-	env := append(os.Environ(), "SLOP_BOT_FAKE_REEXEC=1")
+	env := append(os.Environ(), "SLOP_BOT_FAKE_REEXEC=1", "GORACE=atexit_sleep_ms=0")
 
 	got := make(chan string, 1)
 	unroute, err := hub.Route(session, func(_ context.Context, event string, payload []byte) ([]byte, error) {
@@ -356,7 +356,7 @@ func TestANonPermissiveWorkspaceAlwaysAsks(t *testing.T) {
 	ws := workspace(t)
 	ws.Permissive = false
 	_, events := installedIn(t, ws, hub.Command(session))
-	env := append(os.Environ(), "SLOP_BOT_FAKE_REEXEC=1")
+	env := append(os.Environ(), "SLOP_BOT_FAKE_REEXEC=1", "GORACE=atexit_sleep_ms=0")
 	pre := commandFor(t, events, HookPreToolUse)
 
 	heard := make(chan string, 1)

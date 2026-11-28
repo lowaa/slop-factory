@@ -101,7 +101,9 @@ func fakeHarness(t *testing.T) *Harness {
 	return &Harness{
 		Binary: self, AgentDir: "/agent-dir",
 		Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{},
-		Environ: func() []string { return []string{fakePiEnv + "=1", "OPENAI_API_KEY=sk-test"} },
+		Environ: func() []string {
+			return []string{fakePiEnv + "=1", "OPENAI_API_KEY=sk-test", "GORACE=atexit_sleep_ms=0"}
+		},
 	}
 }
 
