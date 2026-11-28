@@ -193,7 +193,7 @@ func (m *Manager) repoPath(ctx context.Context, name string) (string, error) {
 }
 
 func (m *Manager) path(ticket ident.TicketID, repo string) string {
-	return filepath.Join(m.workspace, dirName(ticket, repo))
+	return filepath.Join(m.workspace, DirName(ticket, repo))
 }
 
 // probeTimeout bounds the git calls that find out what a failed operation

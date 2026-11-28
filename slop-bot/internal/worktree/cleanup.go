@@ -136,7 +136,8 @@ func (m *Manager) cleanupOne(ctx context.Context, ticket ident.TicketID, wt *Wor
 }
 
 // Check reports what Cleanup would keep wt for, removing nothing: none means
-// Cleanup would remove it. As Cleanup does, it first saves a deleted
+// nothing in it is at risk. Cleanup can still fail on it where git refuses,
+// as for initialised submodules. As Cleanup does, it first saves a deleted
 // worktree's detached HEAD to a ticket branch, so the two agree on commits
 // only that HEAD held.
 func (m *Manager) Check(ctx context.Context, ticket ident.TicketID, wt *Worktree) ([]Reason, error) {

@@ -177,8 +177,8 @@ would lose work. These commands find and remove those.
 | Command | Meaning |
 | --- | --- |
 | `worktrees` | Every recorded worktree: its ticket, repo, path, branch, agent, and status. `in use` is a live agent's; `kept` is an ended agent's that holds work, listed with why (`uncommitted`, `untracked`, `unpushed`, `in_progress`, `locked`, `nested`); `released` was handed to you by `attach --no-resume`; `removable` holds nothing a clean would lose; `unchecked` couldn't be checked, with the error. `--json` prints JSON. |
-| `worktrees clean <ticket>` | Remove the ticket's recorded worktrees and its local `slop-bot/t<ticket>/` branches, keeping any that hold work, as at the ticket's end. Refused while the ticket has a live agent or one is starting. |
-| `worktrees clean <ticket> --force` | The same, but discarding the worktrees and branches whatever they hold, a lock or a broken `.git` link included. It lists what it discards and asks you to type `discard` first. A worktree with another worktree inside it is still refused: remove that one first. |
+| `worktrees clean <ticket>` | Remove the ticket's worktrees and its local `slop-bot/t<ticket>/` branches, keeping any that hold work, as at the ticket's end, and any released to you by `attach --no-resume`. Besides the recorded ones, it takes any worktree of the ticket's repos on disk that nothing records, as a first start that failed leaves. Refused while the ticket has a live agent or one is starting. git can't remove a worktree with initialised submodules, so one listed `removable` can still fail here: `--force` removes it. |
+| `worktrees clean <ticket> --force` | The same, but discarding the worktrees and branches whatever they hold, a lock or a deleted `.git` link included. It lists what it discards, warning where a worktree couldn't be checked, and asks you to type `discard` first. Still refused, to be removed by hand: a worktree with another worktree inside it (remove that one first), one whose `.git` file points nowhere (it isn't plainly slop-bot's), and one whose repo is no longer in the config. |
 
 ## Agent commands
 

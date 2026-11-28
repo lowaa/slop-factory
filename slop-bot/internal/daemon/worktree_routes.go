@@ -29,7 +29,7 @@ func worktreeFail(w http.ResponseWriter, err error) {
 }
 
 func (wr *worktreeRoutes) list(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	if !requireUser(w, r, "worktrees") {
 		return
 	}
 	entries, err := wr.d.agents.ListWorktrees(r.Context())
@@ -53,7 +53,7 @@ func (wr *worktreeRoutes) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (wr *worktreeRoutes) clean(w http.ResponseWriter, r *http.Request) {
-	if !requireUser(w, r) {
+	if !requireUser(w, r, "worktrees") {
 		return
 	}
 	var in api.CleanWorktrees

@@ -3,6 +3,8 @@ package agents_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,8 +14,52 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
+	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
+
+// A first start that failed before its agent was recorded tells the user to
+// clean what it couldn't remove: the ticket's repos find it.
+func TestACleanFindsAWorktreeNothingRecords(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	tk := f.file("t", func(nt *tickets.NewTicket) { nt.Assignee = "" })
+	path := filepath.Join(f.cfg.WorkspaceDir, "t"+string(tk.ID)+"-app")
+	require.NoError(t, os.MkdirAll(path, 0o700))
+
+	res, err := f.mgr.CleanWorktrees(f.ctx(), tk.ID, false)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.True(t, res[0].Removed)
+	assert.Equal(t, []string{path}, f.wts.removed)
+}
+
+// A worktree released to a person is theirs: only --force touches it.
+func TestAPlainCleanLeavesAReleasedWorktreeAlone(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	ctx := f.ctx()
+	f.recordAgent("t9-mine", "9", true)
+	_, err := f.state.Agents.SetState(ctx, &state.Transition{Agent: "t9-mine", To: state.StateReleased})
+	require.NoError(t, err)
+
+	list, err := f.mgr.ListWorktrees(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, agents.WorktreeReleased, list[0].Status)
+
+	res, err := f.mgr.CleanWorktrees(ctx, "9", false)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.False(t, res[0].Removed)
+	require.Len(t, res[0].Reasons, 1)
+	assert.Equal(t, agents.Released, res[0].Reasons[0].Kind)
+	assert.Empty(t, f.wts.removed)
+
+	res, err = f.mgr.CleanWorktrees(ctx, "9", true)
+	require.NoError(t, err)
+	assert.True(t, res[0].Removed)
+}
 
 // Check finds nothing at risk: what it finds is the real manager's to
 // decide, and tested there.

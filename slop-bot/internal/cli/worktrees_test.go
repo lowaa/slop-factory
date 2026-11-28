@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake"
 )
 
@@ -47,7 +48,7 @@ func TestKeptWorktreesAreListedAndCleanedThroughTheCLI(t *testing.T) {
 	// Nor an agent's to see.
 	r := e.agentRun(s, "worktrees")
 	assert.NotEqual(t, 0, r.Code)
-	assert.Contains(t, r.Stderr, "user")
+	assert.Contains(t, r.Stderr, "worktrees is the user's")
 
 	e.agent(s, "done", "--summary", "Done.")
 	e.do(s, fake.CmdTurnEnd)
@@ -76,4 +77,49 @@ func TestKeptWorktreesAreListedAndCleanedThroughTheCLI(t *testing.T) {
 	assert.Contains(t, e.h.ok(t, "worktrees"), "no worktrees recorded")
 	require.Equal(t, 1, e.h.run(t, "worktrees", "clean", tk.ID))
 	assert.Contains(t, e.h.err.String(), "no worktrees recorded")
+}
+
+// endedWithWork has a ticket's agent finish with an untracked file in its
+// worktree, which Cleanup keeps.
+func endedWithWork(t *testing.T) (e *e2e, ticket, wt string) {
+	t.Helper()
+	home := t.TempDir()
+	repo, ws := filepath.Join(home, "src", "app"), filepath.Join(home, "ws")
+	gitRepo(t, repo)
+	e = newE2EWithConfig(t, "user: ada\nharnesses: {claude-code: {}}\nworkspace_dir: "+ws+"\nrepos: [{name: app, path: "+repo+"}]\n")
+	s, tk := e.started("--repo", "app")
+	wt = filepath.Join(ws, "t"+tk.ID+"-app")
+	require.NoError(t, os.WriteFile(filepath.Join(wt, "notes.txt"), []byte("work\n"), 0o600))
+	e.agent(s, "done", "--summary", "Done.")
+	e.do(s, fake.CmdTurnEnd)
+	e.await("agent.finished", nil)
+	return e, tk.ID, wt
+}
+
+// A worktree that can't be checked (its .git link deleted) shows nothing at
+// risk, so the confirmation says plainly that what it holds is unknown.
+func TestAForcedCleanWarnsOfAWorktreeItCouldntCheck(t *testing.T) {
+	t.Parallel()
+	e, ticket, wt := endedWithWork(t)
+	require.NoError(t, os.Remove(filepath.Join(wt, ".git")))
+	listed := e.h.ok(t, "worktrees")
+	assert.Contains(t, listed, "ticket "+ticket+", app: unchecked")
+	assert.Contains(t, listed, "couldn't check it")
+
+	e.h.deps.Stdin = strings.NewReader("discard\n")
+	out := e.h.ok(t, "worktrees", "clean", ticket, "--force")
+	assert.Contains(t, out, "whatever it holds is unknown")
+	assert.Contains(t, out, "removed "+wt)
+	assert.NoDirExists(t, wt)
+}
+
+// --force refuses a worktree holding another, so the advice says to deal
+// with that one first.
+func TestDiscardAdviceOrdersANestedWorktreeFirst(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "`slop-bot worktrees clean 1 --force` discards it",
+		discardAdvice("1", []api.WorktreeReason{{Kind: "untracked", Detail: "1 untracked file"}}))
+	assert.Equal(t, "deal with the worktree inside it first (holds the worktree at /ws/t1-app/sub); "+
+		"then `slop-bot worktrees clean 1 --force` discards it",
+		discardAdvice("1", []api.WorktreeReason{{Kind: "nested", Detail: "holds the worktree at /ws/t1-app/sub"}}))
 }

@@ -62,9 +62,21 @@ func printWorktree(out *errWriter, w *api.Worktree) {
 	case api.WorktreeRemovable:
 		out.printf("  remove it: slop-bot worktrees clean %s\n", w.Ticket)
 	case api.WorktreeKept, api.WorktreeReleased, api.WorktreeUnchecked:
-		out.printf("  once you've looked, discard it: slop-bot worktrees clean %s --force\n", w.Ticket)
+		out.printf("  once you've looked, %s\n", discardAdvice(w.Ticket, w.Reasons))
 	}
 	out.printf("\n")
+}
+
+// discardAdvice is how to discard a kept worktree. --force refuses one
+// holding another worktree, whose files it would delete with it.
+func discardAdvice(ticket string, reasons []api.WorktreeReason) string {
+	force := fmt.Sprintf("`slop-bot worktrees clean %s --force` discards it", ticket)
+	for _, r := range reasons {
+		if r.Kind == "nested" {
+			return "deal with the worktree inside it first (" + r.Detail + "); then " + force
+		}
+	}
+	return force
 }
 
 func (a *app) worktreesCleanCmd() *cobra.Command {
@@ -74,8 +86,9 @@ func (a *app) worktreesCleanCmd() *cobra.Command {
 		Short: "Remove a ticket's worktrees that hold no work; --force discards them whatever they hold",
 		Long: "Remove the ticket's recorded worktrees and its local slop-bot/t<ticket>/ branches, keeping any that " +
 			"would lose work, as at the ticket's end. With --force, after you confirm, they go whatever they " +
-			"hold: uncommitted files, unpushed commits, a lock. A worktree holding another worktree is still " +
-			"refused, and so is a ticket whose agent is live.",
+			"hold: uncommitted files, unpushed commits, a lock. Without --force, a worktree released to you by " +
+			"attach --no-resume is left alone. A worktree holding another worktree is still refused, and so is " +
+			"a ticket whose agent is live.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ticket := args[0]
@@ -96,6 +109,11 @@ func (a *app) worktreesCleanCmd() *cobra.Command {
 				case r.Error != "":
 					failed++
 					out.printf("couldn't clean up %s: %s\n", r.Path, r.Error)
+					if !force {
+						// git can't remove some worktrees that hold
+						// nothing at risk (initialised submodules).
+						out.printf("  once you've looked, `slop-bot worktrees clean %s --force` discards it\n", ticket)
+					}
 				case r.Removed:
 					out.printf("removed %s\n", r.Path)
 				default:
@@ -103,8 +121,8 @@ func (a *app) worktreesCleanCmd() *cobra.Command {
 					for _, reason := range r.Reasons {
 						why = append(why, reason.Kind+": "+reason.Detail)
 					}
-					out.printf("kept %s, which holds work: %s. Once you've looked, `slop-bot worktrees clean %s --force` discards it\n",
-						r.Path, strings.Join(why, "; "), ticket)
+					out.printf("kept %s, which holds work: %s. Once you've looked, %s\n",
+						r.Path, strings.Join(why, "; "), discardAdvice(ticket, r.Reasons))
 				}
 			}
 			if out.err != nil {
@@ -136,16 +154,19 @@ func (a *app) confirmDiscard(cmd *cobra.Command, out *errWriter, ticket string) 
 			mine = append(mine, &wts[i])
 		}
 	}
-	if len(mine) == 0 {
-		return fmt.Errorf("no worktrees are recorded for ticket %s", ticket)
-	}
 	out.printf("--force discards ticket %s's worktrees, and its slop-bot/t%s/ branches, whatever they hold:\n", ticket, ticket)
 	for _, w := range mine {
 		out.printf("  %s\n", w.Path)
 		for _, r := range w.Reasons {
 			out.printf("    %s: %s\n", r.Kind, r.Detail)
 		}
+		if w.Error != "" {
+			out.printf("    couldn't check it (%s), so whatever it holds is unknown: its files and any unpushed commits go too\n", w.Error)
+		}
 	}
+	// A start that failed before its agent was recorded leaves a worktree
+	// only the ticket's repos name; the daemon finds those.
+	out.printf("  and any worktree of the ticket's repos that nothing records\n")
 	out.printf("type 'discard' to discard them: ")
 	if out.err != nil {
 		return out.err

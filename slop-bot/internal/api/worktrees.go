@@ -17,8 +17,8 @@ const (
 	// WorktreeReleased was handed to a person (`attach --no-resume`), and is
 	// left alone for them.
 	WorktreeReleased = "released"
-	// WorktreeRemovable is an ended agent's that no longer holds work: a
-	// clean removes it.
+	// WorktreeRemovable is an ended agent's that holds nothing a clean would
+	// lose.
 	WorktreeRemovable = "removable"
 	// WorktreeUnchecked couldn't be checked; Error says why.
 	WorktreeUnchecked = "unchecked"

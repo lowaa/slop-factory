@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
+	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
@@ -29,6 +33,10 @@ var (
 	// ErrNoWorktrees is a clean of a ticket with none recorded.
 	ErrNoWorktrees = errors.New("agents: no worktrees recorded")
 )
+
+// Released is why a plain clean keeps a worktree released to a person
+// (`attach --no-resume`): it is theirs, and their TUI may be working in it.
+const Released worktree.ReasonKind = "released"
 
 // WorktreeEntry is one recorded worktree and where it stands.
 type WorktreeEntry struct {
@@ -82,18 +90,25 @@ func (m *Manager) check(ctx context.Context, e *WorktreeEntry, wt *worktree.Work
 	}
 }
 
-// CleanWorktrees cleans up ticket's recorded worktrees on the user's say-so,
-// as Cleanup does at the ticket's end, or with force, ForceCleanup: whatever
-// they hold. It holds the ticket's start place, so no agent starts into a
-// worktree being removed, and refuses while the ticket's agent is live. It
-// runs under that start's context, not the caller's: a CLI that hangs up
-// mustn't leave a worktree removed but still recorded.
+// CleanWorktrees cleans up ticket's worktrees on the user's say-so, as
+// Cleanup does at the ticket's end, or with force, ForceCleanup: whatever
+// they hold. A plain clean leaves a worktree released to a person alone.
+// Besides what state.db records, it takes any worktree of the ticket's repos
+// on disk: a first start that failed leaves one nothing records.
+//
+// It holds the ticket's start place, so no agent starts into a worktree
+// being removed, and refuses while the ticket's agent is live. That counts
+// as a start against the pools for the few seconds git takes; a clean is
+// rare enough not to need a place of its own. The removal and forgetting
+// run detached from every context (gitx bounds each command): cut short,
+// they would leave a worktree removed but still recorded.
 func (m *Manager) CleanWorktrees(_ context.Context, ticket ident.TicketID, force bool) ([]*worktree.CleanupResult, error) {
-	ctx, done, err := m.claimStart(ticket, state.PoolNormal)
+	claimed, done, err := m.claimStart(ticket, state.PoolNormal)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrWorktreesInUse, err)
 	}
 	defer done()
+	ctx := context.WithoutCancel(claimed)
 	switch a, err := m.opts.State.Agents.LiveForTicket(ctx, ticket); {
 	case err == nil:
 		return nil, fmt.Errorf("%w: ticket %s's agent %s is live; its worktrees are cleaned up when the ticket ends",
@@ -105,38 +120,88 @@ func (m *Manager) CleanWorktrees(_ context.Context, ticket ident.TicketID, force
 	if err != nil {
 		return nil, err
 	}
+	if held, err = m.withUnrecorded(ctx, ticket, held); err != nil {
+		return nil, err
+	}
 	if len(held) == 0 {
 		return nil, fmt.Errorf("%w for ticket %s", ErrNoWorktrees, ticket)
 	}
-	wts := make([]*worktree.Worktree, 0, len(held))
+	results := make([]*worktree.CleanupResult, 0, len(held))
 	for _, h := range held {
-		wts = append(wts, h.wt)
-	}
-	var results []*worktree.CleanupResult
-	if force {
-		for _, wt := range wts {
-			err := m.opts.Worktrees.ForceCleanup(ctx, ticket, wt)
-			results = append(results, &worktree.CleanupResult{Worktree: wt, Removed: err == nil, Err: err})
+		res := m.cleanOne(ctx, ticket, h, force)
+		if res.Removed {
+			m.forgetWorktree(ctx, h, res.Worktree.Repo)
 		}
-	} else {
-		results = m.opts.Worktrees.Cleanup(ctx, ticket, wts)
-	}
-	for i, res := range results {
-		if !res.Removed {
-			continue
-		}
-		for _, id := range held[i].holders {
-			if err := m.opts.State.Agents.RemoveWorktree(ctx, id, res.Worktree.Repo); err != nil {
-				m.opts.Logger.Warn("agents: forgetting a cleaned worktree", "agent", id, "repo", res.Worktree.Repo, "err", err)
-			}
-		}
+		results = append(results, res)
 	}
 	return results, nil
 }
 
+func (m *Manager) cleanOne(ctx context.Context, ticket ident.TicketID, h *heldWorktree, force bool) *worktree.CleanupResult {
+	switch released, err := m.releasedTo(ctx, h); {
+	case force:
+		err := m.opts.Worktrees.ForceCleanup(ctx, ticket, h.wt)
+		return &worktree.CleanupResult{Worktree: h.wt, Removed: err == nil, Err: err}
+	case err != nil:
+		return &worktree.CleanupResult{Worktree: h.wt, Err: err}
+	case released:
+		return &worktree.CleanupResult{Worktree: h.wt, Reasons: []worktree.Reason{{Kind: Released,
+			Detail: "attach --no-resume released it to you, so a plain clean leaves it alone"}}}
+	}
+	return m.opts.Worktrees.Cleanup(ctx, ticket, []*worktree.Worktree{h.wt})[0]
+}
+
+// releasedTo reports whether h was released to a person.
+func (m *Manager) releasedTo(ctx context.Context, h *heldWorktree) (bool, error) {
+	if h.agent == nil || h.agent.State != state.StateReleased {
+		return false, nil
+	}
+	return m.opts.State.Agents.ReleasedForTicket(ctx, h.agent.Ticket)
+}
+
+// forgetWorktree drops a removed worktree from every agent recording it.
+func (m *Manager) forgetWorktree(ctx context.Context, h *heldWorktree, repo string) {
+	for _, id := range h.holders {
+		if err := m.opts.State.Agents.RemoveWorktree(ctx, id, repo); err != nil {
+			m.opts.Logger.Warn("agents: forgetting a cleaned worktree", "agent", id, "repo", repo, "err", err)
+		}
+	}
+}
+
+// withUnrecorded adds to held the worktrees of ticket's repos that are on
+// disk but not recorded: a start that failed before its agent was recorded
+// tells the user to clean what it couldn't remove.
+func (m *Manager) withUnrecorded(ctx context.Context, ticket ident.TicketID, held []*heldWorktree) ([]*heldWorktree, error) {
+	t, err := m.opts.Tickets.Get(ctx, ticket)
+	if err != nil {
+		if errors.Is(err, tickets.ErrNotFound) {
+			return held, nil
+		}
+		return nil, err
+	}
+	have := map[string]bool{}
+	for _, h := range held {
+		have[h.wt.Repo] = true
+	}
+	for _, repo := range t.Repos {
+		r, ok := m.opts.Config.Repo(repo)
+		if !ok || have[repo] {
+			continue
+		}
+		path := filepath.Join(m.opts.Config.WorkspaceDir, worktree.DirName(ticket, repo))
+		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		held = append(held, &heldWorktree{wt: &worktree.Worktree{Ticket: ticket, Repo: repo, Path: path, RepoPath: r.Path}})
+	}
+	return held, nil
+}
+
 // heldWorktree is one worktree path and every agent recording it.
 type heldWorktree struct {
-	// agent is the newest of them.
+	// agent is the newest of them; nil for a worktree nothing records.
 	agent    *state.Agent
 	recorded state.Worktree
 	wt       *worktree.Worktree
@@ -174,10 +239,14 @@ func (m *Manager) recordedWorktrees(ctx context.Context, ticket ident.TicketID) 
 }
 
 // brokenHint is the way out of a broken worktree Create refused, which no
-// `ticket set` can fix: the earlier agent that kept it recorded it.
+// `ticket set` can fix. A clean finds it from the ticket's repos whether or
+// not an agent recorded it.
 func brokenHint(ticket ident.TicketID, err error) string {
 	if !errors.Is(err, worktree.ErrBroken) {
 		return ""
 	}
-	return fmt.Sprintf(" (once you've looked, `slop-bot worktrees clean %s --force` discards it)", ticket)
+	// ForceCleanup won't delete a checkout whose .git file points elsewhere,
+	// unseen: it may not be slop-bot's.
+	return fmt.Sprintf(" (once you've looked, `slop-bot worktrees clean %s --force` discards it, "+
+		"unless its .git file points nowhere: then remove it by hand)", ticket)
 }
