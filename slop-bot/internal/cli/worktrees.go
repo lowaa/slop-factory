@@ -103,28 +103,7 @@ func (a *app) worktreesCleanCmd() *cobra.Command {
 			if err := a.do(cmd, http.MethodPost, path, &api.CleanWorktrees{Force: force}, &results); err != nil {
 				return err
 			}
-			var failed int
-			for _, r := range results {
-				switch {
-				case r.Error != "":
-					failed++
-					out.printf("couldn't clean up %s: %s\n", r.Path, r.Error)
-					if !force {
-						// git can't remove some worktrees that hold
-						// nothing at risk (initialised submodules).
-						out.printf("  once you've looked, `slop-bot worktrees clean %s --force` discards it\n", ticket)
-					}
-				case r.Removed:
-					out.printf("removed %s\n", r.Path)
-				default:
-					why := make([]string, 0, len(r.Reasons))
-					for _, reason := range r.Reasons {
-						why = append(why, reason.Kind+": "+reason.Detail)
-					}
-					out.printf("kept %s, which holds work: %s. Once you've looked, %s\n",
-						r.Path, strings.Join(why, "; "), discardAdvice(ticket, r.Reasons))
-				}
-			}
+			failed := printCleaned(out, ticket, force, results)
 			if out.err != nil {
 				return out.err
 			}
@@ -136,6 +115,34 @@ func (a *app) worktreesCleanCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&force, "force", false, "discard the worktrees and branches whatever they hold, once you confirm")
 	return c
+}
+
+// printCleaned says what a clean did with each worktree, and returns how
+// many it couldn't clean up.
+func printCleaned(out *errWriter, ticket string, force bool, results []api.CleanedWorktree) int {
+	var failed int
+	for _, r := range results {
+		switch {
+		case r.Error != "":
+			failed++
+			out.printf("couldn't clean up %s: %s\n", r.Path, r.Error)
+			if !force {
+				// git can't remove some worktrees that hold nothing at
+				// risk (initialised submodules).
+				out.printf("  once you've looked, `slop-bot worktrees clean %s --force` discards it\n", ticket)
+			}
+		case r.Removed:
+			out.printf("removed %s\n", r.Path)
+		default:
+			why := make([]string, 0, len(r.Reasons))
+			for _, reason := range r.Reasons {
+				why = append(why, reason.Kind+": "+reason.Detail)
+			}
+			out.printf("kept %s, which holds work: %s. Once you've looked, %s\n",
+				r.Path, strings.Join(why, "; "), discardAdvice(ticket, r.Reasons))
+		}
+	}
+	return failed
 }
 
 // errNotDiscarded is a forced clean the user didn't confirm.
