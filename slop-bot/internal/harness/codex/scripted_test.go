@@ -17,14 +17,15 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
 )
 
-// scriptedEnv is scriptedmodel's opt-in for tests that run real harness
-// CLIs against it: they need codex installed, and spend no tokens.
-const scriptedEnv = "SCRIPTED_MODEL_REAL_HARNESSES"
+// scriptedEnv is tier 2's opt-in (slop-bot/tier2.sh) for tests that run real
+// harness CLIs against the scripted model: they need codex installed, and
+// spend no tokens.
+const scriptedEnv = "SLOP_BOT_TIER2"
 
 // TestScriptedModelTurn is the seam tier 2 builds on: the harness, pointed
 // at the scripted model through ModelProvider, with a Codex home of its own
 // (so neither the user's login nor config is touched), runs a scripted turn
-// with a tool call. The conformance suite against it is task 7.4.
+// with a tool call. conformance/scripted runs the conformance suite on it.
 func TestScriptedModelTurn(t *testing.T) {
 	if os.Getenv(scriptedEnv) != "1" {
 		t.Skipf("set %s=1 to run codex against the scripted model", scriptedEnv)

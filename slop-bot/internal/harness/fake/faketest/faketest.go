@@ -4,6 +4,7 @@ package faketest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -212,6 +213,36 @@ func (p *Puppet) LongTool(ctx context.Context) (func(context.Context) error, err
 		_, err := s.Do(ctx, fake.Command{Cmd: fake.CmdTurnEnd})
 		return err
 	}, nil
+}
+
+// Accepted implements conformance.Puppet: it waits for the fake's report of
+// the mid-turn message, made while still in the turn, and keeps it for
+// Received. On fake/tui that report comes from a hook, so it runs one.
+func (p *Puppet) Accepted(ctx context.Context, text string) error {
+	s := p.Session()
+	if p.tui {
+		if _, err := s.Do(ctx, fake.Command{Cmd: fake.CmdStep}); err != nil {
+			return err
+		}
+	}
+	r, err := p.await(ctx, s, fake.RepUser)
+	if err != nil {
+		return err
+	}
+	if r.Text != text {
+		return fmt.Errorf("accepted %q, want %q", r.Text, text)
+	}
+	p.hold(r)
+	return nil
+}
+
+// Remembers implements conformance.Puppet: the fake keeps no history, so
+// being launched to resume the conversation is all of its memory.
+func (p *Puppet) Remembers(context.Context, string) error {
+	if !p.Session().Resumed {
+		return errors.New("the session was not resumed")
+	}
+	return nil
 }
 
 // Received implements conformance.Puppet. On fake/tui a mid-turn message

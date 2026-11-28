@@ -35,6 +35,7 @@ server, err := scriptedmodel.New(&scriptedmodel.Options{ // nil for defaults
 defer server.Close()                // also releases held requests
 server.URL()                        // http://127.0.0.1:<port>: point the harness here
 server.Load(scenario)               // validate, replace, reset the recording
+server.Append(turns...)             // extend the loaded scenario; the recording and turns played stay
 server.Reset()
 server.Release("gate")
 server.WaitHeld(ctx, "gate")       // a request waits there; ErrGateRetired if the scenario is replaced
@@ -116,12 +117,12 @@ Gemini, from Google's API reference and what agy 1.5.18 sends:
 
 ## Validated harnesses
 
-`real_harness_test.go` (opt-in: `SCRIPTED_MODEL_REAL_HARNESSES=1 go test -run TestRealHarnesses ./internal/scriptedmodel`)
+`real_harness_test.go` (opt-in: `SLOP_BOT_TIER2=1 go test -run TestRealHarnesses ./internal/scriptedmodel`, which `slop-bot/tier2.sh` runs)
 runs each CLI on this host for one scripted turn that runs `echo scripted-echo-7f3a` through the harness's shell
 tool, then a final text reply, and asserts: the run exits 0, no errors were recorded, the script was used up, the
 second request carries the echo's output as a tool result, and the harness printed the final text. Each harness
 runs in a scratch directory with a clean environment (`HOME`, `PATH`, `TERM=xterm`) plus what is listed. It is
-the seed of tier 2. Validated on 2026-11-28:
+the seed of tier 2, whose conformance suite runs in `internal/harness/conformance/scripted` (through slop-bot's adapters, not bare CLIs). Validated on 2026-11-28:
 
 | Harness | Version | Shell tool | Configuration |
 | --- | --- | --- | --- |
