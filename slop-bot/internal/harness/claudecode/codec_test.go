@@ -170,3 +170,39 @@ func TestEnvDisablesBackgroundTasksAndKeepsAPIKeysOut(t *testing.T) {
 	opted := h.env(&harness.Workspace{APIKeyOptIn: true})
 	assert.Contains(t, opted, "ANTHROPIC_API_KEY=placeholder")
 }
+
+func TestAssistantAndToolResultRecords(t *testing.T) {
+	t.Parallel()
+	evs := decodeAll(t, &codec{},
+		`{"type":"assistant","message":{"content":[{"type":"thinking"},{"type":"text","text":"a"},{"type":"tool_use","name":"Read"}]}}`,
+		`{"type":"user","message":{"content":[{"type":"text","text":"ignored"},{"type":"tool_result"}]}}`,
+	)
+	assert.Equal(t, []harness.EventKind{harness.TurnStarted, harness.Text, harness.ToolStarted, harness.ToolEnded}, kinds(evs))
+	assert.Equal(t, "Read", evs[2].Tool)
+}
+
+func TestARateLimitWithoutInfoReportsNothing(t *testing.T) {
+	t.Parallel()
+	evs := decodeAll(t, &codec{}, `{"type":"rate_limit_event"}`)
+	assert.Equal(t, []harness.EventKind{harness.TurnStarted}, kinds(evs))
+}
+
+func TestMalformedLinesAreErrors(t *testing.T) {
+	t.Parallel()
+	_, err := (&codec{}).Decode([]byte(`{not json`), nil)
+	assert.Error(t, err)
+}
+
+func TestWriteReportsEncodingFailures(t *testing.T) {
+	t.Parallel()
+	assert.Error(t, write(nil, make(chan int)))
+}
+
+func TestAResultResetsTheTurn(t *testing.T) {
+	t.Parallel()
+	c := &codec{}
+	decodeAll(t, c, `{"type":"system","subtype":"init"}`)
+	assert.True(t, c.inTurn)
+	decodeAll(t, c, `{"type":"result","subtype":"success"}`)
+	assert.False(t, c.inTurn)
+}
