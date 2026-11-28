@@ -179,6 +179,9 @@ func TestAttachHandsTheAgentToATUIAndBack(t *testing.T) {
 	assert.Contains(t, screen, "Quitting the TUI hands the agent back")
 	assert.Contains(t, screen, "fake-tui "+s.ID+" (resumed)")
 	assert.Contains(t, screen, "back to slop-bot: resumed")
+	// The daemon closes the stream as it hands back: that is the attach
+	// ending, not the daemon going away.
+	assert.NotContains(t, screen, "lost the daemon")
 }
 
 func TestASecondAttachIsRefusedAndDetachEndsTheFirst(t *testing.T) {
@@ -199,6 +202,7 @@ func TestASecondAttachIsRefusedAndDetachEndsTheFirst(t *testing.T) {
 	code, screen := term.done(e.ctx())
 	assert.Equal(t, 0, code, screen)
 	assert.Contains(t, screen, "detached from another terminal")
+	assert.NotContains(t, screen, "lost the daemon")
 	e.resumed(s.ID)
 }
 
@@ -331,4 +335,24 @@ func TestAnAttachWhoseCLIDidntComeBackIsHandedBackWhenItsLeaseExpires(t *testing
 	assert.Contains(t, string(ev.Payload), "lease expired")
 	e.resumed(s.ID)
 	_ = agent
+}
+
+// The daemon closes the stream right after telling the CLI the attach is
+// over: the CLI ends the TUI rather than reconnecting to a daemon that never
+// went away.
+func TestAnAttachEndedByTheDaemonEndsTheTUIQuietly(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC))
+	e := newE2EOn(t, "user: ada\nagents: {attach_lease: 30s}\n", clk)
+	s, agent := e.working("t")
+	term := e.attachTerminal("--now", agent)
+	e.tui(s.ID)
+	e.h.ok(t, "ticket", "cancel", "1")
+	e.await("agent.finished", nil)
+	// The next lease renewal finds the agent ended.
+	clk.Advance(11 * time.Second)
+	code, screen := term.done(e.ctx())
+	assert.Equal(t, 0, code, screen)
+	assert.Contains(t, screen, "handed back without this terminal")
+	assert.NotContains(t, screen, "lost the daemon")
 }

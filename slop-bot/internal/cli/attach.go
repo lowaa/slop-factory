@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -106,6 +107,11 @@ type attachRun struct {
 	agent          string
 	// pid is the TUI's, once it runs.
 	pid int
+	// ending is set once this attach is over as far as the CLI knows: it is
+	// handing back, or the daemon said the attach ended. The daemon closes
+	// the stream then, and that is the attach ending, not a restart to
+	// reconnect through; a hand-back retries through a restart itself.
+	ending atomic.Bool
 }
 
 // launched tells the daemon the TUI's pid, so that if this CLI dies the
@@ -174,6 +180,7 @@ func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequ
 	frames := make(chan api.AttachFrame)
 	go at.follow(streamCtx, body, frames)
 	if at.supervise(tui, sigs, frames) {
+		at.ending.Store(true)
 		at.handBack(ctx)
 	}
 	return nil
@@ -292,6 +299,9 @@ func (at *attachRun) follow(ctx context.Context, body *scannedBody, out chan<- a
 			if json.Unmarshal(sb.sc.Bytes(), &f) != nil {
 				continue
 			}
+			if f.Type == api.FrameEnded {
+				at.ending.Store(true)
+			}
 			select {
 			case out <- f:
 			case <-ctx.Done():
@@ -300,7 +310,7 @@ func (at *attachRun) follow(ctx context.Context, body *scannedBody, out chan<- a
 			}
 		}
 		_ = body.Close()
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || at.ending.Load() {
 			return
 		}
 		at.say("\r\nslop-bot: lost the daemon; reconnecting (your TUI keeps running)...")
