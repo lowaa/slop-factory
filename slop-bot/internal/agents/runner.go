@@ -145,8 +145,21 @@ func (r *runner) state() state.AgentState {
 
 // setState moves the agent and records it. A no-op when it's already there.
 func (r *runner) setState(ctx context.Context, to state.AgentState, reason string) {
+	r.setStateIf(ctx, func(state.AgentState) bool { return true }, to, reason)
+}
+
+// setStateIf is setState while ok holds of the current state, checked under
+// the lock the move is made under. A move worked out from a slower read (the
+// ticket's status, for a turn's start) must not clobber one made meanwhile:
+// an attach landing then would be undone, and its hand-back find the agent
+// not attached.
+func (r *runner) setStateIf(ctx context.Context, ok func(state.AgentState) bool, to state.AgentState, reason string) {
 	r.mu.Lock()
 	from := r.st
+	if !ok(from) {
+		r.mu.Unlock()
+		return
+	}
 	r.st = to
 	if from != to {
 		r.since = r.m.opts.Clock.Now()
@@ -233,17 +246,9 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 	}
 	switch ev.Kind {
 	case harness.TurnStarted:
-		r.mu.Lock()
-		r.inTurn, r.personIn = true, false
-		r.mu.Unlock()
-		// A person's turn in a joined session leaves the agent attached.
-		if r.state() != state.StateAttached {
-			r.setState(ctx, r.workingState(ctx), "turn started")
-		}
+		r.turnStarted(ctx)
 	case harness.ToolStarted, harness.ToolEnded, harness.Text:
-		if r.state() == state.StateStalled {
-			r.setState(ctx, r.workingState(ctx), "active again")
-		}
+		r.activeAgain(ctx)
 	case harness.TurnEnded:
 		r.mu.Lock()
 		// Settling until turnEnded returns: what it does next (a delivery,
@@ -262,6 +267,26 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 
 // workingState is refining while the ticket is still being prepared, and
 // working once it's open.
+func (r *runner) turnStarted(ctx context.Context) {
+	r.mu.Lock()
+	r.inTurn, r.personIn = true, false
+	r.mu.Unlock()
+	// A person's turn in a joined session leaves the agent attached.
+	if r.state() != state.StateAttached {
+		r.setStateIf(ctx, notAttached, r.workingState(ctx), "turn started")
+	}
+}
+
+// activeAgain is a stalled agent's conversation showing life.
+func (r *runner) activeAgain(ctx context.Context) {
+	if r.state() == state.StateStalled {
+		r.setStateIf(ctx, isStalled, r.workingState(ctx), "active again")
+	}
+}
+
+func notAttached(s state.AgentState) bool { return s != state.StateAttached }
+func isStalled(s state.AgentState) bool   { return s == state.StateStalled }
+
 func (r *runner) workingState(ctx context.Context) state.AgentState {
 	t, err := r.m.opts.Tickets.Get(ctx, r.ticket)
 	if err == nil && (t.Status == tickets.StatusPreparing || t.Status == tickets.StatusDiscussion) {
