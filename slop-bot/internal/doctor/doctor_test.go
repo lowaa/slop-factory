@@ -2,6 +2,7 @@ package doctor_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"os"
@@ -268,6 +269,27 @@ func TestCodexModelFromTheAppServersList(t *testing.T) {
 	res = f.result(f.run(), "harness codex", "model")
 	assert.Equal(t, doctor.Fail, res.Level)
 	assert.Contains(t, res.Detail, "gpt-9 isn't in codex's model list (gpt-6.2-sol, gpt-6.2-astra)")
+}
+
+// The probe follows the handshake the harness's codec does: initialized,
+// and the model list, only after initialize's reply.
+func TestCodexModelListWaitsForTheInitializeReply(t *testing.T) {
+	t.Parallel()
+	f := codexFixture(t, "")
+	assert.Equal(t, doctor.Pass, f.result(f.run(), "harness codex", "model").Level)
+	var methods [][]string
+	for _, write := range f.cmds.Writes("codex app-server") {
+		var ms []string
+		for _, line := range write {
+			var m struct {
+				Method string `json:"method"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(line), &m))
+			ms = append(ms, m.Method)
+		}
+		methods = append(methods, ms)
+	}
+	assert.Equal(t, [][]string{{"initialize"}, {"initialized", "model/list"}}, methods)
 }
 
 func TestCodexAppServerThatNeverAnswersWarns(t *testing.T) {

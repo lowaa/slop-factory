@@ -196,16 +196,24 @@ func codexSignIn(ctx context.Context, h *harnessCheck) {
 	}
 }
 
-// codexModels asks the app-server for its model list: initialize, then
-// model/list. It is the list the harness's own sessions choose from, and it
-// costs no tokens.
+// codexModels asks the app-server for its model list: initialize, and once
+// it has answered, initialized and model/list, the handshake the harness's
+// codec follows. It is the list the harness's own sessions choose from,
+// and it costs no tokens.
 func codexModels(ctx context.Context, h *harnessCheck) (*modelList, error) {
-	input := `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"slop-bot-doctor","version":"0"}}}` + "\n" +
-		`{"method":"initialized"}` + "\n" +
-		`{"id":2,"method":"model/list","params":{}}` + "\n"
+	initialized := false
 	res, err := h.d.opts.Commands.Run(ctx, &Command{
-		Path: h.bin, Args: []string{"app-server"}, Input: input, Env: h.env(),
-		Done: func(out string) bool { _, done := rpcReply(out, 2); return done },
+		Path: h.bin, Args: []string{"app-server"}, Env: h.env(),
+		Input: `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"slop-bot-doctor","version":"0"}}}` + "\n",
+		Done:  func(out string) bool { _, done := rpcReply(out, 2); return done },
+		Then: func(out string) string {
+			// An error reply ends the probe through Done instead.
+			if _, ok := rpcReply(out, 1); !ok || initialized {
+				return ""
+			}
+			initialized = true
+			return `{"method":"initialized"}` + "\n" + `{"id":2,"method":"model/list","params":{}}` + "\n"
+		},
 	})
 	if err != nil {
 		return nil, err

@@ -52,6 +52,28 @@ func TestExecCommandsEndsAServerOnceItAnswers(t *testing.T) {
 	assert.Equal(t, 0, res.ExitCode, "killed after answering counts as answered")
 }
 
+// Then's reply is written only once the output it answers has arrived: the
+// shell reads its second line only after printing the first.
+func TestExecCommandsRepliesToTheOutputAsItArrives(t *testing.T) {
+	t.Parallel()
+	var replied bool
+	res, err := doctor.ExecCommands{Timeout: probeTimeout}.Run(context.Background(), &doctor.Command{
+		Path:  "/bin/sh",
+		Args:  []string{"-c", `read a; echo "one $a"; read b; echo "two $b"; exec sleep 3600`},
+		Input: "a\n",
+		Done:  func(out string) bool { return strings.Contains(out, "two") },
+		Then: func(out string) string {
+			if replied || !strings.Contains(out, "one a") {
+				return ""
+			}
+			replied = true
+			return "b\n"
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "one a\ntwo b\n", res.Stdout)
+}
+
 func TestExecCommandsTimesOutAHungProbe(t *testing.T) {
 	t.Parallel()
 	_, err := doctor.ExecCommands{Timeout: 10 * time.Millisecond}.Run(context.Background(), &doctor.Command{

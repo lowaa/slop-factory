@@ -32,6 +32,11 @@ type Command struct {
 	// EOF on stdin before it answers, so closing stdin after Input would
 	// lose the reply.
 	Done func(stdout string) bool
+	// Then, when set with Done, answers the output as it arrives: after
+	// each line, given stdout so far, it returns what to write next ("" for
+	// nothing). A handshake whose next message must wait for a reply
+	// (Codex's initialize) is written here, not batched into Input.
+	Then func(stdout string) string
 }
 
 // Commands finds and runs the probes. Tests substitute a fake, so no check
@@ -112,7 +117,7 @@ func (e ExecCommands) Run(ctx context.Context, c *Command) (*service.Result, err
 		return result(ctx, cmd, c, &outcome{err: werr, stdout: stdout.buf.String(), stderr: stderr.buf.String()})
 	}
 	answered := make(chan struct{})
-	stdout.drainLines(c.Done, answered)
+	stdout.drainLines(c.Done, &reply{then: c.Then, stdin: stdin}, answered)
 	// A write error means it already exited; the drain then ends at EOF.
 	_, _ = io.WriteString(stdin, c.Input)
 	var werr error
@@ -223,10 +228,27 @@ func (c *capture) drain() {
 	}()
 }
 
+// reply writes Then's answer to each line into the probe's stdin.
+type reply struct {
+	then  func(stdout string) string
+	stdin io.Writer
+}
+
+func (r *reply) to(stdout string) {
+	if r.then == nil {
+		return
+	}
+	if more := r.then(stdout); more != "" {
+		// A write error means it already exited; the drain then ends at EOF.
+		_, _ = io.WriteString(r.stdin, more)
+	}
+}
+
 // drainLines reads lines into buf until isAnswer reports buf holds the
 // answer, keeps that as the output and closes answered, then reads on to
-// the end, discarding the rest.
-func (c *capture) drainLines(isAnswer func(stdout string) bool, answered chan<- struct{}) {
+// the end, discarding the rest. Each line short of the answer is replied
+// to.
+func (c *capture) drainLines(isAnswer func(stdout string) bool, r *reply, answered chan<- struct{}) {
 	go func() {
 		defer close(c.done)
 		sc := bufio.NewScanner(c.r)
@@ -240,6 +262,7 @@ func (c *capture) drainLines(isAnswer func(stdout string) bool, answered chan<- 
 				close(answered)
 				break
 			}
+			r.to(c.buf.String())
 		}
 		_, _ = io.Copy(io.Discard, c.r)
 	}()
