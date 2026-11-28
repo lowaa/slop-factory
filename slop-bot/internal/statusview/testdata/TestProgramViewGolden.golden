@@ -1,0 +1,12 @@
+pool 3/4, urgent 0/1 | autonomy on, agent-filed 2/10 | plan: n/a
+ [1mTICKET[m  [1mTITLE                         [m  [1mSTATUS     [m  [1mAGENT            [m  [1mHARNESS    [m  [1mMODEL    [m  [1mPOOL  [m  [1mBLOCKERS[m  [1mNOTE                [m 
+ 1       Fix login                       preparing    waiting_user 2h0m  claude-code  -          urgent  -         -                    
+ 2       Add the CSV export for reports  in_progress  working 1m         claude-code  opus/high  normal  -         writing the exporter 
+ 3       Blocked thing                   open         idle 10s           codex        gpt        normal  1,2       -                    
+                                                                                                                                        
+                                                                                                                                        
+                                                                                                                                        
+                                                                                                                                        
+                                                                                                                                        
+                                                                                                                                        
+page 1/1  ←/→ page  q quit

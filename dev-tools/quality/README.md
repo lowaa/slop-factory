@@ -27,7 +27,7 @@ slop-bot/quality.sh --report           # the full reports, to quality-reports/sl
 | `--only=MEASURE[,MEASURE]` | of `coverage`, `complexity`, `testtime` (default all three) |
 | `--coverprofile=FILE` | reuse a cover profile rather than running the tests; repeatable, merged. Test time is then skipped |
 | `--coverdir=DIR` | merge a `GOCOVERDIR` (an e2e run's, from a `-cover` binary) into the coverage; repeatable |
-| `--mutation[=changed\|all]` | mutation testing: not implemented yet (plan task 10.1); exits 2 |
+| `--mutation[=changed\|all]` | not run here: mutation testing is `dev-tools/mutation/mutation.sh <project-dir>` (`dev-tools/mutation/README.md`); exits 2 |
 
 It exits 0 when every measure passes, 1 on a regression, and 2 on a usage
 error or a measure that couldn't be taken. A failing test suite fails it

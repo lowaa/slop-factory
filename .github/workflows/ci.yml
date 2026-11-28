@@ -145,6 +145,22 @@ jobs:
           QUALITY_REQUIRE_BASE: "1"
       - run: dev-tools/quality/quality.sh
 
+  # The mutation tool's own tests; the mutation runs themselves are in
+  # mutation.yml, never on a pull request.
+  dev-tools-mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+          shellspec: "true"
+      - run: dev-tools/mutation/test.sh
+      - run: dev-tools/mutation/quality.sh
+
   # The host-side suites again on an Apple-silicon Mac: with only Linux above,
   # a GNU-only flag or a /proc read passes here and breaks a Mac developer's
   # run (CONTRIBUTING.md, macOS). GitHub's macOS runners have no Docker, so

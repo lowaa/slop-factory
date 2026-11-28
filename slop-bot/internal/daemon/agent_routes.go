@@ -22,6 +22,7 @@ var agentErrors = append([]control.ErrorMapping{
 	{Err: agents.ErrUserOnly, Status: http.StatusForbidden},
 	{Err: agents.ErrNotYourTicket, Status: http.StatusForbidden},
 	{Err: agents.ErrHasAutoMerge, Status: http.StatusConflict},
+	{Err: agents.ErrTicketEnded, Status: http.StatusConflict},
 	{Err: agents.ErrNotInDiscusson, Status: http.StatusConflict},
 	{Err: agents.ErrCantFinish, Status: http.StatusConflict},
 }, ticketErrors...)
@@ -38,6 +39,7 @@ func (ar *agentRoutes) register(s *control.Server) {
 	s.HandleFunc("GET "+api.PathDiscussions, ar.discussions)
 	s.HandleFunc("POST "+api.PathResolve, ar.resolve)
 	s.HandleFunc("POST "+api.PathReadyToMerge, ar.readyToMerge)
+	s.HandleFunc("POST "+api.PathPreTool, ar.preTool)
 	s.HandleFunc("POST "+api.PathDone, ar.done)
 	s.HandleFunc("POST "+api.PathNote, ar.note)
 	s.HandleFunc("GET "+api.PathStatus, ar.status)
@@ -61,6 +63,14 @@ func (ar *agentRoutes) tell(w http.ResponseWriter, r *http.Request) {
 	if in.All && in.Interrupt {
 		fail(w, errors.Join(errBadRequest, errors.New("--interrupt can't be combined with --all: a broadcast never interrupts")))
 		return
+	}
+	if in.Merge || (by.IsUser() && !in.All && ar.d.agents.IsMergeGoAhead(r.Context(), in.To, in.Text)) {
+		text, err := ar.authoriseMerge(r, &in)
+		if err != nil {
+			agentFail(w, err)
+			return
+		}
+		in.Text = text
 	}
 	if in.All {
 		n, err := ar.d.agents.TellAll(r.Context(), by, in.Text)
@@ -256,13 +266,22 @@ func (ar *agentRoutes) status(w http.ResponseWriter, r *http.Request) {
 		agentFail(w, err)
 		return
 	}
+	for _, u := range ar.d.agents.PoolUsage() {
+		out.Pools = append(out.Pools, api.PoolUsage{Pool: string(u.Pool), Active: u.Active, Max: u.Max})
+	}
 	for _, a := range live {
-		title := ""
+		var title, ticketStatus string
+		var blockers []string
 		if t, err := ar.d.tickets.Get(r.Context(), a.Ticket); err == nil {
-			title = t.Title
+			title, ticketStatus = t.Title, string(t.Status)
+			for _, b := range t.BlockedBy {
+				if b.Status != tickets.StatusDone {
+					blockers = append(blockers, string(b.ID))
+				}
+			}
 		}
 		out.Agents = append(out.Agents, api.AgentStatus{
-			ID: string(a.ID), Ticket: string(a.Ticket), Title: title, State: string(a.State), Since: a.StateSince,
+			ID: string(a.ID), Ticket: string(a.Ticket), Title: title, TicketStatus: ticketStatus, Blockers: blockers, State: string(a.State), Since: a.StateSince,
 			Harness: a.Harness, Model: a.Model, Effort: a.Effort, Pool: string(a.Pool), Note: a.ProgressNote, Nudges: a.Nudges,
 		})
 	}

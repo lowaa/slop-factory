@@ -1,0 +1,50 @@
+name: mutation
+
+# Mutation testing is slow (a package's tests run once per mutant), so it runs
+# weekly or by hand, never on a pull request: a score that falls is a signal
+# to strengthen tests, found while the change is still recent. See
+# dev-tools/mutation/README.md.
+on:
+  schedule:
+    - cron: "43 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Go project to mutate
+        default: slop-bot
+        required: true
+      packages:
+        description: Package patterns (comma separated) instead of the project's mutation_baseline/packages.txt
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      # Passed through the environment, not interpolated into the script.
+      PROJECT: ${{ inputs.project || 'slop-bot' }}
+      PACKAGES: ${{ inputs.packages }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          go: "true"
+      # A check, so a score that fell past the tolerance fails the run; the
+      # report is written either way, since MUTATION_REPORT_DIR is set.
+      - run: dev-tools/mutation/mutation.sh "${PROJECT}" ${PACKAGES:+--packages="${PACKAGES}"}
+        env:
+          # The runner context isn't available in a job-level env.
+          MUTATION_REPORT_DIR: ${{ runner.temp }}/mutation-reports
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report
+          path: ${{ runner.temp }}/mutation-reports
+          if-no-files-found: warn
+          retention-days: 90

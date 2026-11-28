@@ -1,0 +1,55 @@
+{
+  "wall_seconds": 1.13,
+  "slowest": [
+    {
+      "package": "./cmd/mutation",
+      "test": "TestCheckWithoutABaselineIsAnError",
+      "seconds": 0.05
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestRebaselineWritesCurrentValuesAndKeepsPackagesNotRun",
+      "seconds": 0.05
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestReportWritesFilesAndNeverFails",
+      "seconds": 0.05
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestCheckFailsOnARegressionNamingThePackage",
+      "seconds": 0.04
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestCheckPassesAtTheBaselineAndPrintsTheSummary",
+      "seconds": 0.02
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestReportWithoutABaselineSaysSo",
+      "seconds": 0.02
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestAnyModeWritesTheReportWhenGivenADirectory",
+      "seconds": 0.01
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestCheckHintsAtPruneAfterAnImprovement",
+      "seconds": 0.01
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestPruneDropsAStalePackage",
+      "seconds": 0.01
+    },
+    {
+      "package": "./cmd/mutation",
+      "test": "TestRebaselineWorksWithoutAnExistingBaseline",
+      "seconds": 0.01
+    }
+  ]
+}
