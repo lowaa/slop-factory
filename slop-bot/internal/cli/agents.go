@@ -124,6 +124,10 @@ func (a *app) followInbox(cmd *cobra.Command, asJSON bool) error {
 	}
 	body, err := c.Stream(cmd.Context(), api.PathEvents+"?follow&after=now")
 	if err != nil {
+		// Interrupted while connecting: a stop, as it is once streaming.
+		if cmd.Context().Err() != nil {
+			return nil
+		}
 		return err
 	}
 	defer func() { _ = body.Close() }()
