@@ -2,9 +2,11 @@ package agents_test
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -191,4 +193,35 @@ func TestAStartThatOutlivesTheDrainIsStoppedNotAdopted(t *testing.T) {
 	resumed := f.session()
 	_, err = resumed.Await(f.ctx(), "never sent")
 	require.ErrorContains(t, err, "session ended", "its conversation was stopped, not left running")
+}
+
+// A sweep still in flight when the drain's deadline has passed is waited
+// for, ForceStopGrace more, and reported if it outlasts that; Exited
+// closes only once it has gone, so the daemon doesn't close state.db under
+// it.
+func TestASweepOutlivingTheDrainIsReportedAndExitedWaitsForIt(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "agents: {attach_lease: 30s}\n")
+	s, a := f.working("t")
+	f.attached(s, a, &agents.AttachRequest{})
+	inSweep, release := make(chan struct{}), make(chan struct{})
+	// The sweep hands the expired attach back; its resume's start is held.
+	f.hooks.set(func(h *harnessHooks) {
+		h.start = func(context.Context, *harness.Workspace, *harness.ConversationRef) error {
+			close(inSweep)
+			<-release
+			return errors.New("released")
+		}
+	})
+	f.clock.Advance(time.Hour) // the lease expires, and the sweeper ticks
+	<-inSweep
+	err := f.stopPastTheGrace()
+	require.ErrorContains(t, err, "sweeper still running")
+	select {
+	case <-f.mgr.Exited():
+		require.FailNow(t, "exited with the sweep still in flight")
+	default:
+	}
+	close(release)
+	<-f.mgr.Exited()
 }

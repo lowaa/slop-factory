@@ -148,6 +148,9 @@ type Manager struct {
 	// fenced is set, under mu, as the drain takes its final look at the
 	// runners: from then on adopt refuses (see adopt).
 	fenced bool
+	// exited is closed once everything Stop stopped has really gone (see
+	// Exited).
+	exited chan struct{}
 }
 
 // New makes a Manager; nothing runs until Start.
@@ -174,6 +177,7 @@ func New(opts *Options) (*Manager, error) {
 		done:         make(chan struct{}),
 		swept:        make(chan struct{}),
 		stopped:      make(chan struct{}),
+		exited:       make(chan struct{}),
 	}, nil
 }
 
@@ -239,10 +243,12 @@ func (m *Manager) drain(ctx context.Context) error {
 	// stopped below, and with ctx done that forces them, rather than
 	// leaving harnesses running once the daemon has gone.
 	err := waitCtx(ctx, m.done)
-	if err == nil {
-		err = waitCtx(ctx, m.swept)
-	}
 	var late []error
+	// The sweeper is waited for whatever the scheduler did: it writes to
+	// state.db, and its sweep in flight ends with the base context.
+	if werr := waitCtx(grace, m.swept); werr != nil {
+		late = append(late, fmt.Errorf("agents: the lease sweeper still running: %w", werr))
+	}
 	if werr := waitGroup(grace, &m.starts); werr != nil {
 		late = append(late, fmt.Errorf("agents: starts still in flight: %w", werr))
 	}
@@ -256,6 +262,7 @@ func (m *Manager) drain(ctx context.Context) error {
 		runners = append(runners, r)
 	}
 	m.mu.Unlock()
+	go m.watchExit(runners)
 	// Each shutdown is bounded (by ctx, then ForceStopGrace), so this is.
 	errs := make([]error, len(runners))
 	var wg sync.WaitGroup
@@ -273,6 +280,26 @@ func (m *Manager) drain(ctx context.Context) error {
 		err = ctx.Err()
 	}
 	return errors.Join(append(append([]error{err}, errs...), late...)...)
+}
+
+// Exited is closed once everything Stop stopped has really gone: the
+// scheduler, the sweeper, every start, runner and cleanup. Stop gives up on
+// them at its deadline and grace, and says so; the daemon waits on this
+// (lifecycle.Exiter) before closing the stores they write to.
+func (m *Manager) Exited() <-chan struct{} { return m.exited }
+
+// watchExit closes exited once the drain's runners and everything else it
+// waited on have gone, however long after Stop that is. Starts are waited
+// for before runners: the fence keeps a late one from adding one.
+func (m *Manager) watchExit(runners []*runner) {
+	<-m.done
+	<-m.swept
+	m.starts.Wait()
+	for _, r := range runners {
+		<-r.exited
+	}
+	m.ends.Wait()
+	close(m.exited)
 }
 
 // graceAfter is a context that ends ForceStopGrace after ctx does, on the

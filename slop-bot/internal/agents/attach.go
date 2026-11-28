@@ -574,7 +574,9 @@ func (m *Manager) sweepEvery() time.Duration {
 // made by Start, so time a test moves after Start is seen.
 func (m *Manager) sweeper(tick clock.Ticker) {
 	defer close(m.swept)
-	ctx := context.Background()
+	// The base context, so Stop cancels a sweep in flight rather than
+	// leaving it writing to state.db as the daemon closes it.
+	ctx := m.base
 	defer tick.Stop()
 	for {
 		select {

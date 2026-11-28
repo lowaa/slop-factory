@@ -186,11 +186,7 @@ func New(opts *Options) (*Daemon, error) {
 		// Stopped after the agents, which let go of their sessions first;
 		// started after them, once they have taken their sessions back.
 		d.tuiSessions(),
-		&lifecycle.Func{
-			N:         "agents",
-			StartFunc: func(ctx context.Context) error { return d.agents.Start(ctx) },
-			StopFunc:  func(ctx context.Context) error { return d.agents.Stop(ctx) },
-		},
+		&agentsComponent{manager: func() *agents.Manager { return d.agents }},
 		d.orphanedSessions(),
 	)
 	return d, nil
@@ -378,3 +374,20 @@ func userID(cfg *config.Config) (tickets.UserID, error) {
 	}
 	return tickets.UserID(u.Username), nil
 }
+
+// agentsComponent runs the agent manager. It is a lifecycle.Exiter: a Stop
+// that gives up at its deadline leaves agents' work still stopping, and the
+// group waits for it before closing the stores it writes to.
+// It reaches the manager through manager: the state component builds it
+// later, at its Start.
+type agentsComponent struct{ manager func() *agents.Manager }
+
+func (c *agentsComponent) Name() string                    { return "agents" }
+func (c *agentsComponent) Start(ctx context.Context) error { return c.manager().Start(ctx) }
+func (c *agentsComponent) Stop(ctx context.Context) error  { return c.manager().Stop(ctx) }
+
+// Exited implements lifecycle.Exiter.
+func (c *agentsComponent) Exited() <-chan struct{} { return c.manager().Exited() }
+
+// The group must be able to wait for it.
+var _ lifecycle.Exiter = (*agentsComponent)(nil)
