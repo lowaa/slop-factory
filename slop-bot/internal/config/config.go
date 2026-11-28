@@ -101,7 +101,8 @@ type HarnessConfig struct {
 	// nobody is watching a headless agent's dialogs.
 	Permissive *bool `yaml:"permissive"`
 	// LimitThreshold is the percentage of the plan's allowance at which no
-	// new agent is started on this harness until the window resets.
+	// new agent is started on this harness until the window resets. 0, or
+	// unset, is DefaultLimitThreshold.
 	LimitThreshold float64 `yaml:"limit_threshold"`
 }
 
@@ -308,6 +309,9 @@ func (c *Config) validate() error {
 	}
 	if c.Autonomy.TicketsPerAgent < 1 {
 		add("autonomy.tickets_per_agent: must be at least 1")
+	}
+	if c.Retention.Transcripts < 0 || c.Retention.Events < 0 {
+		add("retention: transcripts and events must be positive durations")
 	}
 	if c.Agents.Nudges < 1 {
 		add("agents.nudges: must be at least 1")

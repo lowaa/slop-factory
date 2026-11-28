@@ -164,12 +164,12 @@ func TestStatusShowsThePlanLimits(t *testing.T) {
 	require.NoError(t, err)
 	resets := time.Now().Add(time.Hour).Truncate(time.Second)
 	e.do(s, fake.CmdTurnStart)
-	_, err = s.Do(e.ctx(), fake.Command{Cmd: fake.CmdLimit, Used: 97, ResetsAt: resets.Unix()})
+	_, err = s.Do(e.ctx(), fake.Command{Cmd: fake.CmdLimit, Window: "five_hour", Used: 97, ResetsAt: resets.Unix()})
 	require.NoError(t, err)
 	e.await("harness.limit", nil)
 
 	out := e.h.ok(t, "status")
-	assert.Contains(t, out, "plan claude-code: 97% used (new agents wait at 95%), resets "+resets.Local().Format("Jan 2 15:04")+": holding new agents")
+	assert.Contains(t, out, "plan claude-code five_hour: 97% used (new agents wait at 95%), resets "+resets.Local().Format("Jan 2 15:04")+": holding new agents")
 	var st api.Status
 	require.NoError(t, json.Unmarshal([]byte(e.h.ok(t, "status", "--json")), &st))
 	require.Len(t, st.Limits, 1)

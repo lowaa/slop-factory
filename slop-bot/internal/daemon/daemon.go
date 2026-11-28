@@ -135,6 +135,7 @@ func New(opts *Options) (*Daemon, error) {
 			StopFunc:  func(ctx context.Context) error { return d.tickets.Stop(ctx) },
 		},
 		d.archiveComponent(harnesses),
+		d.retentionSweep(),
 		d.agentsComponent(harnesses, user, cliPath),
 		&lifecycle.Func{
 			N: "control socket",
@@ -172,26 +173,44 @@ func (d *Daemon) Run(ctx context.Context) error {
 // Ready is closed once every component has started and the socket serves.
 func (d *Daemon) Ready() <-chan struct{} { return d.ready }
 
-// archiveComponent keeps ended agents' transcripts, on state.db's index,
-// and runs their retention sweep.
+// SweepEvery is how often the retention sweep runs: retention is counted
+// in days, so an hour late is nothing.
+const SweepEvery = time.Hour
+
+// archiveComponent keeps ended agents' transcripts, on state.db's index.
 func (d *Daemon) archiveComponent(harnesses agents.Harnesses) lifecycle.Component {
 	opts := d.opts
 	return &lifecycle.Func{
 		N: "transcript archive",
-		StartFunc: func(ctx context.Context) error {
+		StartFunc: func(context.Context) error {
 			var err error
 			d.archive, err = transcript.NewArchive(&transcript.ArchiveOptions{
 				Dir: opts.Paths.TranscriptsDir(), Index: d.state.Transcripts, Retain: opts.Config.Retention.Transcripts.D(),
-				Clock: opts.Clock, Logger: opts.Logger,
+				Clock: opts.Clock,
 			})
 			if err != nil {
 				return err
 			}
 			d.transcripts = transcript.NewLibrary(harnesses, d.archive)
-			return d.archive.Start(ctx)
+			return nil
 		},
-		StopFunc: func(ctx context.Context) error { return d.archive.Stop(ctx) },
 	}
+}
+
+// retentionSweep deletes what is past its retention, on the clock:
+// retained transcripts, and the event log, which holds some of what agents
+// said.
+func (d *Daemon) retentionSweep() lifecycle.Component {
+	return &lifecycle.Periodic{
+		N: "retention sweep", Every: SweepEvery, Clock: d.opts.Clock, Logger: d.opts.Logger,
+		Run: func(ctx context.Context) error { return d.sweep(ctx) },
+	}
+}
+
+func (d *Daemon) sweep(ctx context.Context) error {
+	cutoff := d.opts.Clock.Now().Add(-d.opts.Config.Retention.Events.D())
+	_, err := d.state.Pruner.Prune(ctx, &state.PruneCutoffs{Events: cutoff})
+	return errors.Join(d.archive.Sweep(ctx), err)
 }
 
 // agentsComponent runs the agent manager, on the ticket feed and state.db

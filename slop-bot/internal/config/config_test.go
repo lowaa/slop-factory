@@ -92,6 +92,7 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"negative concurrency": {"concurrency: {max_active: -1}\n", "max_active and urgent.max_active must be at least 1"},
 		"limit over 100":       {"harnesses: {claude-code: {limit_threshold: 101}}\n", "harnesses.claude-code.limit_threshold: 101 isn't a percentage"},
 		"negative limit":       {"harnesses: {claude-code: {limit_threshold: -5}}\n", "limit_threshold: -5"},
+		"negative retention":   {"retention: {transcripts: -1h}\n", "retention: transcripts and events must be positive"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

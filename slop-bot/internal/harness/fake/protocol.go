@@ -26,6 +26,7 @@ type outMsg struct {
 	// Used and ResetsAt (unix seconds) of a limit.
 	Used     float64 `json:"used,omitempty"`
 	ResetsAt int64   `json:"resets_at,omitempty"`
+	Window   string  `json:"window,omitempty"`
 }
 
 // Command is what a test tells the fake to do.
@@ -39,9 +40,10 @@ type Command struct {
 	// the transcript records.
 	Text string `json:"text,omitempty"`
 	// Used is the percentage of the plan used, and ResetsAt (unix seconds)
-	// when its window resets, for limit.
+	// when its window resets, for limit; Window names the window.
 	Used     float64 `json:"used,omitempty"`
 	ResetsAt int64   `json:"resets_at,omitempty"`
+	Window   string  `json:"window,omitempty"`
 	// Argv for run: a command the fake runs, as an agent's tool call would
 	// (e.g. `slop-bot ask ...`), with the fake's own environment.
 	Argv []string `json:"argv,omitempty"`

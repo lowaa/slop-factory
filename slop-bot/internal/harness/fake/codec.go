@@ -54,7 +54,7 @@ func (codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) {
 	case "text":
 		return []harness.Event{{Kind: harness.Text, Text: m.Text}}, nil
 	case "limit":
-		l := &harness.Limit{UsedPercent: m.Used}
+		l := &harness.Limit{Window: m.Window, UsedPercent: m.Used}
 		if m.ResetsAt != 0 {
 			l.ResetsAt = time.Unix(m.ResetsAt, 0).UTC()
 		}

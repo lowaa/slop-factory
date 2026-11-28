@@ -96,7 +96,7 @@ func (m *Manager) evaluate(ctx context.Context) {
 		spec, err := m.specFor(ctx, t)
 		var hold *errHeld
 		if errors.As(err, &hold) {
-			m.wakeAt(hold.resets)
+			m.wakeAt(hold.until)
 			m.noteHeld(ctx, t, hold)
 			continue
 		}

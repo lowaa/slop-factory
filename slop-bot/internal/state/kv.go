@@ -95,10 +95,12 @@ func (s *Settings) SetAutonomy(ctx context.Context, enabled bool) error {
 	return s.set(ctx, keyAutonomy, strconv.FormatBool(enabled))
 }
 
-// HarnessLimit is the last plan allowance a harness reported. It is kept so
-// a restarted daemon still holds spawns for a harness at its limit.
+// HarnessLimit is the last report of one of a harness's plan windows. It is
+// kept so a restarted daemon still holds spawns for a harness at its limit.
 type HarnessLimit struct {
-	Harness     string    `json:"-"`
+	Harness string `json:"-"`
+	// Window names the window within the harness; "" for its only one.
+	Window      string    `json:"-"`
 	UsedPercent float64   `json:"used_percent"`
 	ResetsAt    time.Time `json:"resets_at,omitzero"`
 	ReportedAt  time.Time `json:"reported_at"`
@@ -106,19 +108,21 @@ type HarnessLimit struct {
 
 const keyLimitPrefix = "limit."
 
-// SetHarnessLimit records l as its harness's latest.
+// SetHarnessLimit records l as its harness's latest for its window.
 func (s *Settings) SetHarnessLimit(ctx context.Context, l *HarnessLimit) error {
-	if l.Harness == "" {
-		return errors.New("state: a harness limit needs its harness")
+	// A harness name never has a /, so the first one ends it.
+	if l.Harness == "" || strings.Contains(l.Harness, "/") {
+		return fmt.Errorf("state: %q isn't a harness to record a limit for", l.Harness)
 	}
 	b, err := json.Marshal(l)
 	if err != nil {
 		return err
 	}
-	return s.set(ctx, keyLimitPrefix+l.Harness, string(b))
+	return s.set(ctx, keyLimitPrefix+l.Harness+"/"+l.Window, string(b))
 }
 
-// HarnessLimits is every harness's latest recorded limit, by name.
+// HarnessLimits is every harness's latest recorded limit of each window, by
+// harness and window.
 func (s *Settings) HarnessLimits(ctx context.Context) ([]HarnessLimit, error) {
 	var rows []settingRow
 	if err := s.db.NewSelect().Model(&rows).Where("key LIKE ?", keyLimitPrefix+"%").Order("key").Scan(ctx); err != nil {
@@ -130,7 +134,7 @@ func (s *Settings) HarnessLimits(ctx context.Context) ([]HarnessLimit, error) {
 		if err := json.Unmarshal([]byte(r.Value), &l); err != nil {
 			return nil, fmt.Errorf("state: setting %s is %q: %w", r.Key, r.Value, err)
 		}
-		l.Harness = strings.TrimPrefix(r.Key, keyLimitPrefix)
+		l.Harness, l.Window, _ = strings.Cut(strings.TrimPrefix(r.Key, keyLimitPrefix), "/")
 		out = append(out, l)
 	}
 	return out, nil

@@ -40,12 +40,10 @@ func (l *Library) Read(ctx context.Context, a *state.Agent) ([]Entry, error) {
 }
 
 // Retain copies a's normalised transcript into the Archive, for when the
-// harness prunes its own. An agent with no transcript yet retains nothing.
+// harness prunes its own. It returns ErrNotFound when there is none to
+// copy.
 func (l *Library) Retain(ctx context.Context, a *state.Agent) error {
 	entries, err := l.readLive(a)
-	if errors.Is(err, ErrNotFound) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}

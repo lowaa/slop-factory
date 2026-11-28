@@ -236,7 +236,7 @@ func (ar *agentRoutes) status(w http.ResponseWriter, r *http.Request) {
 	}
 	out := api.Status{Agents: []api.AgentStatus{}, Autonomy: ar.d.autonomy(r.Context()), Budget: ar.d.opts.Config.AutonomyBudget(), Limits: []api.HarnessLimit{}}
 	for _, l := range ar.d.agents.Limits() {
-		out.Limits = append(out.Limits, api.HarnessLimit{Harness: l.Harness, UsedPercent: l.UsedPercent, ResetsAt: l.ResetsAt,
+		out.Limits = append(out.Limits, api.HarnessLimit{Harness: l.Harness, Window: l.Window, UsedPercent: l.UsedPercent, ResetsAt: l.ResetsAt,
 			ReportedAt: l.ReportedAt, Threshold: l.Threshold, Held: l.Held})
 	}
 	if out.Outstanding, err = ar.d.tickets.CountOutstandingAgentCreated(r.Context()); err != nil {

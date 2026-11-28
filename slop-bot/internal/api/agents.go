@@ -37,14 +37,17 @@ type WatchTarget struct {
 	Ended bool   `json:"ended,omitempty"`
 }
 
-// HarnessLimit is one harness's plan allowance in GET /v1/status.
+// HarnessLimit is one of a harness's plan windows in GET /v1/status.
 type HarnessLimit struct {
-	Harness     string    `json:"harness"`
+	Harness string `json:"harness"`
+	// Window is which of the plan's windows; "" for a harness with one.
+	Window      string    `json:"window,omitempty"`
 	UsedPercent float64   `json:"used_percent"`
 	ResetsAt    time.Time `json:"resets_at,omitzero"`
 	ReportedAt  time.Time `json:"reported_at"`
 	Threshold   float64   `json:"threshold"`
-	// Held means no new agent starts on the harness until ResetsAt.
+	// Held means the window is at the threshold: no new agent starts on
+	// the harness until it resets.
 	Held bool `json:"held,omitempty"`
 }
 

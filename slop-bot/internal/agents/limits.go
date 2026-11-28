@@ -1,7 +1,9 @@
 package agents
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -14,36 +16,45 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 )
 
-// HarnessLimit is a harness's plan allowance as it last reported it, for
-// `slop-bot status`.
+// NoResetHold is how long a window at its limit holds when the harness gave
+// no reset time. Only an agent on the harness can report a lower figure,
+// and a held harness starts none, so an open-ended hold could last forever.
+const NoResetHold = 30 * time.Minute
+
+// HarnessLimit is one of a harness's plan windows as it last reported it,
+// for `slop-bot status`.
 type HarnessLimit struct {
-	Harness     string
+	Harness string
+	// Window names it within the harness, e.g. "five_hour".
+	Window      string
 	UsedPercent float64
 	// ResetsAt is when the window resets; zero when the harness didn't say.
 	ResetsAt   time.Time
 	ReportedAt time.Time
-	// Threshold is the configured limit_threshold, and Held says the
-	// harness is at it: no new agent starts on it until ResetsAt.
+	// Threshold is the harness's limit_threshold, and Held says this window
+	// is at it: no new agent starts on the harness until it resets.
 	Threshold float64
 	Held      bool
 }
 
-// limits tracks each harness's latest plan allowance. Every agent on a
-// harness draws on the same plan, so the latest report from any of them is
-// the harness's.
+// limitKey is one window of one harness. Every agent on a harness draws on
+// the same plan, so the latest report of a window, from any of them, is the
+// harness's.
+type limitKey struct{ harness, window string }
+
+// limits tracks each harness's latest report of each plan window.
 type limits struct {
 	mu     sync.Mutex
-	latest map[string]state.HarnessLimit
-	// toldHeld is the reset each held harness was last reported to the
-	// user for, so a hold is announced once, not on every scheduling pass.
+	latest map[limitKey]state.HarnessLimit
+	// toldHeld is the hold each harness was last reported to the user for,
+	// by when it ends, so a hold is announced once, not on every pass.
 	toldHeld map[string]time.Time
-	// heldTickets is the reset each held ticket's hold event was recorded
-	// for.
+	// heldTickets is the hold each held ticket's event was recorded for.
 	heldTickets map[ident.TicketID]time.Time
 }
 
 func newLimits() *limits {
-	return &limits{latest: map[string]state.HarnessLimit{}, toldHeld: map[string]time.Time{}, heldTickets: map[ident.TicketID]time.Time{}}
+	return &limits{latest: map[limitKey]state.HarnessLimit{}, toldHeld: map[string]time.Time{}, heldTickets: map[ident.TicketID]time.Time{}}
 }
 
 // loadLimits restores the limits a previous run recorded, so a restarted
@@ -56,17 +67,17 @@ func (m *Manager) loadLimits(ctx context.Context) error {
 	m.limits.mu.Lock()
 	defer m.limits.mu.Unlock()
 	for _, l := range saved {
-		m.limits.latest[l.Harness] = l
+		m.limits.latest[limitKey{l.Harness, l.Window}] = l
 	}
 	return nil
 }
 
-// reportLimit records a harness's report, and has the scheduler look again:
-// a lower figure may release a hold.
+// reportLimit records a harness's report of a window, and has the scheduler
+// look again: a lower figure may release a hold.
 func (m *Manager) reportLimit(ctx context.Context, r *runner, l *harness.Limit) {
-	hl := state.HarnessLimit{Harness: r.harness, UsedPercent: l.UsedPercent, ResetsAt: l.ResetsAt, ReportedAt: m.opts.Clock.Now()}
+	hl := state.HarnessLimit{Harness: r.harness, Window: l.Window, UsedPercent: l.UsedPercent, ResetsAt: l.ResetsAt, ReportedAt: m.opts.Clock.Now()}
 	m.limits.mu.Lock()
-	m.limits.latest[r.harness] = hl
+	m.limits.latest[limitKey{hl.Harness, hl.Window}] = hl
 	m.limits.mu.Unlock()
 	if err := m.opts.State.Settings.SetHarnessLimit(ctx, &hl); err != nil {
 		m.opts.Logger.Warn("agents: recording a harness limit", "harness", r.harness, "err", err)
@@ -74,79 +85,98 @@ func (m *Manager) reportLimit(ctx context.Context, r *runner, l *harness.Limit) 
 	m.Kick()
 }
 
-// heldUntil reports whether name is at its limit, and when that ends. A
-// window with no reset time holds until a lower report arrives.
-func (m *Manager) heldUntil(name string) (time.Time, bool) {
-	m.limits.mu.Lock()
-	l, ok := m.limits.latest[name]
-	m.limits.mu.Unlock()
-	if !ok {
-		return time.Time{}, false
-	}
-	threshold := float64(100)
+func (m *Manager) threshold(name string) float64 {
 	if hc := m.opts.Config.Harnesses[name]; hc != nil {
-		threshold = hc.LimitThreshold
+		return hc.LimitThreshold
 	}
-	if l.UsedPercent < threshold || (!l.ResetsAt.IsZero() && !m.opts.Clock.Now().Before(l.ResetsAt)) {
-		return time.Time{}, false
-	}
-	return l.ResetsAt, true
+	return 100
 }
 
-// Limits is every harness's latest reported allowance, by name.
+// holdsUntil is when l stops holding its harness; zero when it doesn't.
+func (m *Manager) holdsUntil(l *state.HarnessLimit) time.Time {
+	if l.UsedPercent < m.threshold(l.Harness) {
+		return time.Time{}
+	}
+	until := l.ResetsAt
+	if until.IsZero() {
+		until = l.ReportedAt.Add(NoResetHold)
+	}
+	if !m.opts.Clock.Now().Before(until) {
+		return time.Time{}
+	}
+	return until
+}
+
+// heldUntil reports whether name is at its limit in any window, and when
+// the last of those resets: a 5-hour window resetting doesn't free a plan
+// whose weekly window is still full.
+func (m *Manager) heldUntil(name string) (time.Time, bool) {
+	m.limits.mu.Lock()
+	defer m.limits.mu.Unlock()
+	var until time.Time
+	for k, l := range m.limits.latest {
+		if k.harness != name {
+			continue
+		}
+		if u := m.holdsUntil(&l); u.After(until) {
+			until = u
+		}
+	}
+	return until, !until.IsZero()
+}
+
+// Limits is every harness's latest report of each window, by harness and
+// window.
 func (m *Manager) Limits() []HarnessLimit {
 	m.limits.mu.Lock()
-	names := make([]string, 0, len(m.limits.latest))
-	for n := range m.limits.latest {
-		names = append(names, n)
+	defer m.limits.mu.Unlock()
+	out := make([]HarnessLimit, 0, len(m.limits.latest))
+	for _, l := range m.limits.latest {
+		out = append(out, HarnessLimit{Harness: l.Harness, Window: l.Window, UsedPercent: l.UsedPercent, ResetsAt: l.ResetsAt,
+			ReportedAt: l.ReportedAt, Threshold: m.threshold(l.Harness), Held: !m.holdsUntil(&l).IsZero()})
 	}
-	m.limits.mu.Unlock()
-	slices.Sort(names)
-	out := make([]HarnessLimit, 0, len(names))
-	for _, n := range names {
-		m.limits.mu.Lock()
-		l := m.limits.latest[n]
-		m.limits.mu.Unlock()
-		hl := HarnessLimit{Harness: n, UsedPercent: l.UsedPercent, ResetsAt: l.ResetsAt, ReportedAt: l.ReportedAt}
-		if hc := m.opts.Config.Harnesses[n]; hc != nil {
-			hl.Threshold = hc.LimitThreshold
+	slices.SortFunc(out, func(a, b HarnessLimit) int {
+		if a.Harness != b.Harness {
+			return cmp.Compare(a.Harness, b.Harness)
 		}
-		_, hl.Held = m.heldUntil(n)
-		out = append(out, hl)
-	}
+		return cmp.Compare(a.Window, b.Window)
+	})
 	return out
 }
 
-// errHeld is a ticket that can't start yet: its harness is at its limit.
+// errHeld is a ticket that can't start yet: its harness is at its limit
+// until until.
 type errHeld struct {
 	harness string
-	resets  time.Time
+	until   time.Time
 }
 
 func (e *errHeld) Error() string {
-	if e.resets.IsZero() {
-		return fmt.Sprintf("%s is at its plan limit", e.harness)
-	}
-	return fmt.Sprintf("%s is at its plan limit until %s", e.harness, e.resets.Format(time.RFC3339))
+	return fmt.Sprintf("%s is at its plan limit until %s", e.harness, e.until.Format(time.RFC3339))
 }
 
 // specFor is the agent spec t starts with. When its harness is at its
-// limit, a ticket that left the harness (and model) blank and has never
-// been started goes to another configured harness that isn't; any other
-// ticket waits. A ticket that names a harness chose it, and a started
-// ticket's conversation lives in its harness, so neither is moved. The
-// model must be blank too: a model is one harness's.
+// limit, a ticket that left the harness, model and effort blank and has
+// never been started goes to another configured harness that isn't; any
+// other ticket waits. A ticket that names a harness chose it, and a started
+// ticket's conversation lives in its harness, so neither is moved. A model
+// or effort is one harness's, and not every harness's efforts are checked
+// before a spawn.
 func (m *Manager) specFor(ctx context.Context, t *tickets.Ticket) (tickets.AgentSpec, error) {
 	spec := agentspec.Resolve(t.Agent, m.opts.Config)
-	resets, held := m.heldUntil(spec.Harness)
+	until, held := m.heldUntil(spec.Harness)
 	if !held {
 		return spec, nil
 	}
-	hold := &errHeld{harness: spec.Harness, resets: resets}
-	if t.Agent.Harness != "" || t.Agent.Model != "" {
+	hold := &errHeld{harness: spec.Harness, until: until}
+	if t.Agent.Harness != "" || t.Agent.Model != "" || t.Agent.Effort != "" {
 		return spec, hold
 	}
-	if _, err := m.opts.State.Agents.LatestForTicket(ctx, t.ID); err == nil {
+	_, err := m.opts.State.Agents.LatestForTicket(ctx, t.ID)
+	if !errors.Is(err, state.ErrNotFound) {
+		if err != nil {
+			m.opts.Logger.Warn("agents: checking whether a held ticket was started", "ticket", t.ID, "err", err)
+		}
 		return spec, hold
 	}
 	names := make([]string, 0, len(m.opts.Config.Harnesses))
@@ -178,14 +208,14 @@ func (m *Manager) specFor(ctx context.Context, t *tickets.Ticket) (tickets.Agent
 func (m *Manager) noteHeld(ctx context.Context, t *tickets.Ticket, hold *errHeld) {
 	m.limits.mu.Lock()
 	prev, ticketNoted := m.limits.heldTickets[t.ID]
-	ticketNoted = ticketNoted && prev.Equal(hold.resets)
-	m.limits.heldTickets[t.ID] = hold.resets
+	ticketNoted = ticketNoted && prev.Equal(hold.until)
+	m.limits.heldTickets[t.ID] = hold.until
 	prev, userTold := m.limits.toldHeld[hold.harness]
-	userTold = userTold && prev.Equal(hold.resets)
-	m.limits.toldHeld[hold.harness] = hold.resets
+	userTold = userTold && prev.Equal(hold.until)
+	m.limits.toldHeld[hold.harness] = hold.until
 	m.limits.mu.Unlock()
 	if !ticketNoted {
-		m.event(ctx, EventHeld, "", t.ID, map[string]any{"harness": hold.harness, "resets_at": hold.resets})
+		m.event(ctx, EventHeld, "", t.ID, map[string]any{"harness": hold.harness, "until": hold.until})
 	}
 	if !userTold {
 		m.tellUser(ctx, "", fmt.Sprintf("%s: new agents on it wait (`slop-bot status` shows the allowance)", hold.Error()))
@@ -200,9 +230,9 @@ func (m *Manager) unheld(t ident.TicketID) {
 	m.limits.mu.Unlock()
 }
 
-// wakeAt has the scheduler look again at t, when a held harness's window
-// resets. An earlier wake already set stands: that pass sets the next.
-// Only the scheduler goroutine calls it.
+// wakeAt has the scheduler look again at t, when a held harness's hold
+// ends. An earlier wake already set stands: that pass sets the next. Only
+// the scheduler goroutine calls it.
 func (m *Manager) wakeAt(t time.Time) {
 	if t.IsZero() || (m.wake != nil && !t.Before(m.wakeTime)) {
 		return

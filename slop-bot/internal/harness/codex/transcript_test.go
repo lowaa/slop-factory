@@ -14,8 +14,9 @@ import (
 
 func ms(v int64) time.Time { return time.UnixMilli(v).UTC() }
 
-// testdata/rollout.jsonl is a real rollout (codex-cli 0.172.0, `codex exec`,
-// a ChatGPT login): session_meta cut to its ids, the event_msg records, and
+// testdata/rollout.jsonl is a real rollout (codex-cli 0.172.0 `codex app-server`,
+// as slop-bot runs it, on a ChatGPT login): session_meta cut to its ids, the
+// event_msg records, and
 // the assistant message and tool-script response_items, which Parse must
 // not count twice. Developer and environment-context messages are dropped,
 // the workspace is /ws, and rate limits are removed from token_count.
@@ -26,16 +27,16 @@ func TestParseARecordedRollout(t *testing.T) {
 	got, err := (&TranscriptReader{}).Parse(data)
 	require.NoError(t, err)
 	want := []transcript.Entry{
-		{At: ms(1795849304979), Kind: transcript.User, Text: "Run the shell command: cat notes.txt. Then run: cat missing.txt. Then reply with exactly: DONE"},
-		{At: ms(1795849306844), Kind: transcript.Assistant, Text: "I’ll run the two commands in order."},
-		{At: ms(1795849307274), Kind: transcript.ToolCall, Tool: "shell", CallID: "exec-0146a66c-f1fd-47a9-87a3-a3c571012080", Text: "cat notes.txt"},
-		{At: ms(1795849307274), Kind: transcript.ToolResult, Tool: "shell", CallID: "exec-0146a66c-f1fd-47a9-87a3-a3c571012080", Text: "hello transcript\n"},
-		{At: ms(1795849307295), Kind: transcript.ToolCall, Tool: "shell", CallID: "exec-291f1e7f-1e25-4943-8ba4-cac977a6459a", Text: "cat missing.txt"},
-		{At: ms(1795849307295), Kind: transcript.ToolResult, Tool: "shell", CallID: "exec-291f1e7f-1e25-4943-8ba4-cac977a6459a",
+		{At: ms(1795852895658), Kind: transcript.User, Text: "Run the shell command: cat notes.txt. Then run: cat missing.txt. Then reply with exactly: DONE"},
+		{At: ms(1795852897612), Kind: transcript.Assistant, Text: "I’ll run the two commands in order."},
+		{At: ms(1795852898201), Kind: transcript.ToolCall, Tool: "shell", CallID: "exec-3154bf80-d2e0-4d25-a80a-a771c7000ecd", Text: "cat notes.txt"},
+		{At: ms(1795852898201), Kind: transcript.ToolResult, Tool: "shell", CallID: "exec-3154bf80-d2e0-4d25-a80a-a771c7000ecd", Text: "hello transcript\n"},
+		{At: ms(1795852898216), Kind: transcript.ToolCall, Tool: "shell", CallID: "exec-06bd72c8-ed2e-4bac-80a6-f0c298d60d2a", Text: "cat missing.txt"},
+		{At: ms(1795852898216), Kind: transcript.ToolResult, Tool: "shell", CallID: "exec-06bd72c8-ed2e-4bac-80a6-f0c298d60d2a",
 			Text: "cat: missing.txt: No such file or directory\n", IsError: true},
-		{At: transcript.ParseTime("2026-11-28T07:01:47.302Z"), Kind: transcript.UsageKind, Usage: &transcript.Usage{Input: 17021 - 13952, Output: 49, CacheRead: 13952}},
-		{At: ms(1795849308768), Kind: transcript.Assistant, Text: "DONE"},
-		{At: transcript.ParseTime("2026-11-28T07:01:48.792Z"), Kind: transcript.UsageKind, Usage: &transcript.Usage{Input: 17173 - 16768, Output: 5, CacheRead: 16768}},
+		{At: transcript.ParseTime("2026-11-28T08:01:38.222Z"), Kind: transcript.UsageKind, Usage: &transcript.Usage{Input: 16087 - 13952, Output: 49, CacheRead: 13952}},
+		{At: ms(1795852899590), Kind: transcript.Assistant, Text: "DONE"},
+		{At: transcript.ParseTime("2026-11-28T08:01:39.617Z"), Kind: transcript.UsageKind, Usage: &transcript.Usage{Input: 16159 - 16000, Output: 5, CacheRead: 16000}},
 	}
 	assert.Equal(t, want, got)
 }

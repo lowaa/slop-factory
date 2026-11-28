@@ -153,7 +153,7 @@ func (f *proc) command(c *Command) (int, bool) {
 		f.record(transcript.Entry{Kind: transcript.UsageKind, Usage: &transcript.Usage{Input: 100, Output: 10}})
 		f.write(outMsg{Ev: "usage", Input: 100, Output: 10})
 	case CmdLimit:
-		f.write(outMsg{Ev: "limit", Used: c.Used, ResetsAt: c.ResetsAt})
+		f.write(outMsg{Ev: "limit", Used: c.Used, ResetsAt: c.ResetsAt, Window: c.Window})
 	case CmdRun:
 		f.run(c.Argv)
 	case CmdIgnoreInterrupts:

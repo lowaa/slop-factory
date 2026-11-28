@@ -184,9 +184,16 @@ type Usage struct {
 	CostEstimated bool
 }
 
-// Limit is the plan allowance a harness reports.
+// Limit is one of the plan's windows, as a harness reports it. A plan has
+// several (a 5-hour and a weekly one, say), each reported as its own Limit:
+// every one at its limit holds the harness, so none may stand in for
+// another.
 type Limit struct {
-	// UsedPercent of the current window.
+	// Window names the window, unique within the harness, e.g. "five_hour"
+	// or "codex/primary"; "" for a harness that reports just one.
+	Window string
+	// UsedPercent of the window.
 	UsedPercent float64
-	ResetsAt    time.Time
+	// ResetsAt is zero when the harness didn't say.
+	ResetsAt time.Time
 }

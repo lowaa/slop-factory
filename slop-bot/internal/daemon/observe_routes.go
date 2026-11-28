@@ -62,6 +62,19 @@ func (o *observeRoutes) target(ctx context.Context, r *http.Request) (*state.Age
 	return nil, fmt.Errorf("%w: %q", errNoAgent, id)
 }
 
+// from is the event seq to follow from, and the target as it was then. The
+// seq is taken first: an agent that ends after it is read has its ending
+// events after the seq, so a follower sees them, where the other order
+// could read a live agent and miss its end.
+func (o *observeRoutes) from(ctx context.Context, r *http.Request) (int64, *state.Agent, error) {
+	seq, err := o.d.state.Events.Latest(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	a, err := o.target(ctx, r)
+	return seq, a, err
+}
+
 // ended reports whether a's conversation can still grow.
 func ended(a *state.Agent) bool { return a.EndedAt != nil || a.State.Ends() }
 
@@ -131,19 +144,12 @@ func (tq *transcriptQuery) view(entries []transcript.Entry, first bool) []transc
 // rather than polling, until the agent ends.
 func (o *observeRoutes) transcript(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	a, err := o.target(ctx, r)
-	if err != nil {
-		observeFail(w, err)
-		return
-	}
 	tq, err := parseTranscriptQuery(r)
 	if err != nil {
 		control.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
-	// Taken before the read, so nothing between the read and the follow
-	// is missed.
-	seq, err := o.d.state.Events.Latest(ctx)
+	seq, a, err := o.from(ctx, r)
 	if err != nil {
 		observeFail(w, err)
 		return
@@ -285,12 +291,7 @@ var watchable = map[string]bool{
 // ends. The first line says whom it watches.
 func (o *observeRoutes) watch(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	a, err := o.target(ctx, r)
-	if err != nil {
-		observeFail(w, err)
-		return
-	}
-	seq, err := o.d.state.Events.Latest(ctx)
+	seq, a, err := o.from(ctx, r)
 	if err != nil {
 		observeFail(w, err)
 		return

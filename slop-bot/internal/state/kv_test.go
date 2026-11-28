@@ -59,16 +59,19 @@ func TestHarnessLimitsKeepTheLatestPerHarness(t *testing.T) {
 	assert.Empty(t, got)
 
 	require.NoError(t, f.Settings.SetAutonomy(ctx, true))
-	require.NoError(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{Harness: "codex", UsedPercent: 40, ResetsAt: t0.Add(time.Hour), ReportedAt: t0}))
+	require.NoError(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{Harness: "codex", Window: "codex/primary", UsedPercent: 40, ResetsAt: t0.Add(time.Hour), ReportedAt: t0}))
 	require.NoError(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{Harness: "claude-code", UsedPercent: 90, ReportedAt: t0}))
-	require.NoError(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{Harness: "codex", UsedPercent: 96, ResetsAt: t0.Add(2 * time.Hour), ReportedAt: t0.Add(time.Minute)}))
+	require.NoError(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{Harness: "codex", Window: "codex/secondary", UsedPercent: 3, ReportedAt: t0}))
+	require.NoError(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{Harness: "codex", Window: "codex/primary", UsedPercent: 96, ResetsAt: t0.Add(2 * time.Hour), ReportedAt: t0.Add(time.Minute)}))
 	got, err = f.Settings.HarnessLimits(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, []state.HarnessLimit{
 		{Harness: "claude-code", UsedPercent: 90, ReportedAt: t0},
-		{Harness: "codex", UsedPercent: 96, ResetsAt: t0.Add(2 * time.Hour), ReportedAt: t0.Add(time.Minute)},
+		{Harness: "codex", Window: "codex/primary", UsedPercent: 96, ResetsAt: t0.Add(2 * time.Hour), ReportedAt: t0.Add(time.Minute)},
+		{Harness: "codex", Window: "codex/secondary", UsedPercent: 3, ReportedAt: t0},
 	}, got, "the autonomy setting isn't a limit")
 	require.Error(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{UsedPercent: 1}))
+	require.Error(t, f.Settings.SetHarnessLimit(ctx, &state.HarnessLimit{Harness: "a/b"}))
 }
 
 func TestStateSurvivesAReopen(t *testing.T) {

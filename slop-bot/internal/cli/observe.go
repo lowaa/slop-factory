@@ -134,7 +134,11 @@ func (a *app) streamLines(cmd *cobra.Command, path string, each func([]byte) err
 
 // describeLimit is a harness's plan allowance, for `status`.
 func describeLimit(l *api.HarnessLimit) string {
-	s := fmt.Sprintf("plan %s: %.0f%% used (new agents wait at %.0f%%)", l.Harness, l.UsedPercent, l.Threshold)
+	name := l.Harness
+	if l.Window != "" {
+		name += " " + l.Window
+	}
+	s := fmt.Sprintf("plan %s: %.0f%% used (new agents wait at %.0f%%)", name, l.UsedPercent, l.Threshold)
 	if !l.ResetsAt.IsZero() {
 		s += ", resets " + l.ResetsAt.Local().Format("Jan 2 15:04")
 	}
@@ -154,6 +158,7 @@ func describe(ev *api.Event) string {
 		Input       int64     `json:"input_tokens"`
 		Output      int64     `json:"output_tokens"`
 		UsedPercent float64   `json:"used_percent"`
+		Window      string    `json:"window"`
 		ResetsAt    time.Time `json:"resets_at"`
 		From        string    `json:"from"`
 		To          string    `json:"to"`
@@ -189,6 +194,9 @@ func describe(ev *api.Event) string {
 		what = fmt.Sprintf("usage: input %d, output %d", p.Input, p.Output)
 	case "harness.limit":
 		what = fmt.Sprintf("plan: %.0f%% used", p.UsedPercent)
+		if p.Window != "" {
+			what = fmt.Sprintf("plan %s: %.0f%% used", p.Window, p.UsedPercent)
+		}
 		if !p.ResetsAt.IsZero() {
 			what += ", resets " + p.ResetsAt.Local().Format("Jan 2 15:04")
 		}

@@ -155,7 +155,7 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 	self, err := os.Executable()
 	require.NoError(t, err)
 	archive, err := transcript.NewArchive(&transcript.ArchiveOptions{
-		Dir: p.TranscriptsDir(), Index: st.Transcripts, Retain: cfg.Retention.Transcripts.D(), Clock: clk, Logger: quiet,
+		Dir: p.TranscriptsDir(), Index: st.Transcripts, Retain: cfg.Retention.Transcripts.D(), Clock: clk,
 	})
 	require.NoError(t, err)
 	f := &fixture{t: t, ctl: ctl, state: st, tickets: ts, clock: clk, cfg: cfg, paths: p,

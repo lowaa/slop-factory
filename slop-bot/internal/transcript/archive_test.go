@@ -35,7 +35,7 @@ func newArchive(t *testing.T) *archiveFixture {
 	t.Cleanup(func() { _ = st.Close() })
 	a, err := transcript.NewArchive(&transcript.ArchiveOptions{
 		Dir: filepath.Join(dir, "transcripts"), Index: st.Transcripts, Retain: 24 * time.Hour,
-		Clock: clk, Logger: slog.New(slog.DiscardHandler),
+		Clock: clk,
 	})
 	require.NoError(t, err)
 	return &archiveFixture{clock: clk, state: st, archive: a, dir: filepath.Join(dir, "transcripts")}
@@ -66,7 +66,7 @@ func TestKeepThenLoad(t *testing.T) {
 	require.Error(t, f.archive.Keep(ctx, "../escape", "1", entries))
 }
 
-// The sweep runs on the clock: due once at start, then every period.
+// Sweep deletes, file and index entry, what is past its retention.
 func TestTheSweepDeletesWhatIsPastItsRetention(t *testing.T) {
 	t.Parallel()
 	f := newArchive(t)
@@ -75,15 +75,12 @@ func TestTheSweepDeletesWhatIsPastItsRetention(t *testing.T) {
 	f.clock.Advance(12 * time.Hour)
 	require.NoError(t, f.archive.Keep(ctx, "t2-bbbbbb", "2", entries))
 
-	require.NoError(t, f.archive.Start(ctx))
-	t.Cleanup(func() { _ = f.archive.Stop(context.Background()) })
-	// The first sweep has run once the sweep waits on the clock.
-	f.clock.BlockUntil(1)
+	require.NoError(t, f.archive.Sweep(ctx))
 	_, err := f.archive.Load(ctx, "t1-aaaaaa")
 	require.NoError(t, err, "12h into 24h: kept")
 
-	f.clock.Advance(transcript.DefaultSweepEvery * 13)
-	f.clock.BlockUntil(1)
+	f.clock.Advance(13 * time.Hour)
+	require.NoError(t, f.archive.Sweep(ctx))
 	_, err = f.archive.Load(ctx, "t1-aaaaaa")
 	require.ErrorIs(t, err, transcript.ErrNotFound, "25h: gone")
 	_, err = os.Stat(filepath.Join(f.dir, "t1-aaaaaa.jsonl"))
@@ -111,7 +108,7 @@ func TestTheLibraryFallsBackToTheRetainedCopy(t *testing.T) {
 
 	_, err := lib.Read(ctx, agent)
 	require.ErrorIs(t, err, transcript.ErrNotFound)
-	require.NoError(t, lib.Retain(ctx, agent), "nothing to retain yet is not an error")
+	require.ErrorIs(t, lib.Retain(ctx, agent), transcript.ErrNotFound, "nothing to retain says so")
 
 	var buf bytes.Buffer
 	require.NoError(t, transcript.Encode(&buf, entries))

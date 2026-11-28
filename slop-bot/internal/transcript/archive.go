@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -25,10 +24,6 @@ type Index interface {
 	Remove(ctx context.Context, path string) error
 }
 
-// DefaultSweepEvery is how often the Archive deletes what is past its
-// retention: retention is counted in days, so an hour late is nothing.
-const DefaultSweepEvery = time.Hour
-
 // ArchiveOptions configures an Archive.
 type ArchiveOptions struct {
 	// Dir holds the retained files: $XDG_STATE_HOME/slop-bot/transcripts.
@@ -36,30 +31,22 @@ type ArchiveOptions struct {
 	Index Index
 	// Retain is how long a transcript is kept after its agent ends.
 	Retain time.Duration
-	// SweepEvery is the sweep's period; 0 means DefaultSweepEvery.
-	SweepEvery time.Duration
-	Clock      clock.Clock
-	Logger     *slog.Logger
+	Clock  clock.Clock
 }
 
 // Archive keeps normalised transcripts after their agents end, and deletes
-// each once its retention is over. It is a lifecycle component: Start runs
-// the sweep on the clock until Stop.
+// each once its retention is over, when Sweep is run (the daemon's
+// retention sweep runs it on the clock).
 type Archive struct {
 	opts *ArchiveOptions
-	stop chan struct{}
-	done chan struct{}
 }
 
-// NewArchive makes an Archive; the sweep runs once Start is called.
+// NewArchive makes an Archive.
 func NewArchive(opts *ArchiveOptions) (*Archive, error) {
-	if opts == nil || opts.Dir == "" || opts.Index == nil || opts.Clock == nil || opts.Logger == nil || opts.Retain <= 0 {
-		return nil, errors.New("transcript: NewArchive needs Dir, Index, Retain, Clock and Logger")
+	if opts == nil || opts.Dir == "" || opts.Index == nil || opts.Clock == nil || opts.Retain <= 0 {
+		return nil, errors.New("transcript: NewArchive needs Dir, Index, a positive Retain, and Clock")
 	}
-	if opts.SweepEvery <= 0 {
-		opts.SweepEvery = DefaultSweepEvery
-	}
-	return &Archive{opts: opts, stop: make(chan struct{}), done: make(chan struct{})}, nil
+	return &Archive{opts: opts}, nil
 }
 
 // Keep writes agent's transcript and indexes it until the retention ends.
@@ -135,39 +122,4 @@ func (a *Archive) Sweep(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// Name implements lifecycle.Component.
-func (a *Archive) Name() string { return "transcript archive" }
-
-// Start sweeps now, then every SweepEvery until Stop.
-func (a *Archive) Start(context.Context) error {
-	go a.run() // #nosec G118 -- the sweep outlives Start's ctx; Stop ends it
-	return nil
-}
-
-func (a *Archive) run() {
-	defer close(a.done)
-	ctx := context.Background()
-	for {
-		if err := a.Sweep(ctx); err != nil {
-			a.opts.Logger.Warn("transcript: sweeping retained transcripts", "err", err)
-		}
-		select {
-		case <-a.opts.Clock.After(a.opts.SweepEvery):
-		case <-a.stop:
-			return
-		}
-	}
-}
-
-// Stop ends the sweep.
-func (a *Archive) Stop(ctx context.Context) error {
-	close(a.stop)
-	select {
-	case <-a.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }

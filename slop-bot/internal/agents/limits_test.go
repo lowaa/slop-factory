@@ -26,12 +26,18 @@ import (
 // stalling when the clock moves).
 func (f *fixture) reportLimit(used float64, resets time.Time) *state.Agent {
 	f.t.Helper()
+	return f.reportLimits(fake.Command{Cmd: fake.CmdLimit, Used: used, ResetsAt: resets.Unix()})
+}
+
+// reportLimits is reportLimit for any limit commands.
+func (f *fixture) reportLimits(limits ...fake.Command) *state.Agent {
+	f.t.Helper()
 	tk := f.file("reporter", nil)
 	s := f.session()
 	f.user(s)
 	a := f.agentFor(tk.ID)
 	f.turn(s, func() {
-		f.do(s, fake.Command{Cmd: fake.CmdLimit, Used: used, ResetsAt: resets.Unix()})
+		f.do(s, limits...)
 		_, err := f.mgr.Ask(f.ctx(), ident.AgentPrincipal(a.ID, tk.ID), "?", nil, "")
 		require.NoError(f.t, err)
 	})
@@ -84,6 +90,47 @@ func TestAHarnessAtItsLimitHoldsNewAgentsUntilItsWindowResets(t *testing.T) {
 	assert.False(t, f.mgr.Limits()[0].Held)
 }
 
+// Each window is its own limit: the 5-hour one resetting doesn't free a
+// plan whose weekly one is still full, and a report of one window doesn't
+// replace another's.
+func TestEveryFullWindowHoldsUntilTheLastResets(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	week := t0.Add(72 * time.Hour)
+	f.reportLimits(
+		fake.Command{Cmd: fake.CmdLimit, Window: "five_hour", Used: 99, ResetsAt: t0.Add(time.Hour).Unix()},
+		fake.Command{Cmd: fake.CmdLimit, Window: "seven_day", Used: 96, ResetsAt: week.Unix()},
+		fake.Command{Cmd: fake.CmdLimit, Window: "five_hour", Used: 98, ResetsAt: t0.Add(time.Hour).Unix()},
+	)
+	held := f.file("waits", nil)
+	ev := f.await(agents.EventHeld, heldFor(held.ID))
+	var p struct {
+		Until time.Time `json:"until"`
+	}
+	require.NoError(t, json.Unmarshal(ev.Payload, &p))
+	assert.Equal(t, week, p.Until)
+	var windows []string
+	for _, l := range f.mgr.Limits() {
+		windows = append(windows, l.Window)
+		assert.True(t, l.Held, l.Window)
+	}
+	assert.Equal(t, []string{"five_hour", "seven_day"}, windows)
+}
+
+// A full window with no reset time can't hold for ever: no agent is left
+// on the harness to report it lower.
+func TestAHoldWithNoResetTimeEnds(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	f.reportLimits(fake.Command{Cmd: fake.CmdLimit, Used: 100})
+	timers := f.clock.Waiters()
+	held := f.file("waits", nil)
+	f.await(agents.EventHeld, heldFor(held.ID))
+	f.blockUntil(timers + 1)
+	f.clock.Advance(agents.NoResetHold)
+	f.await(agents.EventSpawned, heldFor(held.ID))
+}
+
 func TestALowerReportReleasesTheHold(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "harnesses: {claude-code: {limit_threshold: 80}}\n")
@@ -121,6 +168,8 @@ func TestOnlyABlankUnstartedTicketFallsBackToAnotherHarness(t *testing.T) {
 	f.await(agents.EventHeld, heldFor(named.ID))
 	withModel := f.file("model", func(nt *tickets.NewTicket) { nt.Agent.Model = "claude-opus-5-5" })
 	f.await(agents.EventHeld, heldFor(withModel.ID))
+	withEffort := f.file("effort", func(nt *tickets.NewTicket) { nt.Agent.Effort = "max" })
+	f.await(agents.EventHeld, heldFor(withEffort.ID))
 
 	// A ticket that has had an agent keeps to its harness: the
 	// conversation is there.
@@ -177,4 +226,25 @@ func TestAnEndedAgentsTranscriptIsRetained(t *testing.T) {
 	assert.Equal(t, t0.Add(f.cfg.Retention.Transcripts.D()), idx[0].RetainUntil)
 	_, err = os.Stat(filepath.Join(f.paths.TranscriptsDir(), string(a.ID)+".jsonl"))
 	require.NoError(t, err)
+}
+
+// A conversation whose transcript can't be found is told, not recorded as
+// kept.
+func TestAMissingTranscriptIsToldNotRetained(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	tk := f.file("t", nil)
+	s := f.session()
+	f.user(s)
+	a := f.agentFor(tk.ID)
+	require.NoError(t, os.Remove(filepath.Join(f.transcripts, s.ID+".jsonl")))
+	f.turn(s, func() {
+		require.NoError(t, f.mgr.Done(f.ctx(), ident.AgentPrincipal(a.ID, tk.ID), "built"))
+	})
+	ev := f.await(agents.EventUserTold, func(e *state.Event) bool { return e.Agent == a.ID })
+	assert.Contains(t, string(ev.Payload), "transcript couldn't be kept")
+	f.await(agents.EventFinished, nil)
+	idx, err := f.state.Transcripts.ForAgent(context.Background(), a.ID)
+	require.NoError(t, err)
+	assert.Empty(t, idx)
 }

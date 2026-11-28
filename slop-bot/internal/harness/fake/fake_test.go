@@ -211,7 +211,7 @@ func TestTheFakeKeepsATranscriptAndReportsLimits(t *testing.T) {
 	resets := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
 	for _, c := range []fake.Command{
 		{Cmd: fake.CmdTurnStart}, {Cmd: fake.CmdToolStart, Tool: "shell", Text: "ls"}, {Cmd: fake.CmdToolEnd, Tool: "shell", Text: "a.txt"},
-		{Cmd: fake.CmdText, Text: "one file"}, {Cmd: fake.CmdLimit, Used: 97.5, ResetsAt: resets.Unix()}, {Cmd: fake.CmdTurnEnd},
+		{Cmd: fake.CmdText, Text: "one file"}, {Cmd: fake.CmdLimit, Window: "five_hour", Used: 97.5, ResetsAt: resets.Unix()}, {Cmd: fake.CmdTurnEnd},
 	} {
 		_, err := sess.Do(ctx, c)
 		require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestTheFakeKeepsATranscriptAndReportsLimits(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, &harness.Limit{UsedPercent: 97.5, ResetsAt: resets}, limit)
+	assert.Equal(t, &harness.Limit{Window: "five_hour", UsedPercent: 97.5, ResetsAt: resets}, limit)
 
 	r := h.Transcripts()
 	path, err := r.Locate(conv.Ref().ID)

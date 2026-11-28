@@ -24,6 +24,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
@@ -191,6 +192,11 @@ func (m *Manager) retain(ctx context.Context, id ident.AgentID) {
 	a, err := m.opts.State.Agents.Get(ctx, id)
 	if err == nil {
 		err = m.opts.Transcripts.Retain(ctx, a)
+	}
+	// An agent that never got a conversation going has nothing to keep;
+	// one that did and has no transcript is worth knowing about.
+	if errors.Is(err, transcript.ErrNotFound) && a != nil && a.ConversationID == "" {
+		return
 	}
 	if err != nil {
 		m.opts.Logger.Warn("agents: retaining a transcript", "agent", id, "err", err)

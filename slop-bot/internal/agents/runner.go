@@ -112,6 +112,11 @@ func (r *runner) run(ctx context.Context) {
 }
 
 func (r *runner) handle(ctx context.Context, ev *harness.Event) {
+	// A limit is recorded before its event, so whoever sees the event (a
+	// test, `status`) finds it in effect.
+	if ev.Kind == harness.LimitReport && ev.Limit != nil {
+		r.m.reportLimit(ctx, r, ev.Limit)
+	}
 	// The conversation's own events go in the log first, so `slop-bot watch`
 	// shows a turn ending before the state it leads to. Ready and Exited
 	// aren't the conversation: the states say them.
@@ -133,10 +138,6 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		r.inTurn = false
 		r.mu.Unlock()
 		r.turnEnded(ctx, ev)
-	case harness.LimitReport:
-		if ev.Limit != nil {
-			r.m.reportLimit(ctx, r, ev.Limit)
-		}
 	case harness.Exited:
 		r.exitedWith(ctx, ev)
 	}
@@ -251,6 +252,9 @@ func eventPayload(ev *harness.Event) map[string]any {
 	}
 	if ev.Limit != nil {
 		p["used_percent"] = ev.Limit.UsedPercent
+		if ev.Limit.Window != "" {
+			p["window"] = ev.Limit.Window
+		}
 		if !ev.Limit.ResetsAt.IsZero() {
 			p["resets_at"] = ev.Limit.ResetsAt
 		}
