@@ -3,6 +3,7 @@ package agents_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -324,4 +325,58 @@ func TestASweepThatCantReleaseALeaseLeavesTheAttach(t *testing.T) {
 	assert.Equal(t, state.StateAttached, got.State, "not handed back, resumed or crashed")
 	assert.NotNil(t, got.Lease)
 	assert.NotContains(t, f.logs.String(), "handing back an expired attach")
+}
+
+// A message is claimed before it is sent: one whose claim can't be written
+// isn't sent, so it goes once, with the next delivery, rather than once now
+// and again when the queue it never left is next delivered.
+func TestAMessageWhoseClaimFailsIsSentOnceLater(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	s, tk, agent := f.startedAgent("t", nil)
+	f.turn(s, func() { require.NoError(t, f.mgr.ReadyToMerge(f.ctx(), agent, "")) })
+	f.await(agents.EventState, toState(state.StateWaitingMerge))
+	var mu sync.Mutex
+	sent := map[int64]int{}
+	f.hooks.set(func(h *harnessHooks) {
+		h.send = func(_ context.Context, a ident.AgentID, msg *harness.Message) error {
+			if a == agent.Agent {
+				mu.Lock()
+				defer mu.Unlock()
+				for _, id := range msg.IDs {
+					sent[id]++
+				}
+			}
+			return nil
+		}
+	})
+	f.failOn("BEFORE UPDATE OF status ON messages WHEN NEW.status = 'delivered'")
+	first, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), string(tk.ID), "first", false)
+	require.NoError(t, err, "queued, whatever the delivery did")
+	f.dropFailure()
+	second, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), string(tk.ID), "second", false)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, map[int64]int{first.ID: 1, second.ID: 1}, sent)
+}
+
+// A pointer sends the agent to its inbox, so messages it couldn't be
+// recorded for stay where the inbox shows them.
+func TestAPointerThatCantBeRecordedLeavesItsMessagesInTheInbox(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	a := f.deadAgent(f.noAgentTicket())
+	msg, err := f.state.Messages.Enqueue(f.ctx(), &state.NewMessage{From: state.UserParty, To: state.AgentParty(a.ID), Kind: state.KindTell, Body: "hi"})
+	require.NoError(t, err)
+	require.NoError(t, f.state.Messages.MarkDelivered(f.ctx(), msg.ID, state.DeliveryTurn))
+	f.failOn("BEFORE UPDATE OF delivery_path ON messages WHEN NEW.delivery_path = 'pointer'")
+
+	f.mgr.Pointer([]*harness.Message{{IDs: []int64{msg.ID}}})
+
+	inbox, err := f.state.Messages.AgentInbox(f.ctx(), a.ID)
+	require.NoError(t, err)
+	require.Len(t, inbox, 1)
+	assert.Equal(t, msg.ID, inbox[0].ID)
 }

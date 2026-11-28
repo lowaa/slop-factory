@@ -376,22 +376,42 @@ func (m *Manager) redeliverLater(r *runner) {
 // delivered by path. A TUI driver that typed a pointer to the inbox but
 // couldn't submit it (ErrUnsubmitted) has delivered them too: the agent can
 // read them there, and a second pointer would only double the first.
+//
+// Each message is claimed (marked delivered) before it is sent, and put
+// back in the queue if the send fails. Marked after, a mark that failed
+// left a message the harness had taken still queued, to be sent again; and
+// a hook delivering it meanwhile sent it twice. Claimed first, a message
+// whose claim fails isn't sent at all, and the next delivery tries it.
 func (m *Manager) send(ctx context.Context, r *runner, msgs []state.Message, path state.DeliveryPath) error {
-	ids := make([]int64, len(msgs))
-	for i, msg := range msgs {
-		ids[i] = msg.ID
-	}
-	err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: render(msgs), IDs: ids})
-	if err != nil && !errors.Is(err, harness.ErrUnsubmitted) {
-		return err
-	}
+	claimed := make([]state.Message, 0, len(msgs))
 	for _, msg := range msgs {
 		if err := m.opts.State.Messages.MarkDelivered(ctx, msg.ID, path); err != nil {
-			m.opts.Logger.Warn("agents: marking delivered", "message", msg.ID, "err", err)
+			// ErrConflict: another path (a hook, the inbox) delivered it.
+			m.opts.Logger.Warn("agents: claiming a message to deliver; not sent", "message", msg.ID, "err", err)
+			continue
+		}
+		claimed = append(claimed, msg)
+	}
+	if len(claimed) == 0 {
+		return errNothingClaimed
+	}
+	ids := make([]int64, len(claimed))
+	for i, msg := range claimed {
+		ids[i] = msg.ID
+	}
+	err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: render(claimed), IDs: ids})
+	if err != nil && !errors.Is(err, harness.ErrUnsubmitted) {
+		// Nothing reached the agent: queued again for the next delivery,
+		// even when ctx is what stopped the send.
+		if rerr := m.opts.State.Messages.Requeue(context.WithoutCancel(ctx), ids); rerr != nil {
+			m.opts.Logger.Warn("agents: queueing undelivered messages again", "messages", ids, "err", rerr)
 		}
 	}
 	return err
 }
+
+// errNothingClaimed is a delivery none of whose messages could be claimed.
+var errNothingClaimed = errors.New("agents: no message could be claimed for delivery")
 
 // Pointer is what a TUI driver types in place of messages it can't put in
 // front of the model: the agent is told to read its inbox, which keeps them
@@ -404,7 +424,13 @@ func (m *Manager) Pointer(msgs []*harness.Message) string {
 		ids = append(ids, msg.IDs...)
 	}
 	if err := m.opts.State.Messages.MarkPointed(context.Background(), ids); err != nil {
-		m.opts.Logger.Warn("agents: keeping pointed-at messages in the inbox", "err", err)
+		// Delivered but not marked pointed at, AgentInbox would hide them
+		// from the agent the pointer sends there. Queued, it shows them;
+		// at worst a later delivery types the pointer again.
+		m.opts.Logger.Warn("agents: keeping pointed-at messages in the inbox; queueing them again", "err", err)
+		if err := m.opts.State.Messages.Requeue(context.Background(), ids); err != nil {
+			m.opts.Logger.Warn("agents: queueing pointed-at messages again", "messages", ids, "err", err)
+		}
 	}
 	what, them := "new messages", "them"
 	switch {

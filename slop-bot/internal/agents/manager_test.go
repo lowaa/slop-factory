@@ -965,6 +965,13 @@ func (f *fixture) failOn(trigger string) {
 	require.NoError(f.t, err)
 }
 
+// dropFailure removes failOn's trigger: the store writes again.
+func (f *fixture) dropFailure() {
+	f.t.Helper()
+	_, err := f.stateDB.ExecContext(context.Background(), "DROP TRIGGER inject_failure")
+	require.NoError(f.t, err)
+}
+
 // testWriter sends the Manager's logs to the test's, shown on failure.
 type testWriter struct{ t *testing.T }
 
