@@ -46,6 +46,9 @@ type Options struct {
 	// Harnesses overrides the implementations built from the config, for
 	// tests that run a fake.
 	Harnesses agents.Harnesses
+	// TUIGrace is how long a hung-up attach's TUI gets to exit on SIGHUP
+	// before it is killed; 0 is DefaultTUIGrace.
+	TUIGrace time.Duration
 }
 
 // Daemon is the running slop-bot.
@@ -62,6 +65,7 @@ type Daemon struct {
 	agents       *agents.Manager
 	ticketRoutes *ticketRoutes
 	agentRoutes  *agentRoutes
+	attachRoutes *attachRoutes
 }
 
 // New builds a daemon; nothing starts until Run.
@@ -79,6 +83,7 @@ func New(opts *Options) (*Daemon, error) {
 		tellUser: func(ctx context.Context, body string) { d.agents.TellUser(ctx, body) },
 	}
 	d.agentRoutes = &agentRoutes{d: d}
+	d.attachRoutes = &attachRoutes{d: d}
 	d.routes()
 	cliPath := opts.CLIPath
 	if cliPath == "" {
@@ -217,6 +222,7 @@ func (d *Daemon) startFeed(ctx context.Context) error {
 func (d *Daemon) routes() {
 	d.ticketRoutes.register(d.server)
 	d.agentRoutes.register(d.server)
+	d.attachRoutes.register(d.server)
 	d.server.HandleFunc("GET "+api.PathHealth, func(w http.ResponseWriter, _ *http.Request) {
 		control.WriteJSON(w, http.StatusOK, api.Health{
 			Version:   version.String(),

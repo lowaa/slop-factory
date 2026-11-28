@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -26,6 +27,8 @@ import (
 // Deps is what the CLI needs from the outside world, so tests can run it
 // against a temp home and an in-process daemon.
 type Deps struct {
+	// Stdin is the terminal an attached TUI reads.
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 	Env    *paths.Env
@@ -42,6 +45,10 @@ type Deps struct {
 	daemonBuilt func(*daemon.Daemon)
 	// harnesses lets in-package tests run the daemon on a fake harness.
 	harnesses daemon.Harnesses
+	// clock lets in-package tests run the daemon on a fake clock.
+	clock clock.Clock
+	// tuiGrace shortens the daemon's wait for a hung-up TUI in tests.
+	tuiGrace time.Duration
 }
 
 // FromOS is the real outside world.
@@ -51,7 +58,7 @@ func FromOS() (*Deps, error) {
 		return nil, err
 	}
 	return &Deps{
-		Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv),
+		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv),
 		ServiceRunner: service.ExecRunner{}, FindBinary: service.NewBinaryFinder().Find,
 	}, nil
 }
@@ -152,7 +159,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			}
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 			opts := &daemon.Options{
-				Config: cfg, Paths: p, Logger: logger, Clock: clock.Real{},
+				Config: cfg, Paths: p, Logger: logger, Clock: clock.Or(a.deps.clock), TUIGrace: a.deps.tuiGrace,
 				CLIReference: AgentReference(cmd.Root()),
 			}
 			// Only when set: a nil map in the interface would read as

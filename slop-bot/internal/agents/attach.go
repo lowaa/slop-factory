@@ -73,7 +73,19 @@ const (
 	EventAttached   = "agent.attached"
 	EventReattached = "agent.reattached"
 	EventHandedBack = "agent.handed_back"
+	// EventTUILaunched: the attached CLI started the TUI.
+	EventTUILaunched = "agent.tui_launched"
 )
+
+// Record logs an attach event the daemon's routes observe, on the agent's
+// ticket.
+func (m *Manager) Record(ctx context.Context, typ string, id ident.AgentID, payload any) {
+	ticket := ident.TicketID("")
+	if r, ok := m.runner(id); ok {
+		ticket = r.ticket
+	}
+	m.event(ctx, typ, id, ticket, payload)
+}
 
 func (m *Manager) lease(holder string) *state.Lease {
 	return &state.Lease{Holder: holder, ExpiresAt: m.opts.Clock.Now().Add(m.opts.Config.Agents.AttachLease.D())}
@@ -191,6 +203,11 @@ func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, req *
 	}
 	m.event(stopCtx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "now": req.Now})
 	return att, nil
+}
+
+// LiveAgent is the live agent target names: an agent id, or a ticket id.
+func (m *Manager) LiveAgent(ctx context.Context, target string) (*state.Agent, error) {
+	return m.resolveAgent(ctx, target)
 }
 
 // dropLease releases a lease the caller holds, where failing to is only

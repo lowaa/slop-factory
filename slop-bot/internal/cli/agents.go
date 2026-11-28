@@ -21,6 +21,7 @@ func (a *app) agentCmds() []*cobra.Command {
 	return []*cobra.Command{
 		a.tellCmd(), a.inboxCmd(), a.askCmd(), a.asksCmd(), a.discussCmd(), a.discussionsCmd(),
 		a.readyToMergeCmd(), a.doneCmd(), a.statusCmd(), a.eventsCmd(), a.autonomyCmd(),
+		a.attachCmd(), a.detachCmd(),
 	}
 }
 

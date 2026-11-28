@@ -9,9 +9,11 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // Main is the fake harness process. It returns the exit code.
@@ -161,6 +163,8 @@ func (f *proc) command(c *Command) (int, bool) {
 		f.run(c.Argv)
 	case CmdIgnoreInterrupts:
 		f.ignoreInterrupts = c.On
+	case CmdIgnoreHangup:
+		signal.Ignore(syscall.SIGHUP)
 	case CmdIgnoreEOF:
 		f.ignoreEOF = c.On
 	case CmdExit:

@@ -54,6 +54,9 @@ const (
 	CmdExit             = "exit"
 	CmdIgnoreInterrupts = "ignore_interrupts"
 	CmdIgnoreEOF        = "ignore_eof"
+	// CmdIgnoreHangup makes the fake survive SIGHUP, as a TUI that misses
+	// its terminal closing would.
+	CmdIgnoreHangup = "ignore_hangup"
 )
 
 // Report is what the fake tells the test.
