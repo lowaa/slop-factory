@@ -102,7 +102,7 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 	}
 	// In step with whatever the ticket did while the agent started, and an
 	// open ticket's work starts now: no event may come to say so.
-	m.sync(ctx, t.ID)
+	m.syncNow(ctx, t.ID)
 	return nil
 }
 
@@ -524,7 +524,7 @@ func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error
 	case !adopted && note != "" && (cutShort || note == recoveredNote):
 		r.m.enqueueNotice(ctx, r, note)
 	}
-	m.sync(ctx, a.Ticket)
+	m.syncNow(ctx, a.Ticket)
 	// Whatever was queued before the restart or while it was parked: an
 	// answer waiting for a slot, a nudge. It takes its place in the slot
 	// queue, kept in state.db.

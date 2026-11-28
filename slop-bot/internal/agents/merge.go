@@ -8,6 +8,7 @@ import (
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
+	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 )
 
 // EventMergeAuthorised is recorded when the user authorises a merge.
@@ -73,12 +74,19 @@ func (m *Manager) revokeMerge(ctx context.Context, ticket ident.TicketID) {
 
 // revokeMergeIfEnded clears the go-ahead of a ticket that has ended, by
 // whoever and whether or not an agent is running for it: a ticket marked
-// done by hand, or cancelled while its agent is dead, ends no runner.
-func (m *Manager) revokeMergeIfEnded(ctx context.Context, ticket ident.TicketID) {
+// done by hand, or cancelled while its agent is dead, ends no runner. It
+// fails when it couldn't tell or couldn't clear it, for sync to try again.
+func (m *Manager) revokeMergeIfEnded(ctx context.Context, ticket ident.TicketID) error {
 	t, err := m.opts.Tickets.Get(ctx, ticket)
-	if err == nil && t.Status.Terminal() {
-		m.revokeMerge(ctx, ticket)
+	switch {
+	case errors.Is(err, tickets.ErrNotFound):
+		return nil
+	case err != nil:
+		return err
+	case t.Status.Terminal():
+		return m.opts.State.MergeGrants.Revoke(ctx, ticket)
 	}
+	return nil
 }
 
 // ErrTicketEnded refuses a merge go-ahead for a ticket that is done or

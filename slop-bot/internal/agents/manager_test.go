@@ -263,6 +263,57 @@ type racingTickets struct {
 	// getErr and updateErr, when set, fail the reads and status updates of
 	// the tickets they name, with the error they return.
 	getErr, updateErr map[ident.TicketID]error
+	// lost are tickets whose feed events are dropped, as a remote backend
+	// might lose them.
+	lost       map[ident.TicketID]bool
+	eventsOnce sync.Once
+	events     chan tickets.TicketEvent
+	done       <-chan struct{}
+}
+
+var errBackendAway = errors.New("racing: the ticketing backend is away")
+
+// healGet ends failGet's failures of ticket id.
+func (r *racingTickets) healGet(id ident.TicketID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.getErr, id)
+}
+
+// lose drops ticket's feed events from now on.
+func (r *racingTickets) lose(ticket ident.TicketID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lost == nil {
+		r.lost = map[ident.TicketID]bool{}
+	}
+	r.lost[ticket] = true
+}
+
+// Events is the backend's feed less the lost tickets' events. One forwarder
+// serves every manager the test starts, as the backend's one feed does.
+func (r *racingTickets) Events() <-chan tickets.TicketEvent {
+	r.eventsOnce.Do(func() {
+		src := r.TicketingSystem.Events()
+		r.events = make(chan tickets.TicketEvent)
+		go func() {
+			defer close(r.events)
+			for ev := range src {
+				r.mu.Lock()
+				lost := r.lost[ev.Ticket]
+				r.mu.Unlock()
+				if lost {
+					continue
+				}
+				select {
+				case r.events <- ev:
+				case <-r.done:
+					return
+				}
+			}
+		}()
+	})
+	return r.events
 }
 
 // failGet makes reading ticket id fail with err, from now on.
@@ -392,7 +443,7 @@ func newFixtureFor(t *testing.T, cfgYAML string, names []string) *fixture {
 		Dir: p.TranscriptsDir(), Index: st.Transcripts, Retain: cfg.Retention.Transcripts.D(), Clock: clk,
 	})
 	require.NoError(t, err)
-	f := &fixture{t: t, ctl: ctl, state: st, stateDB: stateDB, logs: &logBuffer{}, tickets: ts, racing: &racingTickets{TicketingSystem: ts}, clock: clk, cfg: cfg, paths: p,
+	f := &fixture{t: t, ctl: ctl, state: st, stateDB: stateDB, logs: &logBuffer{}, tickets: ts, racing: &racingTickets{TicketingSystem: ts, done: t.Context().Done()}, clock: clk, cfg: cfg, paths: p,
 		wts: &recordingWorktrees{dir: filepath.Join(dir, "ws")}, hooks: &harnessHooks{}, archive: archive, transcripts: filepath.Join(dir, "fake-transcripts")}
 	require.NoError(t, os.MkdirAll(f.transcripts, 0o700))
 	t.Cleanup(func() {
@@ -467,16 +518,45 @@ func (f *fixture) file(title string, mut func(*tickets.NewTicket)) *tickets.Tick
 // await follows the event log until an event matches, and returns it.
 func (f *fixture) await(typ string, match func(*state.Event) bool) *state.Event {
 	f.t.Helper()
+	return f.awaitExcept(typ, match, nil)
+}
+
+// awaitExcept is await that fails at once on an event matching unexpected:
+// a broken run then fails on what went wrong, rather than by waiting out
+// the step's deadline for an event that can no longer come.
+func (f *fixture) awaitExcept(typ string, match, unexpected func(*state.Event) bool) *state.Event {
+	f.t.Helper()
 	ctx := f.ctx()
 	for {
 		evs, err := f.state.Events.Follow(ctx, f.cursor, 100)
 		require.NoError(f.t, err, "waiting for %s", typ)
 		for i := range evs {
 			f.cursor = evs[i].Seq
-			if string(evs[i].Type) == typ && (match == nil || match(&evs[i])) {
-				return &evs[i]
+			e := &evs[i]
+			if string(e.Type) == typ && (match == nil || match(e)) {
+				return e
+			}
+			if unexpected != nil && unexpected(e) {
+				require.FailNow(f.t, "unexpected event", "waiting for %s, got %s %s %s", typ, e.Type, e.Agent, e.Payload)
 			}
 		}
+	}
+}
+
+// ofType matches an event of any of typs, for agent when it isn't "".
+func ofType(agent ident.AgentID, typs ...string) func(*state.Event) bool {
+	return func(e *state.Event) bool {
+		return (agent == "" || e.Agent == agent) && slices.Contains(typs, string(e.Type))
+	}
+}
+
+// gone matches an event that ends agent, or says its harness died: what a
+// test waiting on the agent's next step rarely expects.
+func gone(agent ident.AgentID) func(*state.Event) bool {
+	ended := ofType(agent, agents.EventFinished, agents.EventReleased, agents.EventSpawnFailed)
+	return func(e *state.Event) bool {
+		return ended(e) || (e.Agent == agent && string(e.Type) == agents.EventState &&
+			(toState(state.StateCrashed)(e) || toState(state.StateExited)(e)))
 	}
 }
 

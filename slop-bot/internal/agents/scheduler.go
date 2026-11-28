@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
@@ -19,6 +20,9 @@ func (m *Manager) schedule() {
 	defer close(m.done)
 	ctx := m.base
 	feed := m.opts.Tickets.Events()
+	reconcile := m.opts.Clock.NewTicker(ReconcileEvery)
+	defer reconcile.Stop()
+	syncs := &syncState{pending: map[ident.TicketID]bool{}}
 	for {
 		select {
 		case <-m.stop:
@@ -26,15 +30,19 @@ func (m *Manager) schedule() {
 		case <-m.kick:
 		case <-m.wake:
 			m.wake = nil
+		case <-syncs.retry:
+			syncs.retry = nil
+			m.syncPending(ctx, syncs)
+		case <-reconcile.C():
+			m.reconcile(ctx, syncs)
 		case ev, ok := <-feed:
 			if !ok {
 				feed = nil
 				continue
 			}
-			m.sync(ctx, ev.Ticket)
-			if err := m.opts.State.Cursors.Set(ctx, CursorKey, string(ev.Cursor)); err != nil {
-				m.opts.Logger.Warn("agents: saving the ticket feed cursor", "err", err)
-			}
+			syncs.pending[ev.Ticket] = true
+			syncs.cursor, syncs.unsaved = ev.Cursor, true
+			m.syncPending(ctx, syncs)
 		}
 		m.evaluate(ctx)
 	}
@@ -43,6 +51,87 @@ func (m *Manager) schedule() {
 // CursorKey is the ticket feed's entry in state.db's cursors.
 const CursorKey = "tickets"
 
+// How a failed sync is tried again, and how often every live agent is
+// synced whatever the feed brought.
+const (
+	syncRetryFirst = time.Second
+	// SyncRetryMax caps the backoff between a failed sync's retries.
+	SyncRetryMax = time.Minute
+	// ReconcileEvery is how often every live agent is synced with its
+	// ticket: the feed is the fast path, this the catch-all for an event
+	// a backend lost or never sent.
+	ReconcileEvery = 5 * time.Minute
+)
+
+// EventSyncFailed is a ticket whose agent couldn't be brought in step with
+// it, to be tried again.
+const EventSyncFailed = "ticket.sync_failed"
+
+// syncState is the scheduler goroutine's own record of the feed: tickets
+// still to sync, and the newest cursor not yet saved. The cursor is saved
+// only once nothing is pending, so a restart replays every event whose
+// sync hadn't got through: the feed is at-least-once only if a failure
+// doesn't move it on.
+type syncState struct {
+	pending map[ident.TicketID]bool
+	cursor  tickets.Cursor
+	unsaved bool
+	backoff time.Duration
+	retry   <-chan time.Time
+}
+
+// syncPending syncs every pending ticket, then saves the cursor if they all
+// went through, or arms a retry with backoff if any didn't. The failures
+// are recorded last, so whoever sees one sees the pass's outcome.
+func (m *Manager) syncPending(ctx context.Context, s *syncState) {
+	failed := map[ident.TicketID]error{}
+	for id := range s.pending {
+		if err := m.sync(ctx, id); err != nil {
+			failed[id] = err
+			continue
+		}
+		delete(s.pending, id)
+	}
+	if len(s.pending) == 0 {
+		s.backoff, s.retry = 0, nil
+		if s.unsaved {
+			if err := m.opts.State.Cursors.Set(ctx, CursorKey, string(s.cursor)); err != nil {
+				m.opts.Logger.Warn("agents: saving the ticket feed cursor", "err", err)
+			} else {
+				s.unsaved = false
+			}
+		}
+		return
+	}
+	if ctx.Err() != nil {
+		return // stopping: the cursor stays where it was, for the next start
+	}
+	s.backoff = min(max(2*s.backoff, syncRetryFirst), SyncRetryMax)
+	if s.retry == nil {
+		s.retry = m.opts.Clock.After(s.backoff)
+	}
+	for id, err := range failed {
+		m.opts.Logger.Warn("agents: keeping an agent in step with its ticket", "ticket", id, "err", err, "retry_in", s.backoff)
+		m.event(ctx, EventSyncFailed, "", id, map[string]string{"error": err.Error(), "retry_in": s.backoff.String()})
+	}
+}
+
+// reconcile syncs every live agent with its ticket, as if each ticket had
+// sent an event.
+func (m *Manager) reconcile(ctx context.Context, s *syncState) {
+	live, err := m.opts.State.Agents.ListLive(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			m.opts.Logger.Warn("agents: listing live agents to reconcile", "err", err)
+		}
+		return
+	}
+	for _, a := range live {
+		s.pending[a.Ticket] = true
+	}
+	m.syncPending(ctx, s)
+}
+
 // sync keeps a ticket's live agent in step with the ticket as it now is,
 // whatever event brought it here: the feed is at-least-once, and an event
 // says only that something changed, so every step compares with what the
@@ -50,31 +139,45 @@ const CursorKey = "tickets"
 // running agent hears when its ticket's blockers change, gets worktrees for
 // repos added since it started, and its work starts once the ticket is open
 // and unblocked.
-func (m *Manager) sync(ctx context.Context, ticket ident.TicketID) {
+//
+// It fails when it couldn't read what it compares, so the caller can try
+// again: what goes wrong after that (a notice that didn't send) is logged.
+func (m *Manager) sync(ctx context.Context, ticket ident.TicketID) error {
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
-	m.revokeMergeIfEnded(ctx, ticket)
+	if err := m.revokeMergeIfEnded(ctx, ticket); err != nil {
+		return err
+	}
 	a, err := m.opts.State.Agents.LiveForTicket(ctx, ticket)
-	if err != nil {
-		return
+	switch {
+	case errors.Is(err, state.ErrNotFound):
+		return nil
+	case err != nil:
+		return err
 	}
 	t, err := m.opts.Tickets.Get(ctx, ticket)
-	if err != nil {
-		return
+	switch {
+	case errors.Is(err, tickets.ErrNotFound):
+		// Never there to compare with: a retry would only hold the feed
+		// cursor back for good.
+		m.opts.Logger.Warn("agents: a live agent's ticket isn't in the ticketing system", "agent", a.ID, "ticket", ticket)
+		return nil
+	case err != nil:
+		return err
 	}
 	r, running := m.runner(a.ID)
 	// One already finishing (its own done included) is left to it.
 	if running && r.isEnding() {
-		return
+		return nil
 	}
 	if t.Status.Terminal() {
 		m.endForTicket(ctx, a, r, t.Status)
-		return
+		return nil
 	}
 	// An agent being started or recovered is synced once that settles.
 	if !running {
 		m.syncParked(ctx, a, t)
-		return
+		return nil
 	}
 	m.syncBlocked(ctx, r, a, t)
 	m.syncWorktrees(ctx, r, a, t)
@@ -82,6 +185,15 @@ func (m *Manager) sync(ctx context.Context, ticket ident.TicketID) {
 		if err := m.advanceTo(ctx, ident.AgentPrincipal(a.ID, a.Ticket), t.ID, tickets.StatusInProgress); err != nil {
 			m.opts.Logger.Debug("agents: starting a ticket's work", "ticket", t.ID, "err", err)
 		}
+	}
+	return nil
+}
+
+// syncNow is sync for a start that has just brought an agent up: a failure
+// is only logged, since the scheduler's periodic pass syncs it again.
+func (m *Manager) syncNow(ctx context.Context, ticket ident.TicketID) {
+	if err := m.sync(ctx, ticket); err != nil && ctx.Err() == nil {
+		m.opts.Logger.Warn("agents: keeping a started agent in step with its ticket", "ticket", ticket, "err", err)
 	}
 }
 

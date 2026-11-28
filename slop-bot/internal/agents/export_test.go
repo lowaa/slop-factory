@@ -71,7 +71,7 @@ func (m *Manager) SpawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 }
 
 // Sync is sync: it keeps the ticket's agent in step with it, now.
-func (m *Manager) Sync(ctx context.Context, ticket ident.TicketID) { m.sync(ctx, ticket) }
+func (m *Manager) Sync(ctx context.Context, ticket ident.TicketID) error { return m.sync(ctx, ticket) }
 
 // RecoverWhenStartSettles holds ticket's start place until hold is closed,
 // and asks for agent id, whose harness just died, to be recovered meanwhile:

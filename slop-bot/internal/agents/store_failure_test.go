@@ -118,7 +118,7 @@ func TestABlockerNoticeThatCantBeRecordedIsWarnedOf(t *testing.T) {
 
 	// The scheduler's own pass may have got there first; either way the
 	// record can't be written.
-	f.mgr.Sync(f.ctx(), tk.ID)
+	require.NoError(t, f.mgr.Sync(f.ctx(), tk.ID), "a write after the reads is warned of, not retried")
 
 	assert.Contains(t, f.logs.String(), "recording a blocker notice")
 	assert.False(t, f.agentFor(tk.ID).BlockedTold)
@@ -159,7 +159,7 @@ func TestAnAgentThatCantBeEndedInItsRecordIsWarnedOf(t *testing.T) {
 	f.setStatus(tk.ID, tickets.StatusCancelled)
 
 	// Its ticket ended while nothing ran it: the record is ended, here.
-	f.mgr.Sync(f.ctx(), tk.ID)
+	require.NoError(t, f.mgr.Sync(f.ctx(), tk.ID), "a write after the reads is warned of, not retried")
 
 	assert.Contains(t, f.logs.String(), "ending an agent")
 	got, err := f.state.Agents.Get(f.ctx(), a.ID)
@@ -176,7 +176,7 @@ func TestASyncThatCantReadItsTicketLeavesTheAgentAlone(t *testing.T) {
 	f.setStatus(tk.ID, tickets.StatusCancelled)
 
 	// The ticket ended, but the manager can't see that: it doesn't guess.
-	f.mgr.Sync(f.ctx(), tk.ID)
+	require.Error(t, f.mgr.Sync(f.ctx(), tk.ID), "and says so, for the scheduler to try again")
 
 	got, err := f.state.Agents.Get(f.ctx(), a.ID)
 	require.NoError(t, err)
