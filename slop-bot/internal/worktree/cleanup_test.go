@@ -276,6 +276,27 @@ func TestCleanupReportsABranchItCouldNotDelete(t *testing.T) {
 	assert.True(t, exists(t, elsewhere))
 }
 
+// With its .git link gone, git run in the worktree would find the repo
+// enclosing the workspace, here the workspace itself; nothing may act on it.
+func TestABrokenWorktreeNeverReachesAnEnclosingRepo(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "a")
+	ctx := context.Background()
+	wt := f.create("12", []string{"a"}, "a")[0]
+	f.run(f.ws, "init", "-q")
+	f.run(f.ws, "commit", "-q", "--allow-empty", "-m", "enclosing")
+	require.NoError(t, os.Remove(filepath.Join(wt.Path, ".git")))
+
+	r := f.m.Cleanup(ctx, "12", []*Worktree{wt})[0]
+	require.ErrorIs(t, r.Err, ErrBroken)
+	assert.False(t, r.Removed)
+	assert.True(t, exists(t, wt.Path))
+
+	_, err := f.m.NewBranch(ctx, wt, "next")
+	require.ErrorIs(t, err, ErrBroken)
+	assert.Equal(t, "main", f.run(f.ws, "branch", "--show-current"))
+}
+
 func TestForceCleanupRemovesWorkTheUserHasLookedAt(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, "a")

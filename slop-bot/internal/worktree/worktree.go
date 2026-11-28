@@ -36,6 +36,9 @@ var (
 	// path isn't where Manager puts that ticket's worktree: a guard against
 	// removing an arbitrary directory on a bad record.
 	ErrNotOurs = errors.New("worktree does not belong to this ticket")
+	// ErrBroken is a worktree directory git doesn't see as a worktree, as
+	// when its .git link was deleted.
+	ErrBroken = errors.New("worktree directory isn't a working git worktree")
 )
 
 // remote is the remote whose HEAD names a repo's default branch.
@@ -245,20 +248,35 @@ func (m *Manager) NewBranch(ctx context.Context, wt *Worktree, name string) (*Wo
 		return nil, fmt.Errorf("worktree: %w", err)
 	}
 	branch := BranchName(wt.Ticket, name)
-	if _, err := m.git.Run(ctx, wt.Path, "check-ref-format", "--branch", branch); err != nil {
+	if _, err := m.git.Run(ctx, wt.RepoPath, "check-ref-format", "--branch", branch); err != nil {
 		return nil, fmt.Errorf("worktree: %w: branch name %q: %w", ErrInvalidName, branch, err)
 	}
 	base, err := m.base(ctx, wt.RepoPath)
 	if err != nil {
 		return nil, fmt.Errorf("worktree: %w", err)
 	}
-	if _, err := m.git.Run(ctx, wt.Path, "switch", "--quiet", "--no-track", "-c", branch, base); err != nil {
+	if _, err := m.inWorktree(ctx, m.path(wt.Ticket, wt.Repo), "switch", "--quiet", "--no-track", "-c", branch, base); err != nil {
 		return nil, fmt.Errorf("worktree: new branch in %s: %w", wt.Path, err)
 	}
 	m.logger.Info("new branch", "ticket", wt.Ticket, "repo", wt.Repo, "branch", branch)
 	next := *wt
 	next.Branch = branch
 	return &next, nil
+}
+
+// inWorktree runs git in the worktree at path, once git agrees path is a
+// worktree's top level. Without the check, a worktree whose .git link is gone
+// would have git discover whatever repo encloses the workspace dir (the
+// user's own checkout, if the workspace sits inside one) and act on that.
+func (m *Manager) inWorktree(ctx context.Context, path string, args ...string) (string, error) {
+	top, err := m.git.Run(ctx, path, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("%w: %s: %w", ErrBroken, path, err)
+	}
+	if got := canon(strings.TrimSpace(top)); got != canon(path) {
+		return "", fmt.Errorf("%w: %s (git found the repo at %s)", ErrBroken, path, got)
+	}
+	return m.git.Run(ctx, path, args...)
 }
 
 // owns checks wt is ticket's and sits exactly where Manager would have put it.

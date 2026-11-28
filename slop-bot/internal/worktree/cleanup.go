@@ -175,7 +175,7 @@ func (m *Manager) inspect(ctx context.Context, ticket ident.TicketID, wt *Worktr
 }
 
 func (m *Manager) dirty(ctx context.Context, path string) ([]Reason, error) {
-	out, err := m.git.Run(ctx, path, "status", "--porcelain=v1", "--untracked-files=all")
+	out, err := m.inWorktree(ctx, path, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
 		return nil, fmt.Errorf("worktree: status of %s: %w", path, err)
 	}
