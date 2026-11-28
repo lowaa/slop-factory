@@ -49,10 +49,11 @@ type Profile struct {
 	// Injects means some hook replies can carry messages to the model (see
 	// HookCall.Inject).
 	Injects bool
-	// Rendered says whether text shows on screen, after a paste. nil is
-	// the default: the screen contains text, ignoring whitespace (line
-	// wrapping inserts some).
-	Rendered func(screen, text string) bool
+	// Rendered says whether a paste of text shows on screen, given the
+	// screen before it and now. nil is the default: text appears more often
+	// than it did before (the same pointer may still be on screen from an
+	// earlier delivery), ignoring whitespace, which line wrapping inserts.
+	Rendered func(before, after, text string) bool
 }
 
 // Markers recognise the harness's state on screen. They are the fallback
@@ -115,11 +116,12 @@ type HookHub interface {
 // payload the harness passed, and the JSON reply the harness reads back.
 type HookHandler func(ctx context.Context, event string, payload []byte) ([]byte, error)
 
-func (p *Profile) rendered(screen, text string) bool {
+func (p *Profile) rendered(before, after, text string) bool {
 	if p.Rendered != nil {
-		return p.Rendered(screen, text)
+		return p.Rendered(before, after, text)
 	}
-	return strings.Contains(stripSpace(screen), stripSpace(text))
+	t := stripSpace(text)
+	return strings.Count(stripSpace(after), t) > strings.Count(stripSpace(before), t)
 }
 
 func stripSpace(s string) string {

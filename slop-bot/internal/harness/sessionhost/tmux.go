@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -47,6 +48,12 @@ type Tmux struct {
 	run     *runner
 	logger  *slog.Logger
 	recheck time.Duration
+	// env is the absolute env(1), which keeps a one-element argv away from
+	// tmux's `sh -c`, and clears TMUX for an attach.
+	env string
+	// socketPath is the server's socket, for an attach that must not depend
+	// on the person's TMUX_TMPDIR.
+	socketPath string
 	// startMu serialises Start: it sets update-environment, a server-global
 	// option, for the session it is creating.
 	startMu sync.Mutex
@@ -82,7 +89,28 @@ func NewTmux(opts *TmuxOptions) (*Tmux, error) {
 	if recheck <= 0 {
 		recheck = time.Second
 	}
-	return &Tmux{run: &runner{bin: bin, socket: socket, tmpdir: opts.TmpDir}, logger: logger, recheck: recheck}, nil
+	env, err := exec.LookPath("env")
+	if err != nil {
+		return nil, fmt.Errorf("sessionhost: env is not installed: %w", err)
+	}
+	return &Tmux{
+		run:    &runner{bin: bin, socket: socket, tmpdir: opts.TmpDir},
+		logger: logger, recheck: recheck, env: env,
+		socketPath: socketPath(opts.TmpDir, socket),
+	}, nil
+}
+
+// socketPath is where tmux puts a -L socket: $TMUX_TMPDIR (else /tmp, its
+// default), resolved as tmux resolves it, then tmux-<uid>/<name>. The
+// runner never passes an inherited TMUX_TMPDIR, so only tmpdir counts.
+func socketPath(tmpdir, socket string) string {
+	if tmpdir == "" {
+		tmpdir = "/tmp"
+	}
+	if real, err := filepath.EvalSymlinks(tmpdir); err == nil {
+		tmpdir = real
+	}
+	return filepath.Join(tmpdir, fmt.Sprintf("tmux-%d", os.Getuid()), socket)
 }
 
 // ensureServer starts the server, if it isn't running, with slop-bot's
@@ -127,7 +155,9 @@ func (t *Tmux) Start(ctx context.Context, spec *StartSpec) error {
 	if spec.Dir != "" {
 		newSession = append(newSession, "-c", spec.Dir)
 	}
-	newSession = append(append(newSession, "--"), spec.Argv...)
+	// tmux runs a one-element command through `sh -c`; through env(1) it is
+	// exec'd as given, like any other.
+	newSession = append(append(newSession, "--", t.env), spec.Argv...)
 	t.startMu.Lock()
 	defer t.startMu.Unlock()
 	_, err := t.run.do(ctx, &call{env: spec.Env, args: chain(
@@ -143,7 +173,7 @@ func (t *Tmux) Start(ctx context.Context, spec *StartSpec) error {
 // List implements SessionHost.
 func (t *Tmux) List(ctx context.Context) ([]string, error) {
 	out, err := t.run.do(ctx, &call{args: []string{"list-sessions", "-F", "#{session_name}"}})
-	if errors.Is(err, errNoServer) {
+	if errors.Is(err, ErrNoServer) {
 		return nil, nil
 	}
 	if err != nil {
@@ -249,14 +279,27 @@ func (t *Tmux) status(ctx context.Context, session string) (*Status, bool, error
 //
 // Each wait is bounded by the recheck interval, because the signal can
 // fail to come: tmux 3.4 can lose a pane's SIGCHLD (see Status), and so
-// never fire pane-died, and it has also been seen not to wake a waiter on a
-// signal it acknowledged. The caller's Status check is what makes the exit
+// never fire pane-died. The caller's Status check is what makes the exit
 // certain; the signal only makes it prompt.
 func (t *Tmux) WaitExit(ctx context.Context, session string) error {
+	channel := diedChannel + session
 	wctx, cancel := context.WithTimeout(ctx, t.recheck)
 	defer cancel()
-	_, err := t.run.do(wctx, &call{args: []string{"wait-for", diedChannel + session}})
-	if errors.Is(err, errNoServer) || (err != nil && ctx.Err() == nil && wctx.Err() != nil) {
+	_, err := t.run.do(wctx, &call{args: []string{"wait-for", channel}})
+	switch {
+	case errors.Is(err, ErrNoServer):
+		return nil
+	case err != nil && wctx.Err() != nil:
+		// tmux keeps a killed client's wait registered, and the next signal
+		// goes to it instead of being kept for a later wait. So the abandoned
+		// wait is released by signalling it: the caller's Status check stands
+		// in for whatever that signal might have been.
+		rctx, rcancel := context.WithTimeout(context.Background(), t.recheck)
+		defer rcancel()
+		_, _ = t.run.do(rctx, &call{args: []string{"wait-for", "-S", channel}})
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return nil
 	}
 	return err
@@ -287,16 +330,17 @@ func (t *Tmux) Kill(ctx context.Context, session string) error {
 // KillServer ends the server and every session on it.
 func (t *Tmux) KillServer(ctx context.Context) error {
 	_, err := t.run.do(ctx, &call{args: []string{"kill-server"}})
-	if errors.Is(err, errNoServer) {
+	if errors.Is(err, ErrNoServer) {
 		return nil
 	}
 	return err
 }
 
-// AttachCommand implements SessionHost. The caller runs it with its own
-// environment, which must have the daemon's TMUX_TMPDIR, if any.
+// AttachCommand implements SessionHost. It names the socket by path, so the
+// person's TMUX_TMPDIR doesn't matter, and clears TMUX, which tmux would
+// otherwise take for nesting inside the person's own tmux.
 func (t *Tmux) AttachCommand(session string) []string {
-	return []string{t.run.bin, "-L", t.run.socket, "attach-session", "-t", target(session)}
+	return []string{t.env, "-u", "TMUX", t.run.bin, "-S", t.socketPath, "attach-session", "-t", target(session)}
 }
 
 // target names a session exactly: tmux otherwise matches a prefix, so
@@ -307,16 +351,33 @@ func target(session string) string { return "=" + session }
 // (set-option and show-options among them) reject a bare "=session".
 func pane(session string) string { return "=" + session + ":" }
 
+// separator stands for chain's command separator until runner.do writes the
+// arguments out; anything else that ends in ";" is escaped there.
+const separator = "\x00;"
+
 // chain joins tmux commands into one invocation, run in order by the server.
 func chain(cmds ...[]string) []string {
 	var out []string
 	for i, c := range cmds {
 		if i > 0 {
-			out = append(out, ";")
+			out = append(out, separator)
 		}
 		out = append(out, c...)
 	}
 	return out
+}
+
+// literal keeps an argument from ending a tmux command: tmux takes a
+// trailing ";" on any argument as a separator (and runs what follows as
+// commands), and "\;" as a literal one.
+func literal(arg string) string {
+	if arg == separator {
+		return ";"
+	}
+	if strings.HasSuffix(arg, ";") {
+		return arg[:len(arg)-1] + `\;`
+	}
+	return arg
 }
 
 func envNames(env []string) []string {
@@ -330,10 +391,15 @@ func envNames(env []string) []string {
 	return names
 }
 
+// ErrNoServer means the tmux server isn't running, so no session exists.
+var ErrNoServer = errors.New("sessionhost: tmux server not running")
+
 var (
-	errNoServer = errors.New("sessionhost: tmux server not running")
-	noServer    = []string{"no server running", "error connecting to", "server exited unexpectedly"}
-	noSession   = []string{"can't find session", "can't find pane", "can't find window", "session not found"}
+	// Only an absent socket: "error connecting to ... (Permission denied)"
+	// is a failure, not a missing server.
+	noServer = []string{"no server running", "(No such file or directory)", "(Connection refused)", "server exited unexpectedly"}
+	// "no current target" is what a server left with no sessions says.
+	noSession = []string{"can't find session", "can't find pane", "can't find window", "session not found", "no such session", "no current target"}
 )
 
 // runner runs the tmux binary against one server.
@@ -349,7 +415,10 @@ type call struct {
 }
 
 func (r *runner) do(ctx context.Context, c *call) (string, error) {
-	args := append([]string{"-L", r.socket, "-f", "/dev/null", "-u"}, c.args...)
+	args := []string{"-L", r.socket, "-f", "/dev/null", "-u"}
+	for _, a := range c.args {
+		args = append(args, literal(a))
+	}
 	cmd := exec.CommandContext(ctx, r.bin, args...) // #nosec G204 -- tmux is run with slop-bot's own arguments; session names are validated
 	cmd.Env = r.env(c.env)
 	cmd.Stdin = c.stdin
@@ -359,7 +428,7 @@ func (r *runner) do(ctx context.Context, c *call) (string, error) {
 		msg := strings.TrimSpace(stderr.String())
 		switch {
 		case containsAny(msg, noServer):
-			return "", fmt.Errorf("%w: %s", errNoServer, msg)
+			return "", fmt.Errorf("%w: %s", ErrNoServer, msg)
 		case containsAny(msg, noSession):
 			return "", fmt.Errorf("%w: %s", ErrNoSession, msg)
 		case ctx.Err() != nil:

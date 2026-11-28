@@ -2,6 +2,8 @@ package sessionhost_test
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,10 +107,26 @@ func TestWaitExitIsBounded(t *testing.T) {
 	assert.False(t, st.Dead)
 }
 
+// patient waits far longer than the test's deadline: only a signal can end
+// one of its waits in time.
+func patient(t *testing.T, socket string) *sessionhost.Tmux {
+	t.Helper()
+	return tmuxtest.Host(t, &sessionhost.TmuxOptions{Socket: socket, ExitRecheck: time.Hour})
+}
+
+// socketName is a fresh server's name, for two hosts that share it.
+func socketName(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 6)
+	_, err := rand.Read(b)
+	require.NoError(t, err)
+	return "sbt-" + hex.EncodeToString(b)
+}
+
 func TestKillWakesAWaiter(t *testing.T) {
 	t.Parallel()
 	ctx := ctxFor(t)
-	host := tmuxtest.New(t)
+	host := patient(t, socketName(t))
 	shell(ctx, t, host, "long", `sleep 1000`)
 	waited := make(chan error, 1)
 	go func() { waited <- host.WaitExit(ctx, "long") }()
@@ -116,6 +134,80 @@ func TestKillWakesAWaiter(t *testing.T) {
 	require.NoError(t, <-waited)
 	_, err := host.Status(ctx, "long")
 	assert.ErrorIs(t, err, sessionhost.ErrNoSession)
+}
+
+func TestPaneDeathWakesAWaiter(t *testing.T) {
+	t.Parallel()
+	ctx := ctxFor(t)
+	host := patient(t, socketName(t))
+	shell(ctx, t, host, "reads", `read x; exit 4`)
+	waited := make(chan error, 1)
+	go func() { waited <- host.WaitExit(ctx, "reads") }()
+	require.NoError(t, host.SendKeys(ctx, "reads", "Enter"))
+	require.NoError(t, <-waited, "the pane-died hook signals")
+	st, err := host.Status(ctx, "reads")
+	require.NoError(t, err)
+	assert.Equal(t, &sessionhost.Status{Dead: true, ExitStatus: 4}, st)
+}
+
+// tmux keeps a timed-out wait registered and gives it the next signal;
+// WaitExit releases it, so the signal is kept for the next wait.
+func TestASignalAfterTimedOutWaitsIsKept(t *testing.T) {
+	t.Parallel()
+	ctx := ctxFor(t)
+	socket := socketName(t)
+	hasty := tmuxtest.Host(t, &sessionhost.TmuxOptions{Socket: socket, ExitRecheck: 20 * time.Millisecond})
+	shell(ctx, t, hasty, "long", `sleep 1000`)
+	for range 3 {
+		require.NoError(t, hasty.WaitExit(ctx, "long"))
+	}
+	require.NoError(t, hasty.Kill(ctx, "long"))
+	require.NoError(t, patient(t, socket).WaitExit(ctx, "long"))
+}
+
+func TestArgumentsAreLiteral(t *testing.T) {
+	t.Parallel()
+	ctx := ctxFor(t)
+	host := tmuxtest.New(t)
+	// tmux takes a trailing ";" as the end of a command.
+	dir := shell(ctx, t, host, "args", `printf '%s' "$0" > arg.txt; exec cat`, "unused")
+	require.NoError(t, host.Start(ctx, &sessionhost.StartSpec{Name: "semi", Argv: []string{"sh", "-c", `printf '%s' "$0" > arg.txt`, "p;"}, Env: []string{"PATH=" + os.Getenv("PATH")}, Dir: dir}))
+	waitDead(ctx, t, host, "semi")
+	b, err := os.ReadFile(filepath.Join(dir, "arg.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "p;", string(b))
+
+	require.NoError(t, host.SetTag(ctx, "args", "v", "val;"))
+	v, err := host.Tag(ctx, "args", "v")
+	require.NoError(t, err)
+	assert.Equal(t, "val;", v)
+
+	require.NoError(t, host.SendText(ctx, "args", "x;"))
+	require.Eventually(t, func() bool {
+		s, err := host.Capture(ctx, "args")
+		return err == nil && strings.Contains(s, "x;")
+	}, 10*time.Second, 5*time.Millisecond, "the typed text keeps its ;")
+
+	// tmux runs a one-element command through `sh -c`: here it must not be.
+	require.NoError(t, host.Start(ctx, &sessionhost.StartSpec{Name: "one", Argv: []string{"exit 7"}, Env: []string{"PATH=" + os.Getenv("PATH")}}))
+	assert.Equal(t, 127, waitDead(ctx, t, host, "one").ExitStatus, "exec'd, not found, rather than run by a shell")
+}
+
+func TestAnEmptiedServerHasNoSessions(t *testing.T) {
+	t.Parallel()
+	ctx := ctxFor(t)
+	host := tmuxtest.New(t)
+	shell(ctx, t, host, "only", `exec sleep 1000`)
+	require.NoError(t, host.Kill(ctx, "only"))
+	for name, err := range map[string]error{
+		"Status":   func() error { _, err := host.Status(ctx, "only"); return err }(),
+		"SendKeys": host.SendKeys(ctx, "only", "Enter"),
+		"Capture":  func() error { _, err := host.Capture(ctx, "only"); return err }(),
+		"SetTag":   host.SetTag(ctx, "only", "v", "1"),
+		"Kill":     host.Kill(ctx, "only"),
+	} {
+		assert.ErrorIs(t, err, sessionhost.ErrNoSession, name)
+	}
 }
 
 func TestKeysTextAndPaste(t *testing.T) {
@@ -167,7 +259,7 @@ func TestTagsAttachAndMissingSessions(t *testing.T) {
 	assert.Equal(t, "c-42", v)
 	v, err = host.Tag(ctx, "agent-12", "conversation")
 	require.NoError(t, err)
-	assert.Empty(t, v, "targets are exact, not prefixes")
+	assert.Empty(t, v)
 
 	st, err := host.Status(ctx, "agent-1")
 	require.NoError(t, err)
@@ -183,4 +275,16 @@ func TestTagsAttachAndMissingSessions(t *testing.T) {
 	assert.ErrorIs(t, host.SendKeys(ctx, "nope", "Enter"), sessionhost.ErrNoSession)
 	assert.Error(t, host.Start(ctx, &sessionhost.StartSpec{Name: "bad:name", Argv: []string{"true"}}))
 	assert.Error(t, host.Start(ctx, &sessionhost.StartSpec{Name: "agent-1", Argv: []string{"true"}}), "names are unique")
+
+	// Targets are exact: with agent-1 gone, nothing reaches agent-12 by its
+	// prefix.
+	require.NoError(t, host.Kill(ctx, "agent-1"))
+	_, err = host.Status(ctx, "agent-1")
+	assert.ErrorIs(t, err, sessionhost.ErrNoSession)
+	assert.ErrorIs(t, host.SendKeys(ctx, "agent-1", "Enter"), sessionhost.ErrNoSession)
+	assert.ErrorIs(t, host.SetTag(ctx, "agent-1", "conversation", "x"), sessionhost.ErrNoSession)
+	assert.ErrorIs(t, host.Kill(ctx, "agent-1"), sessionhost.ErrNoSession)
+	st, err = host.Status(ctx, "agent-12")
+	require.NoError(t, err)
+	assert.False(t, st.Dead)
 }

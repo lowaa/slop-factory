@@ -32,10 +32,17 @@ var (
 	// ErrAttached means a person is attached to the session, so the kit
 	// won't type into it. The message wasn't delivered; send it later.
 	ErrAttached = errors.New("tuidriver: a person is attached to the session")
+	// ErrUnsubmitted means a person attached after the pointer was pasted
+	// and before it was submitted: it is in their prompt, not sent. Sending
+	// again would paste it twice.
+	ErrUnsubmitted = errors.New("tuidriver: a person attached before the pasted pointer was submitted")
 	// ErrUnconfirmed means keys were sent, retried, and the harness never
 	// showed that it acted on them.
 	ErrUnconfirmed = errors.New("tuidriver: the harness didn't confirm")
-	errExited      = errors.New("tuidriver: the session has exited")
+	// ErrClosed means the conversation was closed: the session lives on,
+	// for Adopt, but this Conversation no longer drives it.
+	ErrClosed = errors.New("tuidriver: the conversation was closed")
+	errExited = errors.New("tuidriver: the session has exited")
 )
 
 // Options configure one conversation.
@@ -108,9 +115,11 @@ type Conversation struct {
 	emitMu       sync.Mutex
 	eventsClosed bool
 
-	mu    sync.Mutex
-	id    string
-	ready bool
+	mu sync.Mutex
+	id string
+	// tagged is the id last recorded in the session's tag, for Adopt.
+	tagged string
+	ready  bool
 	// readyCh closes once ready.
 	readyCh chan struct{}
 	inTurn  bool
@@ -187,12 +196,40 @@ func Start(ctx context.Context, opts *Options, ws *harness.Workspace, resume *ha
 		c.cancel()
 		return nil, err
 	}
+	// A resumed id is known now, and its hooks may never repeat it.
+	c.recordID(ctx)
 	c.watch()
 	if err := c.awaitReady(ctx); err != nil {
-		_ = c.kill(context.Background())
+		_ = c.kill(c.boundedContext())
 		return nil, err
 	}
 	return c, nil
+}
+
+// recordID tags the session with the conversation id, if it changed since
+// the last successful tag, so Adopt reads it back after a restart.
+func (c *Conversation) recordID(ctx context.Context) {
+	c.mu.Lock()
+	id, tagged := c.id, c.tagged
+	c.mu.Unlock()
+	if id == "" || id == tagged {
+		return
+	}
+	if err := c.host.SetTag(ctx, c.opts.Session, conversationTag, id); err != nil {
+		c.opts.Logger.Warn("tuidriver: recording the conversation id", "err", err)
+		return
+	}
+	c.mu.Lock()
+	c.tagged = id
+	c.mu.Unlock()
+}
+
+// boundedContext bounds the kill a failed or abandoned operation falls back
+// to, when the caller's context is already spent.
+func (c *Conversation) boundedContext() context.Context {
+	ctx, cancel := clock.WithDeadline(context.Background(), c.opts.Clock, c.opts.Clock.Now().Add(c.opts.ConfirmTimeout))
+	context.AfterFunc(ctx, cancel)
+	return ctx
 }
 
 // Adopt takes over a session that outlived the daemon that started it, by
@@ -259,6 +296,10 @@ func (c *Conversation) awaitReady(ctx context.Context) error {
 	case <-c.readyCh:
 		return nil
 	case <-c.exited:
+		// exitErr is set before exited closes, and nil for a clean exit.
+		if c.exitErr == nil {
+			return fmt.Errorf("tuidriver: %s exited before it was ready", c.p.Harness)
+		}
 		return fmt.Errorf("tuidriver: %s exited before it was ready: %w", c.p.Harness, c.exitErr)
 	case <-ctx.Done():
 		screen, _ := c.host.Capture(context.Background(), c.opts.Session)
@@ -349,12 +390,11 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 	}
 	call.Event = event
 	var inject []*harness.Message
-	var newID string
 	c.apply(func() []harness.Event {
 		c.hookGen++
 		c.lastHook = c.opts.Clock.Now()
-		if call.ConversationID != "" && call.ConversationID != c.id {
-			c.id, newID = call.ConversationID, call.ConversationID
+		if call.ConversationID != "" {
+			c.id = call.ConversationID
 		}
 		if call.Submitted {
 			c.signalSubmitted()
@@ -364,11 +404,8 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 		}
 		return c.hookEvents(call, len(inject) > 0)
 	})
-	if newID != "" {
-		if err := c.host.SetTag(ctx, c.opts.Session, conversationTag, newID); err != nil {
-			c.opts.Logger.Warn("tuidriver: recording the conversation id", "err", err)
-		}
-	}
+	// Also retries a tag that failed before.
+	c.recordID(ctx)
 	reply, err := c.p.Reply(call, inject)
 	if err != nil && len(inject) > 0 {
 		// Not delivered: hold them again. A turn end this hook would have
@@ -478,32 +515,52 @@ func (c *Conversation) retryHeld() {
 func (c *Conversation) watchExit() {
 	for {
 		st, err := c.host.Status(c.bg, c.opts.Session)
-		if c.bg.Err() != nil {
+		switch {
+		case c.bg.Err() != nil:
 			return // closed: the session lives on without us
-		}
-		if err != nil {
+		case errors.Is(err, sessionhost.ErrNoSession) || errors.Is(err, sessionhost.ErrNoServer):
 			c.finish(c.goneStatus(err))
 			return
-		}
-		if st.Dead {
-			screen, _ := c.host.Capture(c.bg, c.opts.Session)
-			var exitErr error
-			if st.ExitStatus != 0 {
-				exitErr = fmt.Errorf("%s exited with status %d: %s", c.p.Harness, st.ExitStatus, lastLine(screen))
-			}
-			// The dead pane was kept only for its status.
-			if err := c.host.Kill(c.bg, c.opts.Session); err != nil && !errors.Is(err, sessionhost.ErrNoSession) {
-				c.opts.Logger.Warn("tuidriver: removing the dead session", "err", err)
-			}
-			c.finish(st.ExitStatus, exitErr)
+		case err != nil:
+			// Not evidence the session is gone (tmux failed to run, say):
+			// reporting an exit would have the core resume a conversation
+			// that is still running.
+			c.opts.Logger.Warn("tuidriver: reading the session's status", "err", err)
+			c.backOff()
+			continue
+		case st.Dead:
+			c.reportDeath(st)
 			return
 		}
 		// It may return early (a signal kept from an earlier session of the
 		// same name); the loop checks again.
 		if err := c.host.WaitExit(c.bg, c.opts.Session); err != nil && c.bg.Err() == nil {
 			c.opts.Logger.Warn("tuidriver: waiting for the session's exit", "err", err)
+			c.backOff()
 		}
 	}
+}
+
+// backOff waits a poll interval, or until closed, before the exit watcher
+// tries a failing call again.
+func (c *Conversation) backOff() {
+	select {
+	case <-c.bg.Done():
+	case <-c.opts.Clock.After(c.opts.PollInterval):
+	}
+}
+
+func (c *Conversation) reportDeath(st *sessionhost.Status) {
+	screen, _ := c.host.Capture(c.bg, c.opts.Session)
+	var exitErr error
+	if st.ExitStatus != 0 {
+		exitErr = fmt.Errorf("%s exited with status %d: %s", c.p.Harness, st.ExitStatus, lastLine(screen))
+	}
+	// The dead pane was kept only for its status.
+	if err := c.host.Kill(c.bg, c.opts.Session); err != nil && !errors.Is(err, sessionhost.ErrNoSession) {
+		c.opts.Logger.Warn("tuidriver: removing the dead session", "err", err)
+	}
+	c.finish(st.ExitStatus, exitErr)
 }
 
 func (c *Conversation) goneStatus(err error) (int, error) {
@@ -557,24 +614,39 @@ func (c *Conversation) Exited() <-chan struct{} { return c.exited }
 // Send implements harness.Conversation. Mid-turn, the message waits for a
 // hook that can inject it, or else for the turn to end, and Send returns at
 // once. Idle, Send types the pointer and returns once the harness took it,
-// or ErrAttached while a person is attached.
+// or ErrAttached while a person is attached (nothing typed: send it later),
+// or ErrUnsubmitted if one attached mid-delivery (the pointer is in their
+// prompt: don't send it again).
 func (c *Conversation) Send(ctx context.Context, msg *harness.Message) error {
+	if err := c.usable(); err != nil {
+		return err
+	}
 	c.keys.Lock()
 	defer c.keys.Unlock()
 	c.mu.Lock()
-	select {
-	case <-c.exited:
-		c.mu.Unlock()
-		return errExited
-	default:
-	}
 	if c.inTurn {
 		c.pending = append(c.pending, msg)
 		c.mu.Unlock()
 		return nil
 	}
 	c.mu.Unlock()
-	return c.typePointer(ctx, []*harness.Message{msg})
+	_, err := c.typePointer(ctx, []*harness.Message{msg})
+	return err
+}
+
+// usable says whether the conversation still drives its session.
+func (c *Conversation) usable() error {
+	select {
+	case <-c.exited:
+		return errExited
+	default:
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closing {
+		return ErrClosed
+	}
+	return nil
 }
 
 // flush types the pointer for the pending messages, if the harness is idle.
@@ -589,38 +661,49 @@ func (c *Conversation) flush(ctx context.Context) {
 	}
 	c.pending = nil
 	c.mu.Unlock()
-	err := c.typePointer(ctx, msgs)
+	pasted, err := c.typePointer(ctx, msgs)
 	switch {
-	case errors.Is(err, ErrAttached):
+	case err == nil:
+	case !pasted:
+		// Nothing was typed, so trying again later can't double anything.
 		c.mu.Lock()
 		c.pending = append(msgs, c.pending...)
-		c.heldForAttach = true
+		c.heldForAttach = c.heldForAttach || errors.Is(err, ErrAttached)
 		c.mu.Unlock()
-	case err != nil:
-		// Not retried: the text may be in the prompt already, and a second
-		// paste would double it. The messages stay in the inbox the pointer
-		// names.
-		c.opts.Logger.Warn("tuidriver: delivering held messages", "count", len(msgs), "err", err)
+		c.opts.Logger.Info("tuidriver: holding messages", "count", len(msgs), "err", err)
+	default:
+		// Not retried: the pointer is in the prompt, and a second paste
+		// would double it. The messages stay in the inbox it names.
+		c.opts.Logger.Warn("tuidriver: dropped held messages", "count", len(msgs), "err", err)
 	}
 }
 
 // typePointer pastes the pointer for msgs, waits for it to show, then
-// submits it, retrying the submit once. c.keys is held.
-func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message) error {
+// submits it, retrying the submit once. pasted says the pointer reached the
+// prompt. c.keys is held.
+func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message) (pasted bool, err error) {
 	if err := c.notAttached(ctx); err != nil {
-		return err
+		return false, err
 	}
 	text := c.opts.Pointer(msgs)
+	before, err := c.host.Capture(ctx, c.opts.Session)
+	if err != nil {
+		return false, err
+	}
 	c.mu.Lock()
 	submitted := c.submitted
 	c.mu.Unlock()
 	if err := c.host.Paste(ctx, c.opts.Session, text); err != nil {
-		return err
+		return false, err
 	}
-	if err := c.awaitRendered(ctx, text); err != nil {
-		return err
+	if err := c.awaitRendered(ctx, before, text); err != nil {
+		return true, err
 	}
-	return c.confirmed(ctx, c.p.SubmitKey, submitted)
+	err = c.confirmed(ctx, c.p.SubmitKey, submitted)
+	if errors.Is(err, ErrAttached) {
+		return true, ErrUnsubmitted
+	}
+	return true, err
 }
 
 // confirmed presses key until done closes: twice at most, because the
@@ -665,14 +748,14 @@ func (c *Conversation) notAttached(ctx context.Context) error {
 // overtake the paste. Nothing signals a redraw, so this polls; it runs on
 // the wall clock, not the injected one, because it is a sub-second wait on
 // tmux's redraw that no test needs to move.
-func (c *Conversation) awaitRendered(ctx context.Context, text string) error {
+func (c *Conversation) awaitRendered(ctx context.Context, before, text string) error {
 	ctx, cancel := context.WithTimeout(ctx, c.opts.RenderTimeout)
 	defer cancel()
 	tick := time.NewTicker(renderPoll)
 	defer tick.Stop()
 	for {
 		screen, err := c.host.Capture(ctx, c.opts.Session)
-		if err == nil && c.p.rendered(screen, text) {
+		if err == nil && c.p.rendered(before, screen, text) {
 			return nil
 		}
 		select {
@@ -687,6 +770,12 @@ func (c *Conversation) awaitRendered(ctx context.Context, text string) error {
 // the turn ending, from a hook or the screen. Idle, there is nothing to
 // interrupt.
 func (c *Conversation) Interrupt(ctx context.Context) error {
+	if err := c.usable(); err != nil {
+		if errors.Is(err, errExited) {
+			return nil
+		}
+		return err
+	}
 	c.keys.Lock()
 	defer c.keys.Unlock()
 	c.mu.Lock()
@@ -711,8 +800,15 @@ func (c *Conversation) Interrupt(ctx context.Context) error {
 
 // Stop implements harness.Conversation: after the turn settles, the
 // profile's quit sequence, confirmed by the pane dying; with force, or when
-// that fails, the session is killed.
+// that fails, the session is killed. Without force it won't type while a
+// person is attached: it returns ErrAttached, and the session runs on.
 func (c *Conversation) Stop(ctx context.Context, force bool) error {
+	if err := c.usable(); err != nil {
+		if errors.Is(err, errExited) {
+			return nil
+		}
+		return err
+	}
 	if force {
 		return c.kill(ctx)
 	}
@@ -725,15 +821,21 @@ func (c *Conversation) Stop(ctx context.Context, force bool) error {
 		case <-c.exited:
 			return nil
 		case <-ctx.Done():
-			return c.kill(context.Background())
+			return c.kill(c.boundedContext())
 		}
 		quitting = c.beginQuit()
 	}
 	err := c.quit(ctx)
 	c.keys.Unlock()
+	if errors.Is(err, ErrAttached) {
+		c.mu.Lock()
+		c.stopping = false
+		c.mu.Unlock()
+		return err
+	}
 	if err != nil {
 		c.opts.Logger.Warn("tuidriver: quitting", "err", err)
-		return c.kill(context.Background())
+		return c.kill(c.boundedContext())
 	}
 	select {
 	case <-c.exited:
@@ -742,7 +844,7 @@ func (c *Conversation) Stop(ctx context.Context, force bool) error {
 	case <-c.opts.Clock.After(c.opts.ConfirmTimeout):
 		c.opts.Logger.Warn("tuidriver: the harness didn't quit; killing it")
 	}
-	return c.kill(context.Background())
+	return c.kill(c.boundedContext())
 }
 
 // beginQuit takes the keys for the quit sequence, unless a turn started
@@ -763,6 +865,9 @@ func (c *Conversation) beginQuit() bool {
 // quit types the quit sequence; c.keys is held.
 func (c *Conversation) quit(ctx context.Context) error {
 	for _, in := range c.p.Quit {
+		if err := c.notAttached(ctx); err != nil {
+			return err
+		}
 		if in.Text != "" {
 			if err := c.host.SendText(ctx, c.opts.Session, in.Text); err != nil {
 				return err

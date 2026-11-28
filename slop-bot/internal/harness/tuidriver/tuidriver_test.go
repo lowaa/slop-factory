@@ -39,12 +39,20 @@ type rig struct {
 // timeouts move only when the test advances them.
 func start(t *testing.T) *rig {
 	t.Helper()
+	r := newRig(t)
+	r.conv = r.launch(t, nil)
+	return r
+}
+
+// newRig is start without the launch, for a test that changes the rig
+// first.
+func newRig(t *testing.T) *rig {
+	t.Helper()
 	clk := clock.NewFake(t0)
 	r := &rig{TUI: faketest.NewTUI(t, &faketest.TUIOptions{Clock: clk, PollInterval: poll, ConfirmTimeout: confirm}), clk: clk}
 	ctx, cancel := context.WithTimeout(context.Background(), faketest.Timeout)
 	t.Cleanup(cancel)
 	r.ctx = ctx
-	r.conv = r.launch(t, nil)
 	return r
 }
 

@@ -36,7 +36,9 @@ type Conversation interface {
 	// Interrupt stops the running turn; the session stays usable.
 	Interrupt(ctx context.Context) error
 	// Events is the structured stream: turns, tools, text, usage, exit.
-	// It closes after the session has exited.
+	// It closes after the session has exited, with Exited last; or, with no
+	// Exited, when its owner lets go of a session that lives on (a TUI
+	// driver's Close, at daemon shutdown, for a later Adopt).
 	Events() <-chan Event
 	// Stop ends the session. Without force it waits for the running turn to
 	// settle first. It returns once the session is gone and resumable.
@@ -136,7 +138,7 @@ const (
 	UsageReport EventKind = "usage"
 	// LimitReport carries how much of the plan's allowance is left.
 	LimitReport EventKind = "limit"
-	// Exited is always the last event: the process is gone.
+	// Exited is the last event when the process is gone (see Events).
 	Exited EventKind = "exited"
 )
 
