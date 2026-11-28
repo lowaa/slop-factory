@@ -86,17 +86,21 @@ type Note struct {
 
 // AgentStatus is one agent in GET /v1/status.
 type AgentStatus struct {
-	ID      string    `json:"id"`
-	Ticket  string    `json:"ticket"`
-	Title   string    `json:"title"`
-	State   string    `json:"state"`
-	Since   time.Time `json:"since"`
-	Harness string    `json:"harness"`
-	Model   string    `json:"model,omitempty"`
-	Effort  string    `json:"effort,omitempty"`
-	Pool    string    `json:"pool"`
-	Note    string    `json:"note,omitempty"`
-	Nudges  int       `json:"nudges,omitempty"`
+	ID     string `json:"id"`
+	Ticket string `json:"ticket"`
+	Title  string `json:"title"`
+	// TicketStatus is the ticket's own status, e.g. preparing or in_progress.
+	TicketStatus string `json:"ticket_status,omitempty"`
+	// Blockers are the ticket's blockers that aren't done.
+	Blockers []string  `json:"blockers,omitempty"`
+	State    string    `json:"state"`
+	Since    time.Time `json:"since"`
+	Harness  string    `json:"harness"`
+	Model    string    `json:"model,omitempty"`
+	Effort   string    `json:"effort,omitempty"`
+	Pool     string    `json:"pool"`
+	Note     string    `json:"note,omitempty"`
+	Nudges   int       `json:"nudges,omitempty"`
 }
 
 // Status is GET /v1/status.
@@ -104,8 +108,26 @@ type Status struct {
 	Agents   []AgentStatus `json:"agents"`
 	Autonomy bool          `json:"autonomy"`
 	// Budget and Outstanding are the autonomy budget and its use.
-	Budget      int `json:"budget"`
-	Outstanding int `json:"outstanding"`
+	Budget      int         `json:"budget"`
+	Outstanding int         `json:"outstanding"`
+	Pools       []PoolUsage `json:"pools,omitempty"`
+	// Allowances are plan allowances per harness; empty until the daemon
+	// tracks them.
+	Allowances []Allowance `json:"allowances,omitempty"`
+}
+
+// PoolUsage is how many of a pool's slots are in a turn.
+type PoolUsage struct {
+	Pool   string `json:"pool"`
+	Active int    `json:"active"`
+	Max    int    `json:"max"`
+}
+
+// Allowance is a harness's plan allowance.
+type Allowance struct {
+	Harness     string    `json:"harness"`
+	UsedPercent float64   `json:"used_percent"`
+	ResetsAt    time.Time `json:"resets_at,omitzero"`
 }
 
 // Event is one entry of GET /v1/events.

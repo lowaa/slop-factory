@@ -239,13 +239,22 @@ func (ar *agentRoutes) status(w http.ResponseWriter, r *http.Request) {
 		agentFail(w, err)
 		return
 	}
+	for _, u := range ar.d.agents.PoolUsage() {
+		out.Pools = append(out.Pools, api.PoolUsage{Pool: string(u.Pool), Active: u.Active, Max: u.Max})
+	}
 	for _, a := range live {
-		title := ""
+		var title, ticketStatus string
+		var blockers []string
 		if t, err := ar.d.tickets.Get(r.Context(), a.Ticket); err == nil {
-			title = t.Title
+			title, ticketStatus = t.Title, string(t.Status)
+			for _, b := range t.BlockedBy {
+				if b.Status != tickets.StatusDone {
+					blockers = append(blockers, string(b.ID))
+				}
+			}
 		}
 		out.Agents = append(out.Agents, api.AgentStatus{
-			ID: string(a.ID), Ticket: string(a.Ticket), Title: title, State: string(a.State), Since: a.StateSince,
+			ID: string(a.ID), Ticket: string(a.Ticket), Title: title, TicketStatus: ticketStatus, Blockers: blockers, State: string(a.State), Since: a.StateSince,
 			Harness: a.Harness, Model: a.Model, Effort: a.Effort, Pool: string(a.Pool), Note: a.ProgressNote, Nudges: a.Nudges,
 		})
 	}
@@ -267,6 +276,11 @@ func (ar *agentRoutes) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	enc := json.NewEncoder(w)
 	flusher, _ := w.(http.Flusher)
+	// Headers go out now: a follower must know the stream is open before
+	// the first event, or it can't tell "no events yet" from "not connected".
+	if flusher != nil {
+		flusher.Flush()
+	}
 	for {
 		var evs []state.Event
 		var err error

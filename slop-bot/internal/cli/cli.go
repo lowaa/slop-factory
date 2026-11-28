@@ -82,6 +82,7 @@ func New(deps *Deps) *cobra.Command {
 		a.healthCmd(),
 		a.serviceCmd(),
 		a.ticketCmd(),
+		a.tuiCmd(),
 	)
 	root.AddCommand(a.agentCmds()...)
 	return root
