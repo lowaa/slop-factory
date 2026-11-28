@@ -52,7 +52,7 @@ func (s *System) insertTicket(ctx context.Context, tx bun.Tx, a *actor, nt *tick
 		Title: nt.Title, Body: nt.Body, Status: tickets.InitialStatus(nt),
 		AssigneeID: nt.Assignee, Agent: nt.Agent, Repos: nt.Repos,
 		AutoMerge: tickets.InheritedAutoMerge(a.by, nt, parent),
-		Urgent:    nt.Urgent, UrgentReason: nt.UrgentReason,
+		Urgent:    nt.Urgent, UrgentReason: tickets.UrgentReason(nt.Urgent, nt.UrgentReason),
 	})
 	if err != nil {
 		return 0, err
@@ -64,8 +64,8 @@ func (s *System) insertTicket(ctx context.Context, tx bun.Tx, a *actor, nt *tick
 	if err := s.event(ctx, tx, a, tickets.EventCreated, row.ID); err != nil {
 		return 0, err
 	}
-	if nt.Urgent && nt.UrgentReason != "" {
-		if _, err := s.insertComment(ctx, tx, a, row.ID, urgentComment(nt.UrgentReason)); err != nil {
+	if row.UrgentReason != "" {
+		if _, err := s.insertComment(ctx, tx, a, row.ID, urgentComment(row.UrgentReason)); err != nil {
 			return 0, err
 		}
 	}
@@ -139,7 +139,8 @@ func applyChange(cur *tickets.Ticket, change *tickets.TicketChange) *tickets.Tic
 		next.AutoMerge = *change.AutoMerge
 	}
 	if change.Urgent != nil {
-		next.Urgent, next.UrgentReason = change.Urgent.Urgent, change.Urgent.Reason
+		next.Urgent = change.Urgent.Urgent
+		next.UrgentReason = tickets.UrgentReason(change.Urgent.Urgent, change.Urgent.Reason)
 	}
 	if change.Repos != nil {
 		next.Repos = slices.Clone(*change.Repos)

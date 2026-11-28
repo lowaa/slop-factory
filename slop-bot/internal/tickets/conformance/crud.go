@@ -116,15 +116,25 @@ func testUpdate(t *testing.T, nb NewBackend) {
 	assert.False(t, cleared.Urgent)
 	assert.Empty(t, cleared.Repos)
 
-	_, err = f.sys.Update(f.ctx, user, created.ID, &tickets.TicketChange{Title: ptr("")})
-	require.ErrorIs(t, err, tickets.ErrInvalid)
+	for name, change := range map[string]*tickets.TicketChange{
+		"a blank title": {Title: ptr("")},
+		"a blank repo":  {Repos: &[]string{"r1", " "}},
+		"a NUL":         {Body: ptr("a\x00b")},
+	} {
+		_, err = f.sys.Update(f.ctx, user, created.ID, change)
+		require.ErrorIs(t, err, tickets.ErrInvalid, name)
+	}
+	assert.Equal(t, []string{}, nonNil(f.get(created.ID).Repos), "a refused change changes nothing")
 	_, err = f.sys.Update(f.ctx, user, created.ID, &tickets.TicketChange{Status: ptr(tickets.Status("limbo"))})
 	require.ErrorIs(t, err, tickets.ErrInvalid)
 }
 
 func testNotFound(t *testing.T, nb NewBackend) {
 	f := newFixture(t, nb)
-	for _, id := range []ident.TicketID{missing, "not-an-id", ""} {
+	real := f.ticket("exists").ID
+	// Other spellings of a real id are other ids: callers compare TicketIDs
+	// as strings, so one ticket must have one id.
+	for _, id := range []ident.TicketID{missing, "not-an-id", "", "0" + real, "+" + real, real + " "} {
 		_, err := f.sys.Get(f.ctx, id)
 		assert.ErrorIs(t, err, tickets.ErrNotFound, "Get %q", id)
 		_, err = f.sys.Update(f.ctx, user, id, &tickets.TicketChange{Title: ptr("x")})
@@ -161,6 +171,8 @@ func testComments(t *testing.T, nb NewBackend) {
 	assert.Equal(t, *second, got[1])
 
 	_, err = f.sys.Comment(f.ctx, user, work.ID, " ")
+	require.ErrorIs(t, err, tickets.ErrInvalid)
+	_, err = f.sys.Comment(f.ctx, user, work.ID, "a\x00b")
 	require.ErrorIs(t, err, tickets.ErrInvalid)
 	_, err = f.sys.Comment(f.ctx, ident.AgentPrincipal("ghost", missing), work.ID, "boo")
 	require.ErrorIs(t, err, tickets.ErrInvalidPrincipal, "an agent is an agent of a real ticket")
@@ -202,6 +214,13 @@ func testList(t *testing.T, nb NewBackend) {
 		require.NoError(t, err)
 		assert.Equal(t, tc.want, refIDs(got), name)
 	}
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func refIDs(ts []*tickets.Ticket) []ident.TicketID {

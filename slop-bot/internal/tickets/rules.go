@@ -90,6 +90,9 @@ func CheckNew(by ident.Principal, cfg *Config, nt *NewTicket) error {
 	if strings.TrimSpace(nt.Title) == "" {
 		return fmt.Errorf("%w: a ticket needs a title", ErrInvalid)
 	}
+	if err := checkText(nt.Title, nt.Body, nt.UrgentReason); err != nil {
+		return err
+	}
 	switch nt.Status {
 	case "", StatusPreparing:
 	case StatusOpen:
@@ -130,34 +133,21 @@ func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketCha
 	if err := CheckPrincipal(by); err != nil {
 		return err
 	}
-	// Before editability, so an agent reopening its finished ticket hears
-	// that reopening is the user's, not that the ticket isn't its to edit.
-	if change.Status != nil {
-		if err := checkStatusAuthority(by, cur, *change.Status); err != nil {
+	// A retried status call (an agent sending done twice) changes nothing,
+	// so it isn't refused for the ticket having become uneditable.
+	if change.Status != nil && *change.Status == cur.Status && *change == (TicketChange{Status: change.Status}) {
+		return nil
+	}
+	if !by.IsUser() {
+		if err := checkAgentChange(by, cur, change); err != nil {
 			return err
 		}
 	}
-	if !by.IsUser() && !AgentMayEdit(by, cur) {
-		return fmt.Errorf("%w (%s is %s)", ErrNotEditable, cur.ID, cur.Status)
-	}
-	// AutoMerge is granted against what a ticket says. A filer rewriting its
-	// filing afterwards would steer what merges without a person.
-	if !by.IsUser() && by.Ticket != cur.ID && cur.AutoMerge && changesScope(change) {
-		return fmt.Errorf("%w (%s)", ErrAutoMergeScopeLocked, cur.ID)
-	}
-	if change.Title != nil && strings.TrimSpace(*change.Title) == "" {
-		return fmt.Errorf("%w: a ticket needs a title", ErrInvalid)
-	}
-	if change.AutoMerge != nil && !by.IsUser() {
-		return ErrAutoMergeUserOnly
+	if err := checkFields(change); err != nil {
+		return err
 	}
 	if change.Urgent != nil {
 		if err := checkUrgent(by, cfg, change.Urgent, true); err != nil {
-			return err
-		}
-	}
-	if change.Repos != nil {
-		if err := checkRepos(*change.Repos); err != nil {
 			return err
 		}
 	}
@@ -167,14 +157,57 @@ func CheckChange(by ident.Principal, cfg *Config, cur *Ticket, change *TicketCha
 	return nil
 }
 
-// checkStatusAuthority is who may move a ticket's status. The user may make
-// any move. An agent moves its own ticket's, and may only cancel one it
-// filed: moving a filing on to open or in_progress itself would skip the
-// refinement another agent is meant to give it.
+// checkAgentChange is what an agent may not change that the user may.
+func checkAgentChange(by ident.Principal, cur *Ticket, change *TicketChange) error {
+	// Before editability, so an agent reopening its finished ticket hears
+	// that reopening is the user's, not that the ticket isn't its to edit.
+	if change.Status != nil {
+		if err := checkStatusAuthority(by, cur, *change.Status); err != nil {
+			return err
+		}
+	}
+	if !AgentMayEdit(by, cur) {
+		return fmt.Errorf("%w (%s is %s)", ErrNotEditable, cur.ID, cur.Status)
+	}
+	// AutoMerge is granted against what a ticket says. A filer rewriting its
+	// filing afterwards would steer what merges without a person.
+	if by.Ticket != cur.ID && cur.AutoMerge && changesScope(change) {
+		return fmt.Errorf("%w (%s)", ErrAutoMergeScopeLocked, cur.ID)
+	}
+	if change.AutoMerge != nil {
+		return ErrAutoMergeUserOnly
+	}
+	return nil
+}
+
+// checkFields refuses values no one may set.
+func checkFields(change *TicketChange) error {
+	if change.Title != nil && strings.TrimSpace(*change.Title) == "" {
+		return fmt.Errorf("%w: a ticket needs a title", ErrInvalid)
+	}
+	texts := []string{deref(change.Title), deref(change.Body)}
+	if change.Urgent != nil {
+		texts = append(texts, change.Urgent.Reason)
+	}
+	if err := checkText(texts...); err != nil {
+		return err
+	}
+	if change.Repos != nil {
+		return checkRepos(*change.Repos)
+	}
+	return nil
+}
+
+// changesScope reports whether c changes what the work is: the fields a
+// user's AutoMerge grant was made against.
 func changesScope(c *TicketChange) bool {
 	return c.Title != nil || c.Body != nil || c.Repos != nil || c.Agent != nil
 }
 
+// checkStatusAuthority is who may move a ticket's status. The user may make
+// any move. An agent moves its own ticket's, and may only cancel one it
+// filed: moving a filing on to open or in_progress itself would skip the
+// refinement another agent is meant to give it.
 func checkStatusAuthority(by ident.Principal, cur *Ticket, to Status) error {
 	if by.IsUser() || to == cur.Status {
 		return nil
@@ -252,7 +285,33 @@ func CheckComment(by ident.Principal, body string) error {
 	if strings.TrimSpace(body) == "" {
 		return fmt.Errorf("%w: a blank comment", ErrInvalid)
 	}
+	return checkText(body)
+}
+
+// checkText refuses a NUL: no store keeps one faithfully, and SQLite's
+// would fail with an error that names none of the caller's mistake.
+func checkText(texts ...string) error {
+	for _, t := range texts {
+		if strings.ContainsRune(t, 0) {
+			return fmt.Errorf("%w: text with a NUL byte", ErrInvalid)
+		}
+	}
 	return nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// UrgentReason is the reason as stored: trimmed, and blank unless urgent.
+func UrgentReason(urgent bool, reason string) string {
+	if !urgent {
+		return ""
+	}
+	return strings.TrimSpace(reason)
 }
 
 // AgentMayEdit is which tickets an agent may change, blockers included: its

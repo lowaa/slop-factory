@@ -44,6 +44,8 @@ func testOnlyTheUserReopens(t *testing.T, nb NewBackend) {
 		f.reach(a.Ticket, end)
 		_, err := f.setStatus(a, a.Ticket, tickets.StatusOpen)
 		require.ErrorIs(t, err, tickets.ErrUserOnly)
+		_, err = f.setStatus(a, a.Ticket, end)
+		require.NoError(t, err, "a retried %s is no move", end)
 		assert.Equal(t, end, f.get(a.Ticket).Status)
 
 		reopened, err := f.setStatus(user, a.Ticket, tickets.StatusOpen)
@@ -81,6 +83,10 @@ func testStartingWaitsOnBlockers(t *testing.T, nb NewBackend) {
 	require.NoError(t, err)
 	assert.Equal(t, tickets.StatusInProgress, change.Ticket.Status)
 	assert.Equal(t, []string{"Later"}, titles(change.Ticket.BlockedBy))
+	_, err = f.sys.Update(f.ctx, user, work.ID, &tickets.TicketChange{
+		Status: ptr(tickets.StatusInProgress), Body: ptr("still going"),
+	})
+	require.NoError(t, err, "restating in_progress, with an edit, is no move into it")
 	_, err = f.setStatus(user, work.ID, tickets.StatusDiscussion)
 	require.NoError(t, err)
 	_, err = f.setStatus(user, work.ID, tickets.StatusInProgress)

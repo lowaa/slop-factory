@@ -14,5 +14,7 @@ internal/sqlitex/ package #36
 internal/sqlitex/sqlitextest/ package #36
 internal/control/auth.go NewToken #36
 internal/tickets/ package #36
+# Test support, imported only by tests, so no main will reach it: raise on #36
+# whether test-support packages belong here or in a deadcode filter.
 internal/tickets/conformance/ package #36
 internal/tickets/local/ package #36

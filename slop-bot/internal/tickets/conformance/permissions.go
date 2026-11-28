@@ -70,6 +70,10 @@ func testAgentStatusAuthority(t *testing.T, nb NewBackend) {
 	require.NoError(t, err, "the agent working it moves it on")
 	assert.Equal(t, tickets.StatusOpen, moved.Status)
 
+	_, err = f.setStatus(a, filed.ID, tickets.StatusOpen)
+	require.NoError(t, err, "restating the status it has is no move")
+	_, err = f.sys.Update(f.ctx, a, second.ID, &tickets.TicketChange{Status: ptr(tickets.StatusOpen), Body: ptr("notes")})
+	require.NoError(t, err, "nor, with an edit of a filing it may edit")
 	cancelled, err := f.setStatus(a, filed.ID, tickets.StatusCancelled)
 	require.NoError(t, err, "a filer may drop its own filing")
 	assert.Equal(t, tickets.StatusCancelled, cancelled.Status)
@@ -122,6 +126,9 @@ func testUrgentAllowed(t *testing.T, nb NewBackend) {
 	assert.True(t, marked.Urgent)
 	assert.Equal(t, "the build is broken", marked.UrgentReason)
 	requireUrgentComment(t, marked.Comments, a, "the build is broken")
+	edited, err := f.sys.Update(f.ctx, a, a.Ticket, &tickets.TicketChange{Body: ptr("progress notes")})
+	require.NoError(t, err)
+	assert.Len(t, edited.Comments, len(marked.Comments), "an edit of an urgent ticket doesn't repeat the reason")
 
 	cleared, err := f.sys.Update(f.ctx, a, a.Ticket, &tickets.TicketChange{Urgent: &tickets.UrgentChange{}})
 	require.NoError(t, err)
@@ -157,6 +164,20 @@ func testUrgentNotAllowed(t *testing.T, nb NewBackend) {
 	_, err = f.sys.Update(f.ctx, a, a.Ticket, &tickets.TicketChange{Urgent: &tickets.UrgentChange{}})
 	require.ErrorIs(t, err, tickets.ErrUrgentNotAllowed, "nor may it clear one")
 	f.create(user, &tickets.NewTicket{Title: "users may", Urgent: true})
+
+	padded, err := f.sys.Update(f.ctx, user, a.Ticket, &tickets.TicketChange{
+		Urgent: &tickets.UrgentChange{Urgent: true, Reason: "  main is red  "},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "main is red", padded.UrgentReason, "stored trimmed")
+	blank := f.create(user, &tickets.NewTicket{Title: "blank reason", Urgent: true, UrgentReason: "  "})
+	assert.Empty(t, blank.UrgentReason)
+	assert.Empty(t, blank.Comments, "no reason, no comment")
+	cleared, err := f.sys.Update(f.ctx, user, a.Ticket, &tickets.TicketChange{
+		Urgent: &tickets.UrgentChange{Urgent: false, Reason: "  "},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, cleared.UrgentReason, "clearing clears the reason")
 }
 
 // The same scope as blockers: its own live ticket, or one it filed that

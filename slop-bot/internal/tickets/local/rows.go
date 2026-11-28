@@ -80,7 +80,9 @@ func ticketID(id int64) ident.TicketID { return ident.TicketID(strconv.FormatInt
 
 func parseID(id ident.TicketID) (int64, error) {
 	n, err := strconv.ParseInt(string(id), 10, 64)
-	if err != nil || n <= 0 {
+	// Canonical spellings only: "01" and "+1" are other ids to anything that
+	// compares TicketIDs as strings, so they must not reach ticket 1 here.
+	if err != nil || n <= 0 || strconv.FormatInt(n, 10) != string(id) {
 		return 0, fmt.Errorf("%w: ticket %q", tickets.ErrNotFound, id)
 	}
 	return n, nil

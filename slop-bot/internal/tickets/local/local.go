@@ -6,6 +6,12 @@
 // System (the CLI and agents reach it over the control socket), so that is
 // every write. A write by another process to the same file is still in the
 // log, and is delivered at this System's next write or Start.
+//
+// Durability is sqlitex's: WAL with synchronous=NORMAL, so an OS crash or
+// power loss (not a daemon crash) can lose the last commits, events the
+// feed may already have delivered. The bot's stored cursor can then be past
+// the end of the log, and Start refuses it with ErrInvalidCursor rather
+// than skip what is written next under the same seqs.
 package local
 
 import (
