@@ -134,8 +134,9 @@ Two limits bound how many agents run. Both are counted per daemon.
   for a slot, and it is resumed by its conversation id when it gets one,
   parking another if need be. A restart leaves a parked agent parked. An
   agent in a turn, starting, attached, finishing, `stalled`, or with a
-  message waiting for a slot is never parked. No agent can be parked at the
-  cap only when every live one is busy; then new work waits.
+  message waiting for a slot is parked only for a parked agent ahead of it
+  in the queue (it keeps its place). When no agent can be parked, the start
+  waits.
 
 An agent that has an answer or message to act on is served before new
 tickets, parked or not, first come first served per pool. New work never
@@ -174,6 +175,10 @@ own TUI, resuming the same conversation, in your terminal. The TUI gets a
 fresh agent token, so `ask` and `done` work from inside it.
 
 - one attach per agent. A second is told who holds it.
+- a parked agent (see [slots](#slots)) has no session to take over:
+  `attach` queues it to be resumed, without a message (a `tell` to an
+  agent with open asks would answer them), and asks you to attach again in a
+  moment.
 - the attach holds a **lease**, renewed by the CLI's heartbeat. If the
   heartbeat stops for `agents.attach_lease` (default 30s), the agent is
   handed back without the CLI. After a daemon restart the CLI has that long

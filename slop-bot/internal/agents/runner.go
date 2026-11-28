@@ -74,6 +74,8 @@ type runner struct {
 	// parking is the agent being stopped to free a process: it takes no
 	// slot, and a message for it queues it to be resumed.
 	parking bool
+	// settling is a turn's end being acted on.
+	settling bool
 	// exited is closed when the conversation's events end.
 	exited chan struct{}
 }
@@ -216,9 +218,15 @@ func (r *runner) handle(ctx context.Context, ev *harness.Event) {
 		}
 	case harness.TurnEnded:
 		r.mu.Lock()
-		r.inTurn = false
+		// Settling until turnEnded returns: what it does next (a delivery,
+		// a nudge) isn't visible until then, so it mustn't be parked.
+		r.inTurn, r.settling = false, true
 		r.mu.Unlock()
 		r.turnEnded(ctx, ev)
+		r.mu.Lock()
+		r.settling = false
+		r.mu.Unlock()
+		r.m.Kick()
 	case harness.Exited:
 		r.exitedWith(ctx, ev)
 	}

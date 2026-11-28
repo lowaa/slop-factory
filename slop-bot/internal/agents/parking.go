@@ -3,6 +3,7 @@ package agents
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -40,16 +41,21 @@ func newParked(a *state.Agent) *parkedAgent {
 	return p
 }
 
-// parkable reports whether r may be stopped to free a process: it is
+// parkGrace is how long a parked agent's harness gets to stop cleanly before
+// it is killed. It is between turns, so a clean stop is quick; the bound is
+// its own, not the start's, so a slow stop can't eat the time of the start
+// it makes room for.
+const parkGrace = 10 * time.Second
+
+// parkableLocked reports whether r may be stopped to free a process: it is
 // between turns waiting on a person (an ask, a discussion, a merge, an
-// interrupt) or on its ticket's blockers. Never one in a turn, starting,
-// attached or being attached, finishing, or with a slot to take into its
-// next turn; and not stalled, which can be set mid-turn and read before
-// the turn's end is settled.
-func (r *runner) parkable() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.conv == nil || r.inTurn || r.attaching || r.holdsSlot || r.stopping || r.ending || r.finishing {
+// interrupt) or on its ticket's blockers. Never one in a turn, settling its
+// turn's end (a nudge or a message may be on its way), starting, attached or
+// being attached, finishing, or with a slot to take into its next turn; and
+// not stalled, which can be set mid-turn and read before the turn's end is
+// settled. Call it holding r.mu.
+func (r *runner) parkableLocked() bool {
+	if r.conv == nil || r.inTurn || r.settling || r.attaching || r.holdsSlot || r.stopping || r.ending || r.finishing {
 		return false
 	}
 	switch r.st {
@@ -57,6 +63,12 @@ func (r *runner) parkable() bool {
 		return true
 	}
 	return false
+}
+
+func (r *runner) parkable() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.parkableLocked()
 }
 
 func (r *runner) waitingSince() time.Time {
@@ -73,29 +85,61 @@ func (m *Manager) admitLocked(pool state.Pool) (ok bool, victim *runner) {
 	if m.aheadLocked(pool, "") || !m.slotFreeLocked(pool, "", "") {
 		return false, nil
 	}
-	return m.roomLocked()
+	return m.roomLocked("")
 }
 
 // roomLocked reports whether there is a live place for one more process,
-// or an agent to park for one. Call it holding mu.
-func (m *Manager) roomLocked() (ok bool, victim *runner) {
-	if len(m.runners)+len(m.starting) < m.opts.Config.Concurrency.MaxLive {
+// or an agent to park for one, on behalf of head (a queued agent being
+// served, or "" for new work). A start counts only until its runner is
+// adopted, so an agent being resumed or handed back isn't counted twice.
+// Call it holding mu.
+func (m *Manager) roomLocked(head ident.AgentID) (ok bool, victim *runner) {
+	live := len(m.runners)
+	for ticket := range m.starting {
+		if !m.hasRunnerLocked(ticket) {
+			live++
+		}
+	}
+	if live < m.opts.Config.Concurrency.MaxLive {
 		return true, nil
 	}
-	victim = m.victimLocked()
+	victim = m.victimLocked(head)
 	return victim != nil, victim
 }
 
-// victimLocked is the parkable agent that has waited longest, or nil. One
-// queued for a slot has work to do, and one a CLI is streaming from is
-// being watched over an attach. Ties go to the lower id, so the choice is
-// the same on every run. Call it holding mu.
-func (m *Manager) victimLocked() *runner {
-	candidates := make([]*runner, 0, len(m.runners))
-	for id, r := range m.runners {
-		if m.queuedAtLocked(id) < 0 && m.streams[id] == 0 && r.parkable() {
-			candidates = append(candidates, r)
+func (m *Manager) hasRunnerLocked(ticket ident.TicketID) bool {
+	for _, r := range m.runners {
+		if r.ticket == ticket {
+			return true
 		}
+	}
+	return false
+}
+
+// victimLocked is the parkable agent that has waited longest, or nil. Not
+// one a start is in flight for (a resume or hand-back still settling), nor
+// one a CLI is streaming from. One queued for a slot has work to do, so it
+// goes only when there is no other and head is ahead of it: parked, it
+// keeps its place and is resumed when served, where sparing it would leave
+// head, and everyone behind head, waiting for good. Ties go to the lower
+// id, so the choice is the same on every run. Call it holding mu.
+func (m *Manager) victimLocked(head ident.AgentID) *runner {
+	var free, behind []*runner
+	headAt := m.queuedAtLocked(head)
+	for id, r := range m.runners {
+		if _, starting := m.starting[r.ticket]; starting || m.streams[id] > 0 || !r.parkable() {
+			continue
+		}
+		switch at := m.queuedAtLocked(id); {
+		case at < 0:
+			free = append(free, r)
+		case head != "" && headAt >= 0 && at > headAt:
+			behind = append(behind, r)
+		}
+	}
+	candidates := free
+	if len(candidates) == 0 {
+		candidates = behind
 	}
 	if len(candidates) == 0 {
 		return nil
@@ -110,10 +154,17 @@ func (m *Manager) victimLocked() *runner {
 
 // parkLocked takes v out of the runners, so it holds no live place and is
 // sent nothing more: a delivery already past this point finds it parking
-// (takeSlot) and queues it for a slot instead. Its conversation is stopped
-// by park. Call it holding mu.
+// (takeSlot) and queues it for a slot instead. Its queue place, if it has
+// one, is kept. Its conversation is stopped by park. It checks v is still
+// parkable in the same critical section that marks it, so an attach can't
+// slip in between, and returns nil, parking nothing, when it isn't. Call it
+// holding mu.
 func (m *Manager) parkLocked(v *runner) *parkedAgent {
 	v.mu.Lock()
+	if !v.parkableLocked() {
+		v.mu.Unlock()
+		return nil
+	}
 	// stopping makes its exit expected, and its turn's end start nothing.
 	v.parking, v.stopping = true, true
 	v.mu.Unlock()
@@ -125,17 +176,18 @@ func (m *Manager) parkLocked(v *runner) *parkedAgent {
 
 // park stops a parked agent's conversation and waits for it to exit, on
 // the goroutine of the start it makes room for. It is between turns, so a
-// clean stop loses nothing; one that outlives the start's context is
-// killed.
+// clean stop loses nothing; one that outlives parkGrace is killed.
 func (m *Manager) park(ctx context.Context, r *runner, p *parkedAgent) {
 	keep := context.WithoutCancel(ctx)
 	// Recorded first: a daemon that dies from here on leaves it parked, not
 	// resumed at the next start into a process it gave up.
 	m.setParked(keep, r.id, true)
-	r.stopConv(ctx, false)
+	grace, cancel := context.WithTimeout(keep, parkGrace)
+	defer cancel()
+	r.stopConv(grace, false)
 	select {
 	case <-r.exited:
-	case <-ctx.Done():
+	case <-grace.Done():
 		r.stopConv(keep, true)
 		<-r.exited
 	}
@@ -193,30 +245,42 @@ func (m *Manager) unparkWhenServed(id ident.AgentID) {
 	if _, busy := m.starting[p.ticket]; busy || m.aheadLocked(p.pool, id) || !m.slotFreeLocked(p.pool, "", "") {
 		return
 	}
-	room, victim := m.roomLocked()
+	room, victim := m.roomLocked(id)
 	if !room {
 		return
 	}
 	var parkedVictim *parkedAgent
 	if victim != nil {
-		parkedVictim = m.parkLocked(victim)
+		if parkedVictim = m.parkLocked(victim); parkedVictim == nil {
+			return // it stopped being parkable: the next pass looks again
+		}
 	}
 	delete(m.parked, id)
 	m.goStartLocked(p.ticket, p.pool, false, func(ctx context.Context) {
 		if victim != nil {
 			m.park(ctx, victim, parkedVictim)
 		}
+		// Its own park, if still stopping its process: one conversation
+		// never runs in two.
 		select {
 		case <-p.stopped:
 		case <-ctx.Done():
-			// Its park outlived this start: parked still, for the next try.
-			m.mu.Lock()
-			m.parked[id] = p
-			m.mu.Unlock()
+			m.repark(p)
 			return
 		}
-		m.unpark(ctx, id)
+		m.unpark(ctx, p)
 	})
+}
+
+// repark puts p back among the parked, still queued: a resume that couldn't
+// go ahead is tried again when the queue is next served, rather than lost.
+func (m *Manager) repark(p *parkedAgent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopping {
+		return
+	}
+	m.parked[p.id] = p
 }
 
 // dropStray takes out of the slot queue an agent that is neither running,
@@ -238,10 +302,17 @@ func (m *Manager) dropStray(id ident.AgentID) {
 }
 
 // unpark resumes a parked agent by conversation id. What was waiting for it
-// is delivered as it resumes, taking the slot the queue kept for it.
-func (m *Manager) unpark(ctx context.Context, id ident.AgentID) {
+// is delivered as it resumes, taking the slot the queue kept for it. A
+// failed read leaves it parked, to try again.
+func (m *Manager) unpark(ctx context.Context, p *parkedAgent) {
+	id := p.id
 	a, err := m.opts.State.Agents.Get(ctx, id)
-	if err != nil || a.EndedAt != nil {
+	switch {
+	case errors.Is(err, state.ErrNotFound) || (err == nil && a.EndedAt != nil):
+		return
+	case err != nil:
+		m.opts.Logger.Warn("agents: reading a parked agent to resume", "agent", id, "err", err)
+		m.repark(p)
 		return
 	}
 	keep := context.WithoutCancel(ctx)
@@ -252,6 +323,7 @@ func (m *Manager) unpark(ctx context.Context, id ident.AgentID) {
 		if m.base.Err() != nil {
 			// The daemon is stopping: parked again, for the next start.
 			m.setParked(keep, id, true)
+			m.repark(p)
 			return
 		}
 		m.giveUp(ctx, a, fmt.Sprintf("it couldn't be resumed after it was parked: %v", err))

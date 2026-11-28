@@ -112,9 +112,11 @@ func (m *Manager) Attach(ctx context.Context, req *AttachRequest) (*Attachment, 
 		return nil, &state.LeaseHeldError{Holder: a.Lease.Holder, ExpiresAt: a.Lease.ExpiresAt}
 	}
 	r, ok := m.runner(a.ID)
-	if !ok && m.isParked(a.ID) {
-		return nil, fmt.Errorf("%w: agent %s is parked to free a process: `slop-bot tell` it to resume it, then attach",
-			ErrNoLiveAgent, a.ID)
+	// A parked agent is resumed for the person, as for a message, but
+	// without one: a tell to an agent with open asks would answer them.
+	if !ok && m.wakeParked(a.ID) {
+		return nil, fmt.Errorf("%w: agent %s was parked to free a process, and slop-bot is resuming it: "+
+			"attach again in a moment (it waits for a slot like any agent with work)", ErrNoLiveAgent, a.ID)
 	}
 	if !ok {
 		return nil, fmt.Errorf("%w: agent %s isn't running", ErrNoLiveAgent, a.ID)

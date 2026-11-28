@@ -286,7 +286,7 @@ func (c *Config) defaultDurations() {
 	if c.Retention.Agents == 0 {
 		// Longer than a transcript is kept, so a retained transcript can
 		// still be found by its ticket's id (LatestForTicket).
-		c.Retention.Agents = Duration(90 * 24 * time.Hour)
+		c.Retention.Agents = max(Duration(90*24*time.Hour), c.Retention.Transcripts)
 	}
 }
 

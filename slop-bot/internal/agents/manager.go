@@ -157,8 +157,8 @@ func New(opts *Options) (*Manager, error) {
 	}, nil
 }
 
-// Start resumes live agents, each on its own goroutine, and starts the
-// scheduler.
+// Start resumes live agents, each on its own goroutine (a parked one stays
+// parked until it has work), and starts the scheduler.
 func (m *Manager) Start(ctx context.Context) error {
 	if err := m.loadLimits(ctx); err != nil {
 		return err
@@ -260,6 +260,9 @@ func (m *Manager) goStartLocked(ticket ident.TicketID, pool state.Pool, admit bo
 			// Parked first, on this start's goroutine, so the live
 			// processes never exceed max_live.
 			parked := m.parkLocked(victim)
+			if parked == nil {
+				return false // it stopped being parkable: the next pass looks again
+			}
 			then := start
 			start = func(ctx context.Context) {
 				m.park(ctx, victim, parked)

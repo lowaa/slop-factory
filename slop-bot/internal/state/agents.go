@@ -355,7 +355,7 @@ func (a *Agents) LatestForTicket(ctx context.Context, ticket ident.TicketID) (*A
 }
 
 // ListLive returns every agent that hasn't ended, oldest first: the ones the
-// daemon resumes on start.
+// daemon takes on at start (resumed, or left parked).
 func (a *Agents) ListLive(ctx context.Context) ([]*Agent, error) {
 	var rows []agentRow
 	if err := a.db.NewSelect().Model(&rows).Where("ended_at IS NULL").Order("created_at", "id").Scan(ctx); err != nil {

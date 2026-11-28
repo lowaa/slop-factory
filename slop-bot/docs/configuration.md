@@ -55,7 +55,7 @@ Durations are Go duration strings: `15m`, `24h`, `720h`.
 | `retention.events` | duration | `720h` (30 days) | How long the event log keeps events. |
 | `retention.state_changes` | duration | `720h` (30 days) | How long agents' state history is kept. |
 | `retention.messages` | duration | `720h` (30 days) | How long a message is kept once delivered or read. Queued messages, and open asks, are kept however old. |
-| `retention.agents` | duration | `2160h` (90 days) | How long an ended agent's record is kept, with its worktree list and history. Keep it at least `retention.transcripts`, so a retained transcript can still be found by its ticket's id. An agent released to a person (`attach --no-resume`) is kept for good: its record keeps new agents off the ticket. So is one whose worktrees couldn't be cleaned up, until they are. |
+| `retention.agents` | duration | the larger of `2160h` (90 days) and `retention.transcripts` | How long an ended agent's record is kept, with its worktree list and history. Keep it at least `retention.transcripts`, so a retained transcript can still be found by its ticket's id. An agent released to a person (`attach --no-resume`) is kept for good: its record keeps new agents off the ticket. So is one whose worktrees couldn't be cleaned up: slop-bot's own cleanup forgets each worktree it removes, but one you remove by hand stays recorded, and keeps its agent for good. |
 | `doctor.require` | list of strings | empty | Binaries your workflow needs on `PATH` (`gh`, linters). slop-bot doesn't use them, but its agents will; `doctor` fails when one is missing. Entries must not be blank. |
 
 If `harnesses` is empty, it holds just the default harness with all

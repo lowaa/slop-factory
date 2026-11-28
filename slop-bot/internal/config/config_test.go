@@ -124,6 +124,15 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 	}
 }
 
+// An agent's record outlives its retained transcript by default, so the
+// transcript is still found by its ticket's id.
+func TestAgentRetentionDefaultsToAtLeastTheTranscripts(t *testing.T) {
+	t.Parallel()
+	c, err := parse(t, "retention: {transcripts: 4320h}\n")
+	require.NoError(t, err)
+	assert.Equal(t, 4320*time.Hour, c.Retention.Agents.D())
+}
+
 func TestLoadReadsTheFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

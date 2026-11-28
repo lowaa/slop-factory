@@ -56,7 +56,8 @@ func (q *Queue) PushFront(ctx context.Context, pool Pool, ticket ident.TicketID)
 	return q.push(ctx, pool, ticket, laneFront)
 }
 
-// List returns pool's waiting tickets, in the order Pop takes them.
+// List returns pool's waiting tickets, in the order they are served: the
+// front lane first, then first come first served.
 func (q *Queue) List(ctx context.Context, pool Pool) ([]QueuedTicket, error) {
 	var rows []queueRow
 	if err := q.db.NewSelect().Model(&rows).Where("pool = ?", string(pool)).Order("lane", "position").Scan(ctx); err != nil {

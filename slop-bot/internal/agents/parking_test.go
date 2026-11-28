@@ -163,6 +163,35 @@ func TestARestartLeavesAParkedAgentParked(t *testing.T) {
 	assert.False(t, m.IsParked(a1.Agent))
 }
 
+// A parked agent at the head of the queue, with every live agent queued
+// behind it, parks one of them for its place: sparing queued agents would
+// leave the whole pool waiting for good.
+func TestAParkedHeadOfTheQueueParksAnAgentQueuedBehindIt(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, twoLive)
+	s1, a1 := f.waitingAgent("first", nil)
+	f.clock.Advance(time.Minute)
+	_, a2 := f.waitingAgent("second", nil)
+	f.file("third", nil)
+	f.await(agents.EventParked, of(a1.Agent))
+	s3 := f.session()
+	f.user(s3)
+	a3 := f.agentFor(f.ticketTitled("third"))
+	f.do(s3, fake.Command{Cmd: fake.CmdTurnStart}) // the third holds the slot
+
+	f.tell(a1.Agent, "for a1")
+	f.tell(a2.Agent, "for a2")
+	assert.Equal(t, []ident.TicketID{a1.Ticket, a2.Ticket}, f.queuedTickets(state.PoolNormal))
+	// Interrupted, the third's turn ends with a message to deliver: it
+	// queues behind a1 too, and the slot is free.
+	_, err := f.mgr.Tell(f.ctx(), ident.UserPrincipal(), string(a3.ID), "stop", true)
+	require.NoError(t, err)
+
+	resumed := f.session()
+	assert.Equal(t, s1.ID, resumed.ID)
+	assert.Contains(t, f.user(resumed).Text, "for a1")
+}
+
 // A message left for a parked agent with no queue place (the daemon died
 // between the two writes) still wakes it after a restart.
 func TestAParkedAgentsMessageWithoutAQueuePlaceWakesItAfterARestart(t *testing.T) {
