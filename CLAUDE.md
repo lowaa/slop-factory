@@ -8,7 +8,7 @@
 - Filter runs to the test you're iterating on
 - No timing-based waits: synchronise on events, locks or channels. Override long production timeouts in tests; discuss any test that must be slow
 - Bash tests use shellspec (`dev-tools/quality/spec/` is the example); existing bats suites (`bats/`) stay. `test.sh` entrypoints don't need tests
-- Coverage, complexity and test time are ratcheted by `quality.sh` against `quality_baseline/` (`dev-tools/quality/README.md`): fix a regression, don't rebaseline it; after an improvement, `--prune`
+- Coverage, complexity and test time are ratcheted by `quality.sh` against `quality_baseline/` (`dev-tools/quality/README.md`): fix a regression; rebaseline only a deliberate one, alone (`--rebaseline --only=<measure>`), saying why in the commit; after an improvement, `--prune`
 - Lint findings are ratcheted, baselines and suppression syntax in `dev-tools/lint/README.md`: fix a new one, don't baseline it; after paying debt, `--prune` the baseline
 
 # Self-review

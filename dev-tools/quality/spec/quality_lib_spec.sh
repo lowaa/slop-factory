@@ -196,10 +196,10 @@ Describe 'quality_lib.sh'
       The result of function quality_calls should match pattern 'quality failures */test.json'
     End
 
-    It 'fails when go list finds no packages'
+    It 'fails as a tool error when go list finds no packages'
       STUB_GO_PACKAGES=''
       When call quality_go "$(project)"
-      The status should eq 1
+      The status should eq 2
       The stderr should include 'no packages'
       The result of function quality_calls should eq ''
     End

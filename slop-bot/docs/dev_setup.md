@@ -13,6 +13,7 @@ installed while slop-bot was being built. The install docs grow from this.
 | gocognit (library) | 1.3.0 | MIT | cognitive complexity in `quality.sh` (`dev-tools/quality`) | a Go module dependency, `go get` |
 | gocyclo (library) | 0.6.0 | BSD-3-Clause | cyclomatic complexity in `quality.sh` | a Go module dependency, `go get` |
 | golang.org/x/tools/cover | x/tools 0.52.0 | BSD-3-Clause | reading cover profiles in `quality.sh` | a Go module dependency, `go get` |
+| golang.org/x/mod | 0.43.0 | BSD-3-Clause | reading `go.mod`'s module path in `quality.sh` | a Go module dependency, `go get` |
 
 ## Already present on the dev host
 

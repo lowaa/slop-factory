@@ -1,8 +1,9 @@
 # Contributing
 
 Every suite has its own `test.sh`, and CI (`.github/workflows/ci.yml`) runs
-exactly those, and the repo-wide linters, so a green local run (the touched
-suites' `test.sh` and `dev-tools/lint/lint.sh --changed`) is a green CI run.
+exactly those, the projects' `quality.sh` and the repo-wide linters, so a
+green local run (the touched suites' `test.sh` and `quality.sh`, and
+`dev-tools/lint/lint.sh --changed`) is a green CI run.
 Most need Docker.
 
 | Suite | Command |
@@ -17,7 +18,9 @@ Most need Docker.
 | Shared frontend packages | `js-components/test.sh unit`, `js-components/test.sh storybook` |
 | Supervisor, token | `slop-haus/supervisor/test.sh`, `slop-haus/token/test.sh` |
 | slop-review | `slop-review/test.sh`, `slop-review/report/test.sh` |
-| Test tooling | `bats/run.sh --recursive dev-tools` |
+| slop-bot | `slop-bot/test.sh` |
+| Coverage, complexity and test time against the baselines | each project's `quality.sh`, e.g. `slop-bot/quality.sh`; see `dev-tools/quality/README.md` |
+| Test tooling | `bats/run.sh --recursive dev-tools`, and `dev-tools/quality/test.sh` (needs shellspec) |
 | End to end | `SHARDS=2 slop-haus/e2e_playwright_ts/test.sh` |
 | Harnesses against a scripted model | `slop-haus/harness_e2e/test.sh` |
 | Deployment examples (compose, Helm, Argo CD), static checks | `deployment_example/test.sh` |
@@ -26,7 +29,9 @@ The soak test, the lists-at-scale e2e run and the harnesses at their latest
 releases run nightly (`.github/workflows/nightly.yml`), not on pull requests.
 
 A fresh checkout needs the root `npm ci` first: bats and the frontend's
-stylelint ratchet come from it.
+stylelint ratchet come from it. The shell tests written since bats use
+[shellspec](https://github.com/shellspec/shellspec) 0.28.1, on `PATH` (its
+release's `shellspec-dist.tar.gz`, unpacked).
 
 ## macOS (Apple silicon)
 

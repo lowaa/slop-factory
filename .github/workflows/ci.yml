@@ -254,6 +254,11 @@ jobs:
             go: "true"
             npm-ci: tools
             run: slop-review/report/test.sh && slop-review/test.sh
+          # quality_lib.sh is host-side shell every project's quality.sh runs.
+          - suite: dev-tools-quality
+            go: "true"
+            shellspec: "true"
+            run: dev-tools/quality/test.sh
           # The Go libraries whose tests need no database (go-db, go-privacy
           # and go-settings run Postgres in Docker). One runner for the five,
           # each run whatever the one before did, so one red hides nothing.
@@ -289,6 +294,7 @@ jobs:
           go: ${{ matrix.go || 'false' }}
           uv: ${{ matrix.uv || 'false' }}
           npm-ci: ${{ matrix.npm-ci || 'none' }}
+          shellspec: ${{ matrix.shellspec || 'false' }}
       # What a Mac developer installs too (CONTRIBUTING.md): /bin/bash is 3.2,
       # and macOS has no flock, which the supervisor's and token's tests use.
       - run: brew install bash flock

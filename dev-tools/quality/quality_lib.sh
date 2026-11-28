@@ -129,13 +129,14 @@ quality_bin() {
 
 # quality_go_test DIR BIN: the suite once, with -race as test.sh runs it,
 # for both coverage (of every package of the module, whichever package's
-# tests reach it) and test time.
+# tests reach it) and test time. Returns 1 for a failing suite, 2 for a
+# module it couldn't list.
 quality_go_test() {
   local dir="$1" bin="$2" listed pkgs rc=0
-  listed="$(go list ./...)" || return 1
+  listed="$(go list ./...)" || return 2
   [[ -n "${listed}" ]] || {
     echo "quality.sh: go list found no packages in $(quality_project_path)" >&2
-    return 1
+    return 2
   }
   mapfile -t pkgs <<< "${listed}"
   # A cached result replays in milliseconds, so timing it needs a real run.
@@ -174,7 +175,7 @@ quality_go() (
   for p in "${QUALITY_PROFILES[@]}"; do args+=(--coverprofile "${p}"); done
   for d in "${QUALITY_COVERDIRS[@]}"; do args+=(--coverdir "${d}"); done
   if quality_runs_tests; then
-    quality_go_test "${tmp}" "${bin}" || exit 1
+    quality_go_test "${tmp}" "${bin}" || exit
     args+=(--coverprofile "${tmp}/cover.out" --test-json "${tmp}/test.json")
   fi
   "${bin}" "${args[@]}"

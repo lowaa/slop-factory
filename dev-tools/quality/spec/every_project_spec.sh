@@ -68,19 +68,25 @@ Describe 'every project'
     [[ -n "${best}" ]] && echo "${best}"
   }
   no_base() { ! merge_base > /dev/null 2>&1 && [[ "${QUALITY_REQUIRE_BASE:-}" != 1 ]]; }
-  added_to_pending() { # entries the branch added; a base without the file has none
+  go_projects() {
+    awk '$1 == "go" { print $2 }' "${QUALITY_REAL_ROOT}/dev-tools/lint/projects.txt" | sort -u
+  }
+  # The Go entries the branch added; a base without the file has none. Only
+  # Go: quality_lib.sh measures nothing else yet, so a new TypeScript or
+  # Python project waits in pending.txt until it does.
+  added_to_pending() {
     local base was
     base="$(merge_base)" || {
       echo "no base to compare pending.txt with: set QUALITY_BASE, or fetch main"
       return
     }
     was="$(git -C "${QUALITY_REAL_ROOT}" show "${base}:dev-tools/quality/pending.txt" 2> /dev/null)" || return 0
-    comm -13 <(entries /dev/stdin <<< "${was}") <(pending)
+    comm -13 <(entries /dev/stdin <<< "${was}") <(pending) | comm -12 - <(go_projects)
   }
 
   # CI fetches main for this (QUALITY_REQUIRE_BASE=1), so only a local
   # checkout without one skips it.
-  It 'never adds to pending.txt: a new project gets its quality.sh'
+  It 'never adds a Go project to pending.txt: a new one gets its quality.sh'
     Skip if 'no main or origin/main to compare with' no_base
     When call added_to_pending
     The output should eq ''

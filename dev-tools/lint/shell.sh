@@ -117,8 +117,8 @@ run_shellcheck() {
 
 run_shfmt() {
   local out err rc=0
-  err="$(mktemp)"
   ((${#FMT_FILES[@]})) || return 0
+  err="$(mktemp)"
   out="$(in_docker "${SHFMT_IMAGE}" -d "${SHFMT_FLAGS[@]}" "${FMT_FILES[@]}" 2> "${err}")" || rc=$?
   # It exits 1 both for a diff and for a file it cannot parse; only the
   # latter writes to stderr.

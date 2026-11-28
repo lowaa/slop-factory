@@ -52,9 +52,12 @@ replays in milliseconds (it is left out when test time isn't selected).
 **Coverage.** Packages are named relative to the module (`.`,
 `./internal/x`). The 0.1-point tolerance absorbs rounding (percentages are
 kept to one decimal); it can't accumulate, since the baseline never moves
-down. A new package must reach **80%** to land; `--prune` then adds it to the
-baseline at its own value. A package that is gone is a stale entry,
-`--prune` removes it. Profiles merge by "covered or not", so a `set`-mode
+down. A new package must reach **80%** to land (and the total must still hold, so
+a large package at 85% can fail a module whose total is 93%); `--prune` then
+adds it to the baseline at its own value. A package that is gone (no source left) is a
+stale entry, `--prune` removes it. A package that still has source but is in
+no profile, as with a `--coverprofile` of some packages' tests, regresses:
+the measurement is partial, and `--prune` keeps its entry and the total. Profiles merge by "covered or not", so a `set`-mode
 e2e profile and an `atomic` one from `-race` combine. A `GOCOVERDIR` is
 converted with `go tool covdata textfmt`.
 
@@ -96,8 +99,10 @@ a new package needs 80%. Add a CI step running it after `test.sh`.
 `dev-tools/lint/projects.txt` has an executable `quality.sh` built on
 `quality_lib.sh`, unless `pending.txt` lists it. `pending.txt` held every
 project when this landed, and only shrinks: a project that gets a
-`quality.sh` leaves it, and an entry the branch adds (against the merge-base
-with `main`, or `QUALITY_BASE`) fails. CI fetches `main` for that and sets
+`quality.sh` leaves it, and a Go project the branch adds to it (against the
+merge-base with `main`, or `QUALITY_BASE`) fails. `quality_lib.sh` measures
+only Go so far, so a new TypeScript or Python project goes in `pending.txt`
+until it gains a `quality_<language>`. CI fetches `main` for that and sets
 `QUALITY_REQUIRE_BASE=1`, so the check can't silently skip there.
 
 ## Tools
