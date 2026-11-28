@@ -42,12 +42,14 @@
           "config": {"additionalProperties": true, "type": ["object", "null"]},
           "counts": {"additionalProperties": {"format": "int64", "type": "integer"}, "type": "object"},
           "anything": true,
+          "output": {"$ref": "#/definitions/v2/OutputBody"},
           "receiverThreadIds": {"items": {"type": "string"}, "type": "array"},
           "window": {"properties": {"usedPercent": {"type": "integer"}}, "type": "object"}
         },
         "required": ["threadId", "input", "origin", "counts"],
         "type": "object"
       },
+      "OutputBody": {"anyOf": [{"type": "string"}, {"items": {"$ref": "#/definitions/v2/TurnError"}, "type": "array"}]},
       "ReasoningEffort": {"minLength": 1, "type": "string"},
       "OtherEnum": {"enum": ["a", "b"], "type": "string"},
       "SandboxMode": {"enum": ["read-only", "danger-full-access"], "type": "string"},

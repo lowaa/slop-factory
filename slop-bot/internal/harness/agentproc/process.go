@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 )
@@ -19,10 +21,16 @@ import (
 // error a harness printed before dying.
 const stderrKeep = 64 << 10
 
+// waitDelay bounds how long Wait lingers, after the harness has exited, for a
+// child that kept its stderr open.
+const waitDelay = 5 * time.Second
+
 // Process is a running harness process.
 type Process struct {
-	cmd    *exec.Cmd
-	Stdin  io.WriteCloser
+	cmd   *exec.Cmd
+	Stdin io.WriteCloser
+	// Stdout stays readable after the process exits; the owner closes it
+	// once read to EOF.
 	Stdout io.ReadCloser
 	stderr *tail
 	done   chan struct{}
@@ -50,13 +58,23 @@ func Start(_ context.Context, spec *harness.LaunchSpec) (*Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// An os.Pipe we own, not StdoutPipe: Wait closes StdoutPipe's read end
+	// when the process exits, discarding output the reader hasn't consumed yet.
+	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, err
 	}
+	cmd.Stdout = stdoutW
+	// A grandchild that inherited stderr would otherwise hold Wait open.
+	cmd.WaitDelay = waitDelay
 	p := &Process{cmd: cmd, Stdin: stdin, Stdout: stdout, stderr: &tail{max: stderrKeep}, done: make(chan struct{})}
 	cmd.Stderr = p.stderr
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	_ = stdoutW.Close() // the child has its copy; ours would stop the reader seeing EOF
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("agentproc: starting %s: %w", spec.Path, err)
 	}
 	go p.wait()

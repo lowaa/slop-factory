@@ -469,7 +469,14 @@ func (c *codec) turnCompleted(w *rpcdriver.Wire, params json.RawMessage) ([]harn
 		evs = append(evs, harness.Event{Kind: harness.UsageReport, Usage: c.usage})
 		c.usage = nil
 	}
-	evs = append(evs, c.turnEnded(&n.Turn))
+	next := len(c.queued) > 0 && !c.starting
+	// A queued message starts the next turn at once. Ending this one first
+	// would tell the driver the session settled, and a graceful Stop would
+	// close stdin on a message Send already accepted; the next turn's end
+	// is the one reported.
+	if !next {
+		evs = append(evs, c.turnEnded(&n.Turn))
+	}
 	if c.interrupted {
 		// An interrupted command keeps running until app-server exits
 		// (protocol spike); this ends it. command/exec/terminate doesn't:
@@ -480,7 +487,7 @@ func (c *codec) turnCompleted(w *rpcdriver.Wire, params json.RawMessage) ([]harn
 			return evs, err
 		}
 	}
-	if len(c.queued) > 0 && !c.starting {
+	if next {
 		text := c.queued[0]
 		c.queued = c.queued[1:]
 		return evs, c.startTurn(w, text)

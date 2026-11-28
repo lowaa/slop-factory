@@ -76,3 +76,15 @@ func TestRecordedMessagesDecodeStrictly(t *testing.T) {
 		assert.NotZero(t, decoded[key], "no recording of %s", key)
 	}
 }
+
+func TestAStringOrArrayUnionDecodesEitherForm(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{`{"name":"t","output":"text"}`, `{"name":"t","output":[{"type":"input_text","text":"x"}]}`} {
+		var out TurnToolOutput
+		require.NoError(t, json.Unmarshal([]byte(in), &out))
+		assert.NotEmpty(t, out.Output)
+		b, err := json.Marshal(&out)
+		require.NoError(t, err)
+		assert.JSONEq(t, in, string(b), "and it round-trips")
+	}
+}

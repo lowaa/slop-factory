@@ -24,6 +24,29 @@ var apiKeyVars = []string{
 // would otherwise think it is that session's child.
 var leakPrefixes = []string{"CLAUDE_CODE_", "CLAUDECODE"}
 
+// userClaudeVars match leakPrefixes but are the user's own login and provider
+// choice, not a parent session's: dropping them would leave an agent on
+// Bedrock, Vertex or a long-lived OAuth token unable to authenticate. The
+// parent-session variables (entrypoint, session id, IDE ports) can't be
+// listed in advance, so the prefix stays the rule and these are the exceptions.
+var userClaudeVars = []string{
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+	"CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+}
+
+func isParentSessionVar(name string) bool {
+	if slices.Contains(userClaudeVars, name) {
+		return false
+	}
+	for _, p := range leakPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // EnvOptions shapes an agent's environment.
 type EnvOptions struct {
 	// Base is the daemon's environment, as os.Environ gives it.
@@ -69,10 +92,8 @@ func AgentEnv(opts *EnvOptions) []string {
 		if !opts.APIKeyOptIn && slices.Contains(apiKeyVars, name) {
 			return true
 		}
-		for _, p := range leakPrefixes {
-			if strings.HasPrefix(name, p) {
-				return true
-			}
+		if isParentSessionVar(name) {
+			return true
 		}
 		_, overridden := opts.Set[name]
 		return overridden

@@ -80,6 +80,15 @@ func TestGeneratedEnumsAndMixedUnions(t *testing.T) {
 	assert.Contains(t, src, "AskForApprovalNever = \"never\"")
 }
 
+func TestGeneratedUnionWithoutAnObjectIsRawJSON(t *testing.T) {
+	t.Parallel()
+	src := generateMini(t, "TurnStartParams")
+	// A string-or-array union flattened into a struct would decode neither;
+	// raw JSON, as an alias so RawMessage keeps its (Un)MarshalJSON.
+	assert.Contains(t, src, "type OutputBody = json.RawMessage")
+	assert.NotContains(t, src, "type OutputBody struct")
+}
+
 func TestGeneratedObjectUnionIsFlattened(t *testing.T) {
 	t.Parallel()
 	src := generateMini(t, "TurnStartParams")

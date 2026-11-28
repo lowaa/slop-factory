@@ -278,6 +278,9 @@ func (t *Tmux) status(ctx context.Context, session string) (*Status, bool, error
 	return st, closed, nil
 }
 
+// releaseTimeout bounds releasing an abandoned wait (see WaitExit).
+const releaseTimeout = 5 * time.Second
+
 // WaitExit implements SessionHost, on the channel the pane-died hook (or
 // Kill) signals. A signal sent while nobody waits is kept by tmux, so a
 // death between a Status check and WaitExit isn't missed; one kept from an
@@ -300,7 +303,10 @@ func (t *Tmux) WaitExit(ctx context.Context, session string) error {
 		// goes to it instead of being kept for a later wait. So the abandoned
 		// wait is released by signalling it: the caller's Status check stands
 		// in for whatever that signal might have been.
-		rctx, rcancel := context.WithTimeout(context.Background(), t.recheck)
+		// Bounded on its own, not by the recheck: a release cut short leaves
+		// the dead wait registered, and it swallows the next real signal
+		// (a short recheck under load did exactly that).
+		rctx, rcancel := context.WithTimeout(context.Background(), max(t.recheck, releaseTimeout))
 		defer rcancel()
 		_, _ = t.run.do(rctx, &call{args: []string{"wait-for", "-S", channel}})
 		if ctx.Err() != nil {
