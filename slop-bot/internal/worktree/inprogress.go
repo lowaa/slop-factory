@@ -78,7 +78,10 @@ func inProgress(adminDir string) ([]string, error) {
 
 // saveAutostashes puts any autostash held in the worktree at path's admin dir
 // into the repo's stash list, where it outlives the admin dir: recover is
-// about to drop that.
+// about to drop that. It writes refs/stash and its reflog as `git stash
+// store` does, because that command needs a work tree, which a bare repo in
+// the lookup hasn't; any of its worktrees lists the entry, since they share
+// its refs.
 func (m *Manager) saveAutostashes(ctx context.Context, repoPath, path string) error {
 	dir, err := m.adminDir(ctx, repoPath, path)
 	if err != nil || dir == "" {
@@ -94,7 +97,7 @@ func (m *Manager) saveAutostashes(ctx context.Context, repoPath, path string) er
 		}
 		oid := strings.TrimSpace(string(raw))
 		msg := fmt.Sprintf("slop-bot: autostash from %s, deleted mid-operation", path)
-		if _, err := m.git.Run(ctx, repoPath, "stash", "store", "-m", msg, oid); err != nil {
+		if _, err := m.git.Run(ctx, repoPath, "update-ref", "--create-reflog", "-m", msg, "refs/stash", oid); err != nil {
 			return fmt.Errorf("worktree: saving the autostash in %s: %w", path, err)
 		}
 		m.logger.Warn("saved a deleted worktree's autostash to the stash list", "path", path, "stash", oid)
