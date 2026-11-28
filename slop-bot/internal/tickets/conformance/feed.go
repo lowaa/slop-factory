@@ -216,12 +216,24 @@ func testFeedConcurrentWriters(t *testing.T, nb NewBackend) {
 			}
 		})
 	}
-	// Read while they write.
-	evs := take(t, ch, writers*each)
+	// Read while they write, in a goroutine of its own: a writer that fails
+	// leaves events missing, and must fail the test rather than hang it.
+	read := make(chan []tickets.TicketEvent, 1)
+	go func() {
+		var evs []tickets.TicketEvent
+		for ev := range ch {
+			if evs = append(evs, ev); len(evs) == writers*each {
+				break
+			}
+		}
+		read <- evs
+	}()
 	wg.Wait()
 	for _, err := range errs {
 		require.NoError(t, err)
 	}
+	evs := <-read
+	require.Len(t, evs, writers*each, "the feed closed")
 	assertOrdered(t, evs)
 	per := map[ident.TicketID]int{}
 	for _, ev := range evs {
