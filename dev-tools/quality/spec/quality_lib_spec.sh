@@ -272,15 +272,16 @@ Describe 'quality_lib.sh'
           'quality measure --module . --mode check --only coverage,complexity,testtime --prune-cmd proj/quality.sh --prune --rerun-profile */cover-1.out --rerun-profile */cover-2.out --test-json */test-1.json'
       End
 
+      # The last row's flag leaves the mode a check.
       Parameters
         --prune 3
         --rebaseline 3
         --report 1
-        '' 1
+        --only=coverage,complexity,testtime 1
       End
       It "takes coverage_runs for '$1' as $2 runs"
         runs_file '# Timing moves e2e coverage: see the README.' 3
-        When call quality_go "$(project)" ${1:+"$1"}
+        When call quality_go "$(project)" "$1"
         The status should be success
         The stderr should include 'go test'
         The result of function go_test_count should eq "$2"
