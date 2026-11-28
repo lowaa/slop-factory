@@ -32,6 +32,10 @@ ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     CODEX_VERSION=${CODEX_VERSION} \
     PI_VERSION=${PI_VERSION}
 
+# /srv is node's: WORKDIR doesn't re-own a directory the base image already
+# has as root's, and `go work init` there exits 0 without writing go.work
+# when it can't, leaving the build on the published go-clock.
+RUN mkdir -p /srv && chown node:node /srv
 # Not root: Claude Code refuses --dangerously-skip-permissions as root.
 USER node
 ENV PATH=/usr/local/go/bin:${PATH} \
@@ -43,7 +47,7 @@ COPY --chown=node:node go-clock/go.mod go-clock/go.sum ./go-clock/
 COPY --chown=node:node slop-bot/go.mod slop-bot/go.sum ./slop-bot/
 # A workspace of just the modules slop-bot uses, rather than the repo-level
 # go.work, whose other entries aren't in this context.
-RUN go work init ./go-clock ./slop-bot && cd slop-bot && go mod download
+RUN go work init ./go-clock ./slop-bot && test -f go.work && cd slop-bot && go mod download
 
 # The source is baked in, not mounted: a CI step's Docker daemon can't see
 # the step's checkout.
