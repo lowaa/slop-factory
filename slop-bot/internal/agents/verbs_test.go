@@ -15,11 +15,13 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
 )
 
-// startedAgent files an open ticket and waits for its agent's kick-off.
+// startedAgent files a ticket and waits for its agent's kick-off. The
+// ticket is left preparing, not open: the scheduler walks an open ticket to
+// in_progress asynchronously, which would race with a verb under test that
+// moves the ticket.
 func (f *fixture) startedAgent(title string, mut func(*tickets.NewTicket)) (*fake.Session, *tickets.Ticket, ident.Principal) {
 	f.t.Helper()
 	tk := f.file(title, func(nt *tickets.NewTicket) {
-		nt.Status = tickets.StatusOpen
 		if mut != nil {
 			mut(nt)
 		}
@@ -66,7 +68,8 @@ func TestDiscussParksTheTicketAndResolveWakesTheAgent(t *testing.T) {
 
 	require.NoError(t, f.mgr.ResolveDiscussion(f.ctx(), ident.UserPrincipal(), tk.ID, "keep it"))
 	got = f.ticket(tk.ID)
-	assert.Equal(t, tickets.StatusOpen, got.Status)
+	// The woken agent's ticket is open, or already walked on to in_progress.
+	assert.Contains(t, []tickets.Status{tickets.StatusOpen, tickets.StatusInProgress}, got.Status)
 	assert.Contains(t, lastComment(got), "Discussion resolved:** keep it")
 	assert.Contains(t, f.user(s).Text, "Your discussion is resolved: keep it")
 
