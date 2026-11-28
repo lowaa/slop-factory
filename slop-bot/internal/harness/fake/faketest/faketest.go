@@ -173,6 +173,9 @@ type Puppet struct {
 	cur *fake.Session
 	// held is a user report a script goroutine consumed, kept for Received.
 	held *fake.Report
+	// scripts is the script goroutines Reply and LongTool start, so a test
+	// can know one has finished rather than guess.
+	scripts sync.WaitGroup
 }
 
 // Session is the current fake, for a test to script directly.
@@ -212,7 +215,7 @@ func (p *Puppet) Started(ctx context.Context) (string, bool, error) {
 // arrived (Received checks it).
 func (p *Puppet) Reply(ctx context.Context, text string) error {
 	s := p.Session()
-	go func() {
+	p.scripts.Go(func() {
 		r, err := p.await(ctx, s, fake.RepUser)
 		if err != nil {
 			return
@@ -223,14 +226,14 @@ func (p *Puppet) Reply(ctx context.Context, text string) error {
 				return
 			}
 		}
-	}()
+	})
 	return nil
 }
 
 // LongTool implements conformance.Puppet.
 func (p *Puppet) LongTool(ctx context.Context) (func(context.Context) error, error) {
 	s := p.Session()
-	go func() {
+	p.scripts.Go(func() {
 		r, err := p.await(ctx, s, fake.RepUser)
 		if err != nil {
 			return
@@ -239,7 +242,7 @@ func (p *Puppet) LongTool(ctx context.Context) (func(context.Context) error, err
 		if _, err := s.Do(ctx, fake.Command{Cmd: fake.CmdTurnStart}); err == nil {
 			_, _ = s.Do(ctx, fake.Command{Cmd: fake.CmdToolStart, Tool: "shell"})
 		}
-	}()
+	})
 	return func(ctx context.Context) error {
 		if _, err := s.Do(ctx, fake.Command{Cmd: fake.CmdToolEnd, Tool: "shell"}); err != nil {
 			return err
