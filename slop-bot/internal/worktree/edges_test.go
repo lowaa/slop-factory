@@ -14,8 +14,8 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 )
 
-// git unregisters a worktree before deleting its files; one it can't delete
-// must be reported as left behind, not taken for someone else's next time.
+// git unregisters a worktree even when it couldn't delete all its files; the
+// rest must be reported as left behind, not taken for someone else's next time.
 func TestCleanupReportsAWorktreeGitCouldNotFullyDelete(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() == 0 {
@@ -131,8 +131,9 @@ func TestAnotherRepoAtTheWorktreePathIsNotReused(t *testing.T) {
 	f.run(f.root, "init", "-q", wt.Path)
 	f.commit(wt.Path, "theirs", "someone else's repo")
 
-	_, err := f.m.Create(ctx, "44", []string{"a"}, "a")
+	wts, err := f.m.Create(ctx, "44", []string{"a"}, "a")
 	require.ErrorIs(t, err, ErrCollision)
+	assert.Empty(t, wts, "git made nothing, so there's nothing to record")
 	require.ErrorIs(t, f.m.ForceCleanup(ctx, "44", wt), ErrCollision)
 	assert.FileExists(t, filepath.Join(wt.Path, "theirs"))
 }

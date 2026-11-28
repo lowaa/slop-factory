@@ -93,7 +93,7 @@ func TestMainDefaultID(t *testing.T) {
 	t.Parallel()
 	p := startMain(t, nil, nil)
 	p.send(t, map[string]string{"op": "hello"})
-	assert.Equal(t, "fake-conversation", p.next(t)["id"])
+	assert.True(t, strings.HasPrefix(p.next(t)["id"].(string), "fake-"), "a fresh fake id")
 }
 
 func TestMainUnreachableControllerIsAnError(t *testing.T) {

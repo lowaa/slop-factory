@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/config"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/daemon"
+	"github.com/lowaa/slop-factory/slop-bot/internal/doctor"
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/service"
 	"github.com/lowaa/slop-factory/slop-bot/internal/version"
@@ -36,12 +38,22 @@ type Deps struct {
 	ServiceRunner service.Runner
 	// FindBinary is the slop-bot binary the service should run.
 	FindBinary func() (string, error)
+	// Commands runs doctor's probes: each harness's version, sign-in and
+	// model list.
+	Commands doctor.Commands
+	// Stdin answers `uninstall --purge`'s confirmation, and is the terminal
+	// an attached TUI reads.
+	Stdin io.Reader
 
 	// daemonBuilt lets in-package tests see the daemon `slop-bot daemon`
 	// builds, to wait on its Ready.
 	daemonBuilt func(*daemon.Daemon)
 	// harnesses lets in-package tests run the daemon on a fake harness.
 	harnesses daemon.Harnesses
+	// clock lets in-package tests run the daemon on a fake clock.
+	clock clock.Clock
+	// tuiGrace shortens the daemon's wait for a hung-up TUI in tests.
+	tuiGrace time.Duration
 }
 
 // FromOS is the real outside world.
@@ -53,8 +65,13 @@ func FromOS() (*Deps, error) {
 	return &Deps{
 		Stdout: os.Stdout, Stderr: os.Stderr, Env: env, Token: os.Getenv(control.TokenEnv),
 		ServiceRunner: service.ExecRunner{}, FindBinary: service.NewBinaryFinder().Find,
+		Commands: doctor.ExecCommands{Timeout: probeTimeout}, Stdin: os.Stdin,
 	}, nil
 }
+
+// probeTimeout bounds each of doctor's probes. agy's model list and
+// Codex's app-server go over the network, so it allows for a slow one.
+const probeTimeout = 30 * time.Second
 
 // app holds what commands share once flags are parsed.
 type app struct {
@@ -62,9 +79,9 @@ type app struct {
 	configPath string
 }
 
-// New builds the command tree.
-func New(deps *Deps) *cobra.Command {
-	a := &app{deps: deps}
+// root builds the command tree.
+func (a *app) root() *cobra.Command {
+	deps := a.deps
 	root := &cobra.Command{
 		Use:           "slop-bot",
 		Short:         "Run coding agents on tickets, one agent per ticket",
@@ -81,6 +98,9 @@ func New(deps *Deps) *cobra.Command {
 		a.daemonCmd(),
 		a.healthCmd(),
 		a.serviceCmd(),
+		a.doctorCmd(),
+		a.installCmd(),
+		a.uninstallCmd(),
 		a.ticketCmd(),
 	)
 	root.AddCommand(a.agentCmds()...)
@@ -89,10 +109,17 @@ func New(deps *Deps) *cobra.Command {
 
 // Execute runs the CLI and returns the process exit code.
 func Execute(ctx context.Context, deps *Deps, args []string) int {
-	root := New(deps)
+	a := &app{deps: deps}
+	root := a.root()
 	root.SetArgs(args)
 	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprintln(deps.Stderr, "slop-bot:", err)
+		var notRunning *control.NotRunningError
+		if errors.As(err, &notRunning) {
+			if note := a.unreachableNote(notRunning.Socket); note != "" {
+				_, _ = fmt.Fprintln(deps.Stderr, "slop-bot: note:", note)
+			}
+		}
 		return 1
 	}
 	return 0
@@ -152,7 +179,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			}
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 			opts := &daemon.Options{
-				Config: cfg, Paths: p, Logger: logger, Clock: clock.Real{},
+				Config: cfg, Paths: p, Logger: logger, Clock: clock.Or(a.deps.clock), TUIGrace: a.deps.tuiGrace,
 				CLIReference: AgentReference(cmd.Root()),
 			}
 			// Only when set: a nil map in the interface would read as

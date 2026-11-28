@@ -75,9 +75,6 @@ type codec struct {
 	// tools are the tool items started and not yet completed, by item id.
 	tools map[string]string
 	usage *harness.Usage
-	// limits are the last rate-limit windows seen, per limit id: Codex's
-	// updates are sparse, so each merges into what came before.
-	limits map[string]*limitWindows
 	// lastError is the last unretried error notification, for a turn that
 	// fails without saying why.
 	lastError string
@@ -102,7 +99,7 @@ type request struct {
 }
 
 func newCodec(opts *codecOptions) *codec {
-	return &codec{opts: opts, pending: map[int64]*request{}, tools: map[string]string{}, limits: map[string]*limitWindows{}}
+	return &codec{opts: opts, pending: map[int64]*request{}, tools: map[string]string{}}
 }
 
 // message is any JSON-RPC message: a request or notification has Method, a
@@ -590,46 +587,32 @@ func (c *codec) tokenUsage(params json.RawMessage) error {
 	return nil
 }
 
-// limitWindows are one limit id's windows: the 5-hour and the weekly.
-type limitWindows struct {
-	primary, secondary *harness.Limit
-}
-
-// rateLimits merges a sparse update into the last windows seen and reports
-// the tighter of its limit's windows: the one the scheduler must not run
-// past.
+// rateLimits reports each window an update carries, named by its limit id
+// and slot (the 5-hour primary, the weekly secondary). Updates are sparse:
+// a window left out is unchanged, and the Manager keeps the last report of
+// each.
 func (c *codec) rateLimits(params json.RawMessage) ([]harness.Event, error) {
 	var n protocol.AccountRateLimitsUpdatedNotification
 	if err := json.Unmarshal(params, &n); err != nil {
 		return nil, err
 	}
-	w := c.limits[n.RateLimits.LimitID]
-	if w == nil {
-		w = &limitWindows{}
-		c.limits[n.RateLimits.LimitID] = w
+	var evs []harness.Event
+	for _, w := range []struct {
+		slot string
+		win  *protocol.RateLimitWindow
+	}{{"primary", n.RateLimits.Primary}, {"secondary", n.RateLimits.Secondary}} {
+		if l := limitOf(n.RateLimits.LimitID+"/"+w.slot, w.win); l != nil {
+			evs = append(evs, harness.Event{Kind: harness.LimitReport, Limit: l})
+		}
 	}
-	if l := limitOf(n.RateLimits.Primary); l != nil {
-		w.primary = l
-	}
-	if l := limitOf(n.RateLimits.Secondary); l != nil {
-		w.secondary = l
-	}
-	best := w.primary
-	if best == nil || (w.secondary != nil && w.secondary.UsedPercent > best.UsedPercent) {
-		best = w.secondary
-	}
-	if best == nil {
-		return nil, nil
-	}
-	l := *best
-	return []harness.Event{{Kind: harness.LimitReport, Limit: &l}}, nil
+	return evs, nil
 }
 
-func limitOf(win *protocol.RateLimitWindow) *harness.Limit {
+func limitOf(window string, win *protocol.RateLimitWindow) *harness.Limit {
 	if win == nil {
 		return nil
 	}
-	l := &harness.Limit{UsedPercent: float64(win.UsedPercent)}
+	l := &harness.Limit{Window: window, UsedPercent: float64(win.UsedPercent)}
 	if win.ResetsAt != 0 {
 		l.ResetsAt = time.Unix(win.ResetsAt, 0).UTC()
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -96,6 +97,7 @@ type record struct {
 	RateLimitInfo *struct {
 		Status         string `json:"status"`
 		ResetsAt       int64  `json:"resetsAt"`
+		RateLimitType  string `json:"rateLimitType"`
 		UnifiedWindows map[string]struct {
 			Utilization float64 `json:"utilization"`
 			ResetsAt    int64   `json:"resetsAt"`
@@ -125,7 +127,7 @@ func (c *codec) Decode(line []byte, _ *rpcdriver.Wire) ([]harness.Event, error) 
 	case "user":
 		evs = append(evs, toolResultEvents(&r)...)
 	case "rate_limit_event":
-		if l := limitFrom(&r); l != nil {
+		for _, l := range limitsFrom(&r) {
 			evs = append(evs, harness.Event{Kind: harness.LimitReport, Limit: l})
 		}
 	case "result":
@@ -183,20 +185,41 @@ func turnEnded(r *record) harness.Event {
 	}
 }
 
-// limitFrom reports the tightest window: the one the scheduler must not run
-// past.
-func limitFrom(r *record) *harness.Limit {
-	if r.RateLimitInfo == nil {
+// limitsFrom reports each of the plan's windows, sorted by name. A
+// rejection is a limit reached whatever the windows say (it may name one
+// they don't carry, such as a model's weekly limit, or come with none), so
+// it reports its limit type as full until its reset.
+func limitsFrom(r *record) []*harness.Limit {
+	info := r.RateLimitInfo
+	if info == nil {
 		return nil
 	}
-	var best *harness.Limit
-	for _, w := range r.RateLimitInfo.UnifiedWindows {
-		l := &harness.Limit{UsedPercent: w.Utilization * 100, ResetsAt: time.Unix(w.ResetsAt, 0).UTC()}
-		if best == nil || l.UsedPercent > best.UsedPercent {
-			best = l
-		}
+	names := make([]string, 0, len(info.UnifiedWindows))
+	for name := range info.UnifiedWindows {
+		names = append(names, name)
 	}
-	return best
+	slices.Sort(names)
+	var out []*harness.Limit
+	for _, name := range names {
+		w := info.UnifiedWindows[name]
+		out = append(out, &harness.Limit{Window: name, UsedPercent: w.Utilization * 100, ResetsAt: unixOrZero(w.ResetsAt)})
+	}
+	if info.Status == "rejected" {
+		window := info.RateLimitType
+		if window == "" {
+			window = "rejected"
+		}
+		out = append(out, &harness.Limit{Window: window, UsedPercent: 100, ResetsAt: unixOrZero(info.ResetsAt)})
+	}
+	return out
+}
+
+// unixOrZero is a reset time, or zero when the harness gave none.
+func unixOrZero(s int64) time.Time {
+	if s == 0 {
+		return time.Time{}
+	}
+	return time.Unix(s, 0).UTC()
 }
 
 func write(w *rpcdriver.Wire, v any) error {

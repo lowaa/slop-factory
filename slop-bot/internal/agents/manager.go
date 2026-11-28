@@ -24,6 +24,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/paths"
 	"github.com/lowaa/slop-factory/slop-bot/internal/state"
 	"github.com/lowaa/slop-factory/slop-bot/internal/tickets"
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 	"github.com/lowaa/slop-factory/slop-bot/internal/worktree"
 )
 
@@ -58,6 +59,14 @@ type Options struct {
 	// StartTimeout bounds starting or resuming one agent, git and the
 	// harness's handshake included; zero means DefaultStartTimeout.
 	StartTimeout time.Duration
+	// Transcripts keeps an agent's transcript once it ends.
+	Transcripts Retainer
+}
+
+// Retainer copies an ended agent's transcript to where slop-bot keeps it
+// (transcript.Library).
+type Retainer interface {
+	Retain(ctx context.Context, a *state.Agent) error
 }
 
 // DefaultStartTimeout is Options.StartTimeout's default: generous, since a
@@ -85,6 +94,14 @@ type Manager struct {
 	// recovered once that start settles, rather than lost.
 	recoverAfter map[ident.TicketID]*runner
 	stopping     bool
+	// streams counts the attached CLIs' open streams per agent.
+	streams map[ident.AgentID]int
+
+	limits *limits
+	// wake fires when the earliest held harness's window resets, at
+	// wakeTime; only the scheduler goroutine touches them.
+	wake     <-chan time.Time
+	wakeTime time.Time
 	// guardTold is when the user was last told the loop guard stopped a
 	// pair, so a refused retry doesn't tell them again within the window.
 	guardTold map[string]time.Time
@@ -108,12 +125,14 @@ type Manager struct {
 	kick chan struct{}
 	stop chan struct{}
 	done chan struct{}
+	// swept is closed when the lease sweeper has stopped.
+	swept chan struct{}
 }
 
 // New makes a Manager; nothing runs until Start.
 func New(opts *Options) (*Manager, error) {
 	if opts == nil || opts.Config == nil || opts.Paths == nil || opts.State == nil || opts.Tickets == nil ||
-		opts.Harnesses == nil || opts.Worktrees == nil || opts.Logger == nil || opts.Clock == nil {
+		opts.Harnesses == nil || opts.Worktrees == nil || opts.Logger == nil || opts.Clock == nil || opts.Transcripts == nil {
 		return nil, errors.New("agents: New is missing a dependency")
 	}
 	base, cancel := context.WithCancel(context.Background())
@@ -122,22 +141,29 @@ func New(opts *Options) (*Manager, error) {
 		runners:      map[ident.AgentID]*runner{},
 		starting:     map[ident.TicketID]state.Pool{},
 		recoverAfter: map[ident.TicketID]*runner{},
+		streams:      map[ident.AgentID]int{},
+		limits:       newLimits(),
 		guardTold:    map[string]time.Time{},
 		base:         base,
 		cancelBase:   cancel,
 		kick:         make(chan struct{}, 1),
 		stop:         make(chan struct{}),
 		done:         make(chan struct{}),
+		swept:        make(chan struct{}),
 	}, nil
 }
 
 // Start resumes live agents, each on its own goroutine, and starts the
 // scheduler.
 func (m *Manager) Start(ctx context.Context) error {
+	if err := m.loadLimits(ctx); err != nil {
+		return err
+	}
 	if err := m.resumeAll(ctx); err != nil {
 		return err
 	}
 	go m.schedule() // #nosec G118 -- the scheduler outlives Start's ctx; Stop ends it
+	go m.sweeper()  // #nosec G118 -- like the scheduler, it runs until Stop
 	m.Kick()
 	return nil
 }
@@ -164,6 +190,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 	close(m.stop)
 	m.cancelBase()
 	if err := waitCtx(ctx, m.done); err != nil {
+		return err
+	}
+	if err := waitCtx(ctx, m.swept); err != nil {
 		return err
 	}
 	if err := waitGroup(ctx, &m.starts); err != nil {
@@ -310,6 +339,27 @@ func (m *Manager) event(ctx context.Context, typ string, agent ident.AgentID, ti
 	}
 }
 
+// retain keeps an ended agent's transcript, because the harness prunes its
+// own. A failure costs the copy, not the ending, so it's told, not
+// returned.
+func (m *Manager) retain(ctx context.Context, id ident.AgentID) {
+	a, err := m.opts.State.Agents.Get(ctx, id)
+	if err == nil {
+		err = m.opts.Transcripts.Retain(ctx, a)
+	}
+	// An agent that never got a conversation going has nothing to keep;
+	// one that did and has no transcript is worth knowing about.
+	if errors.Is(err, transcript.ErrNotFound) && a != nil && a.ConversationID == "" {
+		return
+	}
+	if err != nil {
+		m.opts.Logger.Warn("agents: retaining a transcript", "agent", id, "err", err)
+		m.tellUser(ctx, id, fmt.Sprintf("agent %s's transcript couldn't be kept: %v", id, err))
+		return
+	}
+	m.event(ctx, EventRetained, id, a.Ticket, nil)
+}
+
 // TellUser puts a system message from slop-bot in the user's inbox.
 func (m *Manager) TellUser(ctx context.Context, body string) { m.tellUser(ctx, "", body) }
 
@@ -346,4 +396,11 @@ const (
 	EventReleased     = "agent.released"
 	EventSpawnFailed  = "agent.spawn_failed"
 	EventMisconfigure = "ticket.misconfigured"
+	// EventHeld is a ticket waiting for its harness's plan window to reset.
+	EventHeld = "ticket.held"
+	// EventRetained is an ended agent's transcript, kept.
+	EventRetained = "transcript.retained"
+	// EventHarness prefixes the conversation's own events: harness.text,
+	// harness.tool_started, and so on, which `slop-bot watch` shows.
+	EventHarness = "harness."
 )

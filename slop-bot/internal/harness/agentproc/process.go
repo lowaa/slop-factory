@@ -21,16 +21,17 @@ import (
 // error a harness printed before dying.
 const stderrKeep = 64 << 10
 
-// waitDelay bounds how long Wait lingers, after the harness has exited, for a
-// child that kept its stderr open.
-const waitDelay = 5 * time.Second
+// stderrDrain bounds how long an exit waits for stderr to drain once the
+// harness itself has gone. Normally it drains at once; a child the harness
+// left behind (a backgrounded shell, an MCP server) can hold stderr open
+// indefinitely, and without a bound that would keep the exit from ever
+// being reported.
+const stderrDrain = 5 * time.Second
 
 // Process is a running harness process.
 type Process struct {
-	cmd   *exec.Cmd
-	Stdin io.WriteCloser
-	// Stdout stays readable after the process exits; the owner closes it
-	// once read to EOF.
+	cmd    *exec.Cmd
+	Stdin  io.WriteCloser
 	Stdout io.ReadCloser
 	stderr *tail
 	done   chan struct{}
@@ -44,7 +45,11 @@ type exitResult struct {
 
 // Start runs spec. The process outlives ctx only until Kill or its own exit:
 // ctx governs starting, not the process's life, which the conversation owns.
-func Start(_ context.Context, spec *harness.LaunchSpec) (*Process, error) {
+func Start(ctx context.Context, spec *harness.LaunchSpec) (*Process, error) {
+	return start(ctx, spec, stderrDrain)
+}
+
+func start(_ context.Context, spec *harness.LaunchSpec, drain time.Duration) (*Process, error) {
 	if spec == nil || spec.Path == "" {
 		return nil, errors.New("agentproc: no command")
 	}
@@ -58,20 +63,23 @@ func Start(_ context.Context, spec *harness.LaunchSpec) (*Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	// An os.Pipe we own, not StdoutPipe: Wait closes StdoutPipe's read end
-	// when the process exits, discarding output the reader hasn't consumed yet.
+	// Not cmd.StdoutPipe: Wait closes that pipe's read end, so output the
+	// harness wrote just before exiting would be lost to a reader that
+	// hasn't got to it yet. With our own pipe the reader drains it to EOF
+	// whenever the process exits.
 	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		return nil, err
 	}
 	cmd.Stdout = stdoutW
-	// A grandchild that inherited stderr would otherwise hold Wait open.
-	cmd.WaitDelay = waitDelay
+	cmd.WaitDelay = drain
 	p := &Process{cmd: cmd, Stdin: stdin, Stdout: stdout, stderr: &tail{max: stderrKeep}, done: make(chan struct{})}
 	cmd.Stderr = p.stderr
 	err = cmd.Start()
-	_ = stdoutW.Close() // the child has its copy; ours would stop the reader seeing EOF
+	// The child has its own copy of the write end; ours must go, or the
+	// reader never sees EOF.
+	_ = stdoutW.Close()
 	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
@@ -83,6 +91,11 @@ func Start(_ context.Context, spec *harness.LaunchSpec) (*Process, error) {
 
 func (p *Process) wait() {
 	err := p.cmd.Wait()
+	// A stderr still held open past the drain bound is not the harness
+	// failing: its exit status is what's reported.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
 	code := 0
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {

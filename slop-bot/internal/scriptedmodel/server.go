@@ -122,6 +122,16 @@ func (s *Server) Load(scenario *Scenario) error {
 	return nil
 }
 
+// Append adds turns to the end of the loaded scenario, without resetting the
+// recording, the turns already played or the gates: how a test scripts a
+// conversation one step at a time, as it goes, rather than all up front.
+func (s *Server) Append(turns ...*Turn) error {
+	if err := (&Scenario{Turns: turns}).Validate(); err != nil {
+		return err
+	}
+	return s.script.extend(turns)
+}
+
 // Reset unloads the scenario and resets the recording.
 func (s *Server) Reset() { s.script.replace(nil) }
 

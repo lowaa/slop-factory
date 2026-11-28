@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -49,9 +50,22 @@ func (a *app) pathsCmd() *cobra.Command {
 					return err
 				}
 			}
-			return w.Flush()
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			return a.printMismatches(cmd.OutOrStdout(), p)
 		},
 	}
+}
+
+// printMismatches warns when the installed service resolves a location
+// differently from this shell: the 1.4 mismatch warning.
+func (a *app) printMismatches(out io.Writer, p *paths.Paths) error {
+	w := &errWriter{w: out}
+	for _, warn := range a.mismatchWarnings(p) {
+		w.printf("warning: %s\n", warn)
+	}
+	return w.err
 }
 
 func origin(d paths.Dir) string {

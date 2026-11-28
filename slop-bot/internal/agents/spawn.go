@@ -25,16 +25,16 @@ var errMisconfigured = errors.New("agents: misconfigured")
 // for a harness that dies on every start.
 const recoveryLimit = 3
 
-// spawn starts an agent for t, which the scheduler found eligible. It runs
+// spawn starts an agent for t, which the scheduler found eligible, with
+// spec: t's own, resolved, or the fallback specFor chose. It runs
 // on its own goroutine (goStart), under a context Stop cancels.
-func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool) {
-	if err := m.spawnAgent(ctx, t, pool); err != nil && !errors.Is(err, errMisconfigured) {
+func (m *Manager) spawn(ctx context.Context, t *tickets.Ticket, pool state.Pool, spec tickets.AgentSpec) {
+	if err := m.spawnAgent(ctx, t, pool, spec); err != nil && !errors.Is(err, errMisconfigured) {
 		m.opts.Logger.Warn("agents: spawning", "ticket", t.ID, "err", err)
 	}
 }
 
-func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.Pool) error {
-	spec := agentspec.Resolve(t.Agent, m.opts.Config)
+func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.Pool, spec tickets.AgentSpec) error {
 	h, ok := m.opts.Harnesses.Harness(spec.Harness)
 	if err := agentspec.Validate(spec, m.opts.Config); err != nil || !ok {
 		if err == nil {
@@ -80,7 +80,7 @@ func (m *Manager) spawnAgent(ctx context.Context, t *tickets.Ticket, pool state.
 		m.failStart(ctx, id, t, err)
 		return fmt.Errorf("agents: starting %s for ticket %s: %w", h.Name(), t.ID, err)
 	}
-	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
+	r := m.adopt(ctx, &adoption{id: id, ticket: t.ID, harness: spec.Harness, pool: pool, conv: conv, caps: h.Capabilities(), st: state.StateStarting})
 	m.event(ctx, EventSpawned, id, t.ID, map[string]string{"harness": spec.Harness, "driver": h.Driver()})
 	if err := r.conv.Send(ctx, &harness.Message{From: ident.UserPrincipal(), Text: kickoff(t)}); err != nil {
 		m.abortStart(ctx, r, t, err)
@@ -196,9 +196,10 @@ func (m *Manager) giveUp(ctx context.Context, a *state.Agent, why string) {
 func (m *Manager) endRecord(ctx context.Context, a *state.Agent, st state.AgentState, reason string) {
 	ctx = context.WithoutCancel(ctx)
 	m.cleanup(ctx, a.ID, a.Ticket)
-	if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: st, Reason: reason}); err != nil {
+	if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: st, Reason: reason, GivenUp: true}); err != nil {
 		m.opts.Logger.Warn("agents: ending an agent", "agent", a.ID, "err", err)
 	}
+	m.retain(ctx, a.ID)
 	typ := EventFinished
 	if st == state.StateReleased {
 		typ = EventReleased
@@ -211,16 +212,24 @@ func (m *Manager) endRecord(ctx context.Context, a *state.Agent, st state.AgentS
 type adoption struct {
 	id     ident.AgentID
 	ticket ident.TicketID
-	pool   state.Pool
-	conv   harness.Conversation
-	caps   harness.Capabilities
-	st     state.AgentState
+	// harness is the configured name, whose plan limits the agent reports.
+	harness string
+	pool    state.Pool
+	conv    harness.Conversation
+	caps    harness.Capabilities
+	st      state.AgentState
+	// decl and summary carry what the agent declared from inside a TUI
+	// across the hand-back.
+	decl      declared
+	summary   string
+	holdsSlot bool
 }
 
 func (m *Manager) adopt(ctx context.Context, a *adoption) *runner {
 	id := a.id
 	conv := a.conv
-	r := &runner{m: m, id: id, ticket: a.ticket, pool: a.pool, conv: conv, caps: a.caps, st: a.st, exited: make(chan struct{})}
+	r := &runner{m: m, id: id, ticket: a.ticket, harness: a.harness, pool: a.pool, conv: conv, caps: a.caps, st: a.st,
+		decl: a.decl, summary: a.summary, holdsSlot: a.holdsSlot, exited: make(chan struct{})}
 	m.mu.Lock()
 	r.stopping = m.stopping
 	m.runners[id] = r
@@ -342,6 +351,7 @@ func (m *Manager) resumeAll(ctx context.Context) error {
 	}
 	for _, a := range live {
 		if a.Mode == state.ModeAttached {
+			m.adoptAttached(ctx, a)
 			continue
 		}
 		t, err := m.opts.Tickets.Get(ctx, a.Ticket)
@@ -364,35 +374,42 @@ func (m *Manager) resumeAll(ctx context.Context) error {
 	return nil
 }
 
+// adoptAttached takes on an agent a person had attached when the daemon
+// last stopped. It has no conversation of ours: it holds its slot and
+// takes its verbs from the TUI until its CLI reconnects and hands it back,
+// or its lease expires.
+func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
+	if a.State != state.StateAttached {
+		// The daemon stopped between taking the lease and moving the state.
+		if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: state.StateAttached, Reason: "attached at restart"}); err != nil {
+			m.opts.Logger.Warn("agents: recording an attach", "agent", a.ID, "err", err)
+		}
+	}
+	r := &runner{m: m, id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, st: state.StateAttached,
+		decl: declared(a.Declared), summary: a.DeclaredSummary, exited: make(chan struct{})}
+	close(r.exited)
+	m.mu.Lock()
+	m.runners[a.ID] = r
+	m.mu.Unlock()
+}
+
 // resume restarts a's conversation by id. A waiting agent stays waiting;
 // one that was mid-work, or whose harness died, is told why its last turn
 // may have been cut short. Messages that were waiting for it go now.
 func (m *Manager) resume(ctx context.Context, a *state.Agent, note string) error {
-	h, ok := m.opts.Harnesses.Harness(a.Harness)
-	if !ok {
-		return fmt.Errorf("harness %q isn't available", a.Harness)
+	if a.State == state.StateAttached {
+		// Attached but holding no lease: the daemon stopped mid hand-back.
+		// It resumes like any agent cut off mid-work.
+		if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: state.StateStarting, Reason: "an interrupted hand-back"}); err != nil {
+			return err
+		}
+		a.State = state.StateStarting
 	}
-	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
+	conv, caps, err := m.startConversation(ctx, a)
 	if err != nil {
 		return err
 	}
-	// state.db holds only token hashes, so the resumed agent gets a new one.
-	token, err := control.NewToken()
-	if err != nil {
-		return err
-	}
-	if err := m.opts.State.Agents.RotateTokenHash(ctx, a.ID, control.HashToken(token)); err != nil {
-		return err
-	}
-	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, m.worktreesOf(a), token)
-	if err != nil {
-		return err
-	}
-	conv, err := h.Start(ctx, ws, &harness.ConversationRef{Harness: a.Harness, Driver: a.Driver, ID: a.ConversationID})
-	if err != nil {
-		return err
-	}
-	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, pool: a.Pool, conv: conv, caps: h.Capabilities(), st: a.State})
+	r := m.adopt(ctx, &adoption{id: a.ID, ticket: a.Ticket, harness: a.Harness, pool: a.Pool, conv: conv, caps: caps, st: a.State})
 	st, cutShort := resumedState(a.State)
 	r.setState(ctx, st, "resumed")
 	m.event(ctx, EventResumed, a.ID, a.Ticket, nil)
@@ -417,4 +434,42 @@ func resumedState(was state.AgentState) (state.AgentState, bool) {
 		return state.StateIdle, true
 	}
 	return was, true
+}
+
+// startConversation resumes a's conversation by id, with a fresh token:
+// state.db holds only token hashes, so the old one can't be handed on.
+func (m *Manager) startConversation(ctx context.Context, a *state.Agent) (harness.Conversation, harness.Capabilities, error) {
+	h, ok := m.opts.Harnesses.Harness(a.Harness)
+	if !ok {
+		return nil, harness.Capabilities{}, fmt.Errorf("harness %q isn't available", a.Harness)
+	}
+	t, err := m.opts.Tickets.Get(ctx, a.Ticket)
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	token, err := m.rotateToken(ctx, a.ID)
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	ws, err := m.workspace(a.ID, t, tickets.AgentSpec{Harness: a.Harness, Model: a.Model, Effort: a.Effort}, m.worktreesOf(a), token)
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	conv, err := h.Start(ctx, ws, &harness.ConversationRef{Harness: a.Harness, Driver: a.Driver, ID: a.ConversationID})
+	if err != nil {
+		return nil, harness.Capabilities{}, err
+	}
+	return conv, h.Capabilities(), nil
+}
+
+// rotateToken gives the agent a new token, retiring the old one.
+func (m *Manager) rotateToken(ctx context.Context, id ident.AgentID) (string, error) {
+	token, err := control.NewToken()
+	if err != nil {
+		return "", err
+	}
+	if err := m.opts.State.Agents.RotateTokenHash(ctx, id, control.HashToken(token)); err != nil {
+		return "", err
+	}
+	return token, nil
 }

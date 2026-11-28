@@ -21,7 +21,7 @@ import (
 // scripted turn that runs a shell command, then a final text reply, against
 // an in-process server. Opt-in, since it needs the CLIs; it spends no tokens
 // (the harnesses get dummy keys and talk only to the scripted model).
-const realHarnessesEnv = "SCRIPTED_MODEL_REAL_HARNESSES"
+const realHarnessesEnv = "SLOP_BOT_TIER2"
 
 // A bound on a stuck harness, not a wait for anything: each run finishes in
 // seconds when it works.

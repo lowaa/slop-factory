@@ -42,7 +42,7 @@ type specFlags struct{ harness, model, effort string }
 
 func (s *specFlags) add(c *cobra.Command) {
 	c.Flags().StringVar(&s.harness, "harness", "", "harness to run it (claude-code, codex, pi, agy); blank: default_harness")
-	c.Flags().StringVar(&s.model, "model", "", "model; blank: the harness's own default")
+	c.Flags().StringVar(&s.model, "model", "", "model; blank: harnesses.<name>.model from the config, else the harness's own default")
 	c.Flags().StringVar(&s.effort, "effort", "", "effort or thinking level; blank: the harness's own default")
 }
 

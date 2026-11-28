@@ -4,13 +4,20 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
+
+	"github.com/lowaa/slop-factory/slop-bot/internal/transcript"
 )
 
 // Main is the fake harness process. It returns the exit code. Its modes:
@@ -32,9 +39,25 @@ func Main(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) 
 		id, resumed = args[1], true
 	}
 	if id == "" {
-		id = "fake-conversation"
+		// Distinct per conversation, as a real harness's are: transcripts
+		// are kept by id.
+		b := make([]byte, 6)
+		_, _ = rand.Read(b)
+		id = "fake-" + hex.EncodeToString(b)
 	}
 	rep := &reporter{}
+	var tr *json.Encoder
+	if dir := getenv(EnvTranscripts); dir != "" {
+		// Appended to, so a resumed conversation keeps one transcript, as
+		// the real harnesses do.
+		t, err := os.OpenFile(filepath.Join(dir, id+".jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- the test names the directory
+		if err != nil {
+			_, _ = fmt.Fprintln(stdout, `{"ev":"error"}`)
+			return 70
+		}
+		defer func() { _ = t.Close() }()
+		tr = json.NewEncoder(t)
+	}
 	var cmds <-chan Command
 	if sock := getenv(EnvControl); sock != "" {
 		conn, err := net.Dial("unix", sock)
@@ -49,7 +72,7 @@ func Main(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) 
 	if tui {
 		return runTUI(&tuiOptions{id: id, resumed: resumed, stdin: stdin, stdout: stdout, getenv: getenv, rep: rep, cmds: cmds})
 	}
-	f := &proc{out: json.NewEncoder(stdout), rep: rep, id: id}
+	f := &proc{out: json.NewEncoder(stdout), rep: rep, id: id, transcript: tr}
 	msgs := readStdin(stdin)
 	rep.report(Report{Rep: RepStarted, ID: id, Resumed: resumed})
 	return f.loop(msgs, cmds)
@@ -103,6 +126,10 @@ type proc struct {
 	out *json.Encoder
 	rep *reporter
 	id  string
+	// transcript, when kept, gets each entry before its event is written,
+	// so whoever reads it on the event finds it there.
+	transcript *json.Encoder
+	calls      int
 
 	inTurn           bool
 	ignoreInterrupts bool
@@ -139,9 +166,11 @@ func (f *proc) handle(m *inMsg, autonomous bool) {
 	case "hello":
 		f.write(outMsg{Ev: "hello", ID: f.id})
 	case "user":
+		f.record(transcript.Entry{Kind: transcript.User, Text: m.Text})
 		f.rep.report(Report{Rep: RepUser, Text: m.Text, From: m.From, MidTurn: f.inTurn})
 		if autonomous {
 			f.write(outMsg{Ev: "turn_start"})
+			f.record(transcript.Entry{Kind: transcript.Assistant, Text: "echo: " + m.Text})
 			f.write(outMsg{Ev: "text", Text: "echo: " + m.Text})
 			f.write(outMsg{Ev: "turn_end", Outcome: "completed"})
 		}
@@ -165,13 +194,20 @@ func (f *proc) command(c *Command) (int, bool) {
 		f.inTurn = false
 		f.write(outMsg{Ev: "turn_end", Outcome: outcomeOr(c.Outcome)})
 	case CmdToolStart:
+		f.calls++
+		f.record(transcript.Entry{Kind: transcript.ToolCall, Tool: c.Tool, CallID: f.callID(), Text: c.Text})
 		f.write(outMsg{Ev: "tool_start", Tool: c.Tool})
 	case CmdToolEnd:
+		f.record(transcript.Entry{Kind: transcript.ToolResult, Tool: c.Tool, CallID: f.callID(), Text: c.Text})
 		f.write(outMsg{Ev: "tool_end", Tool: c.Tool})
 	case CmdText:
+		f.record(transcript.Entry{Kind: transcript.Assistant, Text: c.Text})
 		f.write(outMsg{Ev: "text", Text: c.Text})
 	case CmdUsage:
+		f.record(transcript.Entry{Kind: transcript.UsageKind, Usage: &transcript.Usage{Input: 100, Output: 10}})
 		f.write(outMsg{Ev: "usage", Input: 100, Output: 10})
+	case CmdLimit:
+		f.write(outMsg{Ev: "limit", Used: c.Used, ResetsAt: c.ResetsAt, Window: c.Window})
 	case CmdRun:
 		f.rep.run(c.Argv)
 		return 0, false
@@ -195,6 +231,20 @@ func outcomeOr(outcome string) string {
 		return "completed"
 	}
 	return outcome
+}
+
+func (f *proc) callID() string { return "call-" + strconv.Itoa(f.calls) }
+
+// record appends e to the transcript, stamped now: the fake is a separate
+// process, with no clock of the test's to read.
+func (f *proc) record(e transcript.Entry) {
+	if f.transcript == nil {
+		return
+	}
+	e.At = time.Now().UTC()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_ = f.transcript.Encode(&e)
 }
 
 func (f *proc) write(m outMsg) {

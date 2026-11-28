@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -23,6 +24,8 @@ func (m *Manager) schedule() {
 		case <-m.stop:
 			return
 		case <-m.kick:
+		case <-m.wake:
+			m.wake = nil
 		case ev, ok := <-feed:
 			if !ok {
 				feed = nil
@@ -59,12 +62,16 @@ func (m *Manager) sync(ctx context.Context, ticket ident.TicketID) {
 		return
 	}
 	r, running := m.runner(a.ID)
+	// One already finishing (its own done included) is left to it.
+	if running && r.isEnding() {
+		return
+	}
 	if t.Status.Terminal() {
 		m.endForTicket(ctx, a, r, t.Status)
 		return
 	}
 	// An agent being started or recovered is synced once that settles.
-	if !running || r.isEnding() {
+	if !running {
 		return
 	}
 	m.syncBlocked(ctx, r, a, t)
@@ -189,9 +196,23 @@ func (m *Manager) evaluate(ctx context.Context) {
 		if t.Urgent {
 			pool = state.PoolUrgent
 		}
+		// New work never jumps an agent already queued for a slot, even
+		// when a slot has freed since the queue was served (goStart checks
+		// again, as it claims the place).
+		if !m.admits(pool) {
+			continue
+		}
+		spec, err := m.specFor(ctx, t)
+		var hold *errHeld
+		if errors.As(err, &hold) {
+			m.wakeAt(hold.until)
+			m.noteHeld(ctx, t, hold)
+			continue
+		}
+		m.unheld(t.ID)
 		// Off the scheduler goroutine: git and a harness's handshake can be
 		// slow, and must not hold up every other ticket's events.
-		m.goStart(t.ID, pool, true, func(ctx context.Context) { m.spawn(ctx, t, pool) })
+		m.goStart(t.ID, pool, true, func(ctx context.Context) { m.spawn(ctx, t, pool, spec) })
 	}
 }
 
@@ -214,9 +235,19 @@ func (m *Manager) eligible(ctx context.Context) []*tickets.Ticket {
 		if t.Status == tickets.StatusOpen && len(t.BlockedBy) > 0 {
 			return true
 		}
-		_, err := m.opts.State.Agents.LiveForTicket(ctx, t.ID)
-		return err == nil
+		if _, err := m.opts.State.Agents.LiveForTicket(ctx, t.ID); err == nil {
+			return true
+		}
+		// A person took the ticket over with `attach --no-resume`.
+		released, err := m.opts.State.Agents.ReleasedForTicket(ctx, t.ID)
+		return err != nil || released
 	})
+}
+
+func (m *Manager) admits(pool state.Pool) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.admitsLocked(pool)
 }
 
 // admitsLocked reports whether new work may start in pool now: no agent in
@@ -267,7 +298,12 @@ func (m *Manager) takeSlot(r *runner) bool {
 			break
 		}
 	}
-	if !ahead && m.slotFreeLocked(r.pool, r.id) {
+	r.mu.Lock()
+	// An agent handed back from an attach brings the slot it held.
+	held := r.holdsSlot
+	r.holdsSlot = false
+	r.mu.Unlock()
+	if held || (!ahead && m.slotFreeLocked(r.pool, r.id)) {
 		m.wantSlot = slices.DeleteFunc(m.wantSlot, func(id ident.AgentID) bool { return id == r.id })
 		r.mu.Lock()
 		// Counted as active from now, so a second taker sees the slot gone

@@ -41,8 +41,8 @@ func validTicket(t ident.TicketID) error {
 }
 
 func validRepo(name string) error {
-	if err := config.ValidRepoName(name); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidName, err)
+	if err := config.CheckRepoName(name); err != nil {
+		return fmt.Errorf("%w: repo name %w", ErrInvalidName, err)
 	}
 	return nil
 }

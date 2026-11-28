@@ -26,11 +26,15 @@ var efforts = map[string][]string{
 	config.Agy:        {"low", "medium", "high", "xhigh", "max"},
 }
 
-// Resolve fills a blank harness with the config's default_harness. A blank
-// model or effort stays blank: the harness uses its own default.
+// Resolve fills a blank harness with the config's default_harness, and a
+// blank model with that harness's configured model. A model still blank, and
+// a blank effort, stay blank: the harness uses its own default.
 func Resolve(spec tickets.AgentSpec, cfg *config.Config) tickets.AgentSpec {
 	if spec.Harness == "" {
 		spec.Harness = cfg.DefaultHarness
+	}
+	if h, ok := cfg.Harnesses[spec.Harness]; ok && spec.Model == "" {
+		spec.Model = h.Model
 	}
 	return spec
 }

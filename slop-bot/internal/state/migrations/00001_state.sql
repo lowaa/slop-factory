@@ -25,6 +25,9 @@ CREATE TABLE agents (
   state_since INTEGER NOT NULL,
   progress_note TEXT NOT NULL DEFAULT '',
   nudge_count INTEGER NOT NULL DEFAULT 0 CHECK (nudge_count >= 0),
+  -- What the agent declared from inside an attached TUI, for its hand-back.
+  declared TEXT NOT NULL DEFAULT '',
+  declared_summary TEXT NOT NULL DEFAULT '',
   -- control.HashToken of the agent's token (hex sha256); the plaintext is
   -- never stored.
   token_hash TEXT NOT NULL UNIQUE CHECK (length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'),
