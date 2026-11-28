@@ -20,6 +20,8 @@ internal/harness/agentproc/process.go Start #36
 internal/harness/agentproc/process.go tail.String #36
 internal/harness/agentproc/process.go tail.Write #36
 internal/harness/claudecode/ package #36
+internal/harness/codex/ package #36
+internal/harness/codex/protocol/ package #36
 internal/harness/conformance/ package #36
 internal/harness/fake/codec.go codec.Decode #36
 internal/harness/fake/codec.go codec.Interrupt #36
