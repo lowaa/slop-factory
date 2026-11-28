@@ -178,22 +178,16 @@ func (ar *attachRoutes) attach(w http.ResponseWriter, r *http.Request) {
 // its lease, until it hands back, is detached, or hangs up.
 func (ar *attachRoutes) hold(r *http.Request, sess *attachSession, id ident.AgentID, send func(*api.AttachFrame)) {
 	ctx := r.Context()
-	m := ar.d.agents
+	defer ar.d.agents.StreamOpen(id)()
 	tick := ar.d.opts.Clock.NewTicker(max(ar.d.opts.Config.Agents.AttachLease.D()/3, time.Millisecond))
 	defer tick.Stop()
 	detach := sess.detach
 	for {
 		select {
 		case <-tick.C():
-			if err := m.Heartbeat(ctx, id, sess.holder); err != nil {
-				if ctx.Err() != nil {
-					continue // the hang-up case below handles it
-				}
-				send(&api.AttachFrame{Type: api.FrameEnded, Reason: err.Error()})
-				sess.finish(agents.Ended, nil)
+			if !ar.heartbeat(ctx, sess, id, send) {
 				return
 			}
-			send(&api.AttachFrame{Type: api.FrameHeartbeat})
 		case <-detach:
 			detach = nil
 			send(&api.AttachFrame{Type: api.FrameDetach})
@@ -204,26 +198,49 @@ func (ar *attachRoutes) hold(r *http.Request, sess *attachSession, id ident.Agen
 			case <-ar.d.server.Stopping():
 				// The daemon is stopping, not the CLI: the lease stays for
 				// the CLI to reconnect to, or to expire.
-				return
 			default:
+				ar.hungUp(ctx, sess, id)
 			}
-			if !sess.claim() {
-				<-sess.done
-				return
-			}
-			bg := context.WithoutCancel(ctx)
-			sess.mu.Lock()
-			pid := sess.pid
-			sess.mu.Unlock()
-			ar.endTUI(pid)
-			out, err := m.HandBack(bg, id, sess.holder, "the attached terminal hung up")
-			if err != nil {
-				ar.d.opts.Logger.Warn("daemon: handing back after a hang-up", "agent", id, "err", err)
-			}
-			sess.finish(out, err)
 			return
 		}
 	}
+}
+
+// heartbeat renews the lease, and reports whether the attach goes on.
+func (ar *attachRoutes) heartbeat(ctx context.Context, sess *attachSession, id ident.AgentID, send func(*api.AttachFrame)) bool {
+	err := ar.d.agents.Heartbeat(ctx, id, sess.holder)
+	switch {
+	case err == nil:
+		send(&api.AttachFrame{Type: api.FrameHeartbeat})
+		return true
+	case ctx.Err() != nil:
+		return true // the stream's end handles it
+	case !sess.claim():
+		// A hand-back released the lease and is resuming the agent: its
+		// outcome is the session's, not this.
+		<-sess.done
+		return false
+	}
+	send(&api.AttachFrame{Type: api.FrameEnded, Reason: err.Error()})
+	sess.finish(agents.Ended, nil)
+	return false
+}
+
+// hungUp hands back an attach whose CLI went away without a word.
+func (ar *attachRoutes) hungUp(ctx context.Context, sess *attachSession, id ident.AgentID) {
+	if !sess.claim() {
+		<-sess.done
+		return
+	}
+	sess.mu.Lock()
+	pid := sess.pid
+	sess.mu.Unlock()
+	ar.endTUI(pid)
+	out, err := ar.d.agents.HandBack(context.WithoutCancel(ctx), id, sess.holder, "the attached terminal hung up")
+	if err != nil {
+		ar.d.opts.Logger.Warn("daemon: handing back after a hang-up", "agent", id, "err", err)
+	}
+	sess.finish(out, err)
 }
 
 // endTUI makes sure a TUI whose CLI went away has exited, so the

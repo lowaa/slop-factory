@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -122,18 +124,31 @@ func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequ
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// Once the TUI runs it owns the terminal's signals: Ctrl-C and Ctrl-\ are
+	// its, and this process only passes on what would otherwise end it.
+	// Until then, any of them gives up the wait for the agent's turn.
+	sigs := make(chan os.Signal, 4)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigs)
+	opened := make(chan struct{})
+	go func() {
+		select {
+		case <-sigs:
+			cancel()
+		case <-opened:
+		}
+	}()
 	body, att, err := at.open(streamCtx, target, req)
+	close(opened)
 	if err != nil {
+		if streamCtx.Err() != nil {
+			return errors.New("attach: given up; the agent carries on")
+		}
 		return err
 	}
 	at.agent = att.Agent
 	at.show(att)
-	// The TUI owns the terminal's signals: Ctrl-C and Ctrl-\ are its, and
-	// this process only passes on what would otherwise end it.
-	sigs := make(chan os.Signal, 4)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
-	defer signal.Stop(sigs)
-	tui, err := at.startTUI(ctx, att.Command)
+	tui, err := at.startTUI(ctx, withTerminalEnv(att.Command, os.Environ()))
 	if err != nil || att.Released {
 		_ = body.Close()
 	}
@@ -362,6 +377,7 @@ func (at *attachRun) show(att *api.Attachment) {
 	}
 	if att.Released {
 		fmt.Fprintf(&b, "Released: slop-bot no longer runs this agent, and ticket %s stays assigned to you.\n", att.Ticket)
+		b.WriteString("The agent's own slop-bot commands (ask, done, ...) no longer work from this TUI.\n")
 	} else {
 		b.WriteString("Quitting the TUI hands the agent back to slop-bot.\n")
 	}
@@ -370,4 +386,34 @@ func (at *attachRun) show(att *api.Attachment) {
 
 func (at *attachRun) say(format string, args ...any) {
 	_, _ = fmt.Fprintf(at.stderr, format+"\r\n", args...)
+}
+
+// terminalVars are the attaching terminal's own: the daemon's environment
+// (under systemd or launchd) has none of them, or another terminal's.
+var terminalVars = []string{"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG"}
+
+// withTerminalEnv is c with this terminal's variables from local laid over
+// the daemon's.
+func withTerminalEnv(c *api.Command, local []string) *api.Command {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	mine := map[string]string{}
+	for _, kv := range local {
+		k, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(terminalVars, k) || strings.HasPrefix(k, "LC_") {
+			mine[k] = kv
+		}
+	}
+	out.Env = make([]string, 0, len(c.Env)+len(mine))
+	for _, kv := range c.Env {
+		if k, _, _ := strings.Cut(kv, "="); mine[k] == "" {
+			out.Env = append(out.Env, kv)
+		}
+	}
+	for _, k := range slices.Sorted(maps.Keys(mine)) {
+		out.Env = append(out.Env, mine[k])
+	}
+	return &out
 }

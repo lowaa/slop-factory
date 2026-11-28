@@ -48,6 +48,8 @@ type runner struct {
 	// attaching is set while an attach stops the conversation: the turn's
 	// end mustn't start another, and the exit isn't a crash.
 	attaching bool
+	// attachHolder is who is attaching, for a second attach's refusal.
+	attachHolder string
 	// holdsSlot carries an attached agent's slot into its first turn after
 	// the hand-back, so it can't lose it to new work in between.
 	holdsSlot bool

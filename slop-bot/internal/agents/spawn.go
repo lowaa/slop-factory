@@ -230,7 +230,8 @@ func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
 			m.opts.Logger.Warn("agents: recording an attach", "agent", a.ID, "err", err)
 		}
 	}
-	r := &runner{m: m, id: a.ID, ticket: a.Ticket, pool: a.Pool, st: state.StateAttached, exited: make(chan struct{})}
+	r := &runner{m: m, id: a.ID, ticket: a.Ticket, pool: a.Pool, st: state.StateAttached,
+		decl: declared(a.Declared), summary: a.DeclaredSummary, exited: make(chan struct{})}
 	close(r.exited)
 	m.mu.Lock()
 	m.runners[a.ID] = r
@@ -238,6 +239,14 @@ func (m *Manager) adoptAttached(ctx context.Context, a *state.Agent) {
 }
 
 func (m *Manager) resume(ctx context.Context, a *state.Agent) error {
+	if a.State == state.StateAttached {
+		// Attached but holding no lease: the daemon stopped mid hand-back.
+		// It resumes like any agent cut off mid-work.
+		if _, err := m.opts.State.Agents.SetState(ctx, &state.Transition{Agent: a.ID, To: state.StateStarting, Reason: "an interrupted hand-back"}); err != nil {
+			return err
+		}
+		a.State = state.StateStarting
+	}
 	conv, caps, err := m.startConversation(ctx, a)
 	if err != nil {
 		return err

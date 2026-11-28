@@ -68,6 +68,8 @@ type Manager struct {
 	// new work.
 	wantSlot []ident.AgentID
 	stopping bool
+	// streams counts the attached CLIs' open streams per agent.
+	streams map[ident.AgentID]int
 
 	kick chan struct{}
 	stop chan struct{}
@@ -85,6 +87,7 @@ func New(opts *Options) (*Manager, error) {
 	return &Manager{
 		opts:    opts,
 		runners: map[ident.AgentID]*runner{},
+		streams: map[ident.AgentID]int{},
 		kick:    make(chan struct{}, 1),
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),

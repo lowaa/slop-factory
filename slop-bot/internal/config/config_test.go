@@ -88,6 +88,7 @@ func TestInvalidConfigsNameTheField(t *testing.T) {
 		"repo without path":    {"repos: [{name: a}]\n", "repos[0].path: is empty"},
 		"max_live too small":   {"concurrency: {max_active: 4, max_live: 2}\n", "concurrency.max_live: 2 is below"},
 		"bad duration":         {"agents: {stall_after: soon}\n", `"soon" isn't a duration`},
+		"tiny attach lease":    {"agents: {attach_lease: 10ms}\n", "agents.attach_lease: 10ms is below 1s"},
 		"zero budget":          {"autonomy: {tickets_per_agent: -1}\n", "tickets_per_agent: must be at least 1"},
 		"negative concurrency": {"concurrency: {max_active: -1}\n", "max_active and urgent.max_active must be at least 1"},
 	}

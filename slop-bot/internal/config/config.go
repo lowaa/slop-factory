@@ -283,6 +283,11 @@ func (c *Config) validate() error {
 	if c.Ticketing.System != "local" {
 		add("ticketing.system: %q isn't available (have: local)", c.Ticketing.System)
 	}
+	// Heartbeats come every third of the lease; much shorter and a busy
+	// daemon would hand back attaches whose CLI is fine.
+	if c.Agents.AttachLease.D() < time.Second {
+		add("agents.attach_lease: %s is below 1s", c.Agents.AttachLease.D())
+	}
 	seen := map[string]bool{}
 	for i, r := range c.Repos {
 		if r.Name == "" {

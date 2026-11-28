@@ -24,7 +24,6 @@ type screen struct {
 	mu      sync.Mutex
 	raw     bytes.Buffer
 	changed chan struct{}
-	closed  bool
 }
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]`)

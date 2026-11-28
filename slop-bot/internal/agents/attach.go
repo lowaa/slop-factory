@@ -91,10 +91,15 @@ func (m *Manager) lease(holder string) *state.Lease {
 	return &state.Lease{Holder: holder, ExpiresAt: m.opts.Clock.Now().Add(m.opts.Config.Agents.AttachLease.D())}
 }
 
-// Attach takes an agent's conversation over for a person: it takes the
-// lease, stops the conversation once its turn settles (or interrupts it
-// first), and returns the TUI command that resumes it. The agent keeps its
+// Attach takes an agent's conversation over for a person: it stops the
+// conversation once its turn settles (or interrupts it first), takes the
+// lease, and returns the TUI command that resumes it. The agent keeps its
 // slot until it's handed back.
+//
+// The lease is taken only once the conversation has stopped: until then the
+// runner's attaching flag refuses a second attach and holds the slot, so a
+// long turn can't outlast a lease nothing is renewing yet, and the expiry
+// sweep and detach have nothing to act on.
 func (m *Manager) Attach(ctx context.Context, req *AttachRequest) (*Attachment, error) {
 	a, err := m.resolveAgent(ctx, req.Target)
 	if err != nil {
@@ -108,24 +113,21 @@ func (m *Manager) Attach(ctx context.Context, req *AttachRequest) (*Attachment, 
 	if !ok {
 		return nil, fmt.Errorf("%w: agent %s isn't running", ErrNoLiveAgent, a.ID)
 	}
-	if err := m.opts.State.Agents.AcquireLease(ctx, a.ID, m.lease(req.Holder)); err != nil {
-		return nil, err
-	}
-	att, err := m.takeOver(ctx, r, a, req)
-	if err != nil {
-		m.dropLease(ctx, a.ID, req.Holder)
-		return nil, err
-	}
-	return att, nil
-}
-
-func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, req *AttachRequest) (*Attachment, error) {
 	plan, err := m.stopForAttach(ctx, r, a, req)
 	if err != nil {
 		return nil, err
 	}
-	// What follows outlives the request too: see stopForAttach.
+	// From here the work outlives the request: the conversation is stopped,
+	// and must end attached or resumed, not half-way.
 	ctx = context.WithoutCancel(ctx)
+	if err := m.opts.State.Agents.AcquireLease(ctx, a.ID, m.lease(req.Holder)); err != nil {
+		m.abandonAttach(ctx, r, "the attach couldn't take its lease: "+err.Error())
+		return nil, err
+	}
+	return m.takeOver(ctx, r, a, plan, req)
+}
+
+func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, plan *harness.AttachPlan, req *AttachRequest) (*Attachment, error) {
 	att := &Attachment{Agent: a}
 	if t, err := m.opts.Tickets.Get(ctx, a.Ticket); err == nil {
 		att.Title = t.Title
@@ -139,16 +141,14 @@ func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, req *
 		m.event(ctx, EventAttached, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "released": true})
 		return att, nil
 	}
-	r.setState(ctx, state.StateAttached, "attached by "+req.Holder)
-	r.setAttaching(false)
 	token, err := m.rotateToken(ctx, a.ID)
 	if err != nil {
-		// Nobody will run its TUI: hand it straight back, lease first as the
-		// expiry sweep does; Attach's own release then finds nothing to do.
 		m.dropLease(ctx, a.ID, req.Holder)
-		_, _ = m.handBack(ctx, a.ID, "the attach failed: "+err.Error())
+		m.abandonAttach(ctx, r, "the attach failed: "+err.Error())
 		return nil, err
 	}
+	r.setState(ctx, state.StateAttached, "attached by "+req.Holder)
+	r.setAttaching(false)
 	att.Command = withEnv(plan.Command, control.TokenEnv, token)
 	att.Held, err = m.opts.State.Messages.Pending(ctx, state.AgentParty(a.ID))
 	if err != nil {
@@ -161,18 +161,15 @@ func (m *Manager) takeOver(ctx context.Context, r *runner, a *state.Agent, req *
 // stopForAttach stops r's conversation for an attach, once its turn has
 // settled (or, with Now, after interrupting it), and returns how to hand it
 // over. r is left attaching: it holds its slot and its messages.
+//
+// If ctx ends first (the CLI gave up, or the daemon is stopping), it returns
+// at once; the stop carries on, and the conversation is resumed once it has
+// (see abandonAttach), so a person's Ctrl-C or a shutdown never waits on a
+// long turn.
 func (m *Manager) stopForAttach(ctx context.Context, r *runner, a *state.Agent, req *AttachRequest) (*harness.AttachPlan, error) {
-	r.mu.Lock()
-	switch {
-	case r.stopping:
-		r.mu.Unlock()
-		return nil, fmt.Errorf("%w: agent %s is finishing", ErrNoLiveAgent, a.ID)
-	case r.attaching || r.st == state.StateAttached || r.conv == nil:
-		r.mu.Unlock()
-		return nil, fmt.Errorf("%w: agent %s is already attached", state.ErrConflict, a.ID)
+	if err := m.beginAttach(r, a, req.Holder); err != nil {
+		return nil, err
 	}
-	r.attaching = true
-	r.mu.Unlock()
 	m.event(ctx, EventAttaching, a.ID, a.Ticket, map[string]any{"holder": req.Holder, "now": req.Now})
 	plan, err := r.conv.AttachPlan(ctx)
 	if err == nil && (plan.Kind != harness.HandOver || plan.Command == nil) {
@@ -185,16 +182,27 @@ func (m *Manager) stopForAttach(ctx context.Context, r *runner, a *state.Agent, 
 		}
 		return nil, err
 	}
-	// The stop outlives the request: a CLI that gives up mid-wait leaves an
-	// attach its hang-up hands back, not a half-stopped conversation.
 	stopCtx := context.WithoutCancel(ctx)
 	if req.Now {
 		if err := r.conv.Interrupt(stopCtx); err != nil {
 			m.opts.Logger.Warn("agents: interrupting for an attach", "agent", a.ID, "err", err)
 		}
 	}
-	_ = r.conv.Stop(stopCtx, false)
-	<-r.exited
+	stopped := make(chan struct{})
+	go func() {
+		_ = r.conv.Stop(stopCtx, false)
+		<-r.exited
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-ctx.Done():
+		go func() {
+			<-stopped
+			m.abandonAttach(stopCtx, r, "the attach was given up before its TUI started")
+		}()
+		return nil, fmt.Errorf("agents: attaching %s: %w", a.ID, ctx.Err())
+	}
 	r.mu.Lock()
 	finishing := r.stopping
 	r.inTurn = false
@@ -205,6 +213,52 @@ func (m *Manager) stopForAttach(ctx context.Context, r *runner, a *state.Agent, 
 		return nil, fmt.Errorf("%w: agent %s finished while its turn settled", ErrNoLiveAgent, a.ID)
 	}
 	return plan, nil
+}
+
+// beginAttach marks r attaching for holder, refusing a runner that is
+// finishing, attached, or already being attached by someone.
+func (m *Manager) beginAttach(r *runner, a *state.Agent, holder string) error {
+	r.mu.Lock()
+	switch {
+	case r.stopping:
+		r.mu.Unlock()
+		return fmt.Errorf("%w: agent %s is finishing", ErrNoLiveAgent, a.ID)
+	case r.attaching:
+		pending := r.attachHolder
+		r.mu.Unlock()
+		return &state.LeaseHeldError{Holder: pending, ExpiresAt: m.opts.Clock.Now().Add(m.opts.Config.Agents.AttachLease.D())}
+	case r.st == state.StateAttached || r.conv == nil:
+		r.mu.Unlock()
+		return fmt.Errorf("%w: agent %s is already attached", state.ErrConflict, a.ID)
+	}
+	r.attaching, r.attachHolder = true, holder
+	r.mu.Unlock()
+	// An agent waiting for a slot gives up its place: attached, it holds a
+	// slot of its own, and left at the front it would stall its pool.
+	m.mu.Lock()
+	m.wantSlot = slices.DeleteFunc(m.wantSlot, func(id ident.AgentID) bool { return id == r.id })
+	m.mu.Unlock()
+	return nil
+}
+
+// abandonAttach resumes a conversation an attach stopped but never handed
+// over. A daemon that is stopping leaves it for the next start to resume.
+func (m *Manager) abandonAttach(ctx context.Context, r *runner, why string) {
+	m.mu.Lock()
+	stopping := m.stopping
+	m.mu.Unlock()
+	r.mu.Lock()
+	finishing := r.stopping
+	r.mu.Unlock()
+	if stopping || finishing {
+		r.setAttaching(false)
+		return
+	}
+	r.setState(ctx, state.StateAttached, why)
+	r.setAttaching(false)
+	if _, err := m.handBack(ctx, r.id, why); err != nil {
+		m.opts.Logger.Warn("agents: resuming after an abandoned attach", "agent", r.id, "err", err)
+	}
 }
 
 // LiveAgent is the live agent target names: an agent id, or a ticket id.
@@ -221,17 +275,15 @@ func (m *Manager) dropLease(ctx context.Context, id ident.AgentID, holder string
 }
 
 // Reattach is an attached CLI reconnecting after a daemon restart: it
-// renews the lease it still holds. One that has expired and been handed
-// back is ErrNotAttached, and the CLI must end its TUI.
+// renews the lease it still holds, in one conditional write, so it can't
+// re-take one the sweep or a detach handed back meanwhile; that is
+// ErrNotAttached, and the CLI must end its TUI.
 func (m *Manager) Reattach(ctx context.Context, target, holder string) (*Attachment, error) {
 	a, err := m.resolveAgent(ctx, target)
 	if err != nil {
 		return nil, err
 	}
-	if a.Mode != state.ModeAttached || a.Lease == nil || a.Lease.Holder != holder {
-		return nil, fmt.Errorf("%w: agent %s was handed back", ErrNotAttached, a.ID)
-	}
-	if err := m.opts.State.Agents.AcquireLease(ctx, a.ID, m.lease(holder)); err != nil {
+	if err := m.Heartbeat(ctx, a.ID, holder); err != nil {
 		return nil, err
 	}
 	m.event(ctx, EventReattached, a.ID, a.Ticket, map[string]string{"holder": holder})
@@ -247,6 +299,22 @@ func (m *Manager) Heartbeat(ctx context.Context, id ident.AgentID, holder string
 		return err
 	}
 	return nil
+}
+
+// StreamOpen marks an attached CLI's stream as open in this daemon until
+// the returned func is called: the expiry sweep leaves such an agent
+// alone, since its heartbeat (late after a suspend, say) is still coming.
+func (m *Manager) StreamOpen(id ident.AgentID) func() {
+	m.mu.Lock()
+	m.streams[id]++
+	m.mu.Unlock()
+	return func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.streams[id]--; m.streams[id] <= 0 {
+			delete(m.streams, id)
+		}
+	}
 }
 
 // HandBack ends holder's attach: the person quit the TUI, was detached, or
@@ -270,15 +338,25 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 		return Ended, nil
 	}
 	r.mu.Lock()
-	st, decl, summary := r.st, r.decl, r.summary
+	st, decl, summary, finishing := r.st, r.decl, r.summary, r.stopping
 	r.mu.Unlock()
-	if st != state.StateAttached {
+	if st != state.StateAttached || finishing {
 		return Ended, nil
+	}
+	if err := m.opts.State.Agents.SetDeclared(ctx, id, "", ""); err != nil {
+		m.opts.Logger.Warn("agents: clearing an attach's declaration", "agent", id, "err", err)
 	}
 	if decl == declDone {
 		m.event(ctx, EventHandedBack, id, r.ticket, map[string]string{"why": why, "outcome": string(Finished)})
 		m.finish(ctx, r, summary)
 		return Finished, nil
+	}
+	if decl == declNone {
+		// An ask still open from before the attach is still waiting on the
+		// user: the resumed turn ends in waiting_user, not a nudge.
+		if open, err := m.opts.State.Messages.OpenAsksFrom(ctx, id); err == nil && len(open) > 0 {
+			decl = declAsk
+		}
 	}
 	a, err := m.opts.State.Agents.Get(ctx, id)
 	if err != nil {
@@ -292,8 +370,8 @@ func (m *Manager) handBack(ctx context.Context, id ident.AgentID, why string) (H
 		return "", err
 	}
 	payload := map[string]string{"why": why, "outcome": string(Resumed)}
-	// Every supported harness keeps the id across the round trip; one that
-	// didn't would have the next restart resume the wrong conversation.
+	// A harness whose protocol reports the id (Codex, pi) could hand back a
+	// different one; the next restart must resume the one now running.
 	if got := conv.Ref().ID; got != a.ConversationID {
 		m.opts.Logger.Warn("agents: the conversation id changed across an attach", "agent", id, "was", a.ConversationID, "now", got)
 		payload["conversation_was"] = a.ConversationID
@@ -321,6 +399,12 @@ func (m *Manager) sweepLeases(ctx context.Context) {
 		return
 	}
 	for _, a := range expired {
+		m.mu.Lock()
+		open := m.streams[a.ID] > 0
+		m.mu.Unlock()
+		if open {
+			continue
+		}
 		// A heartbeat or reconnect that beat this sweep wins.
 		if err := m.opts.State.Agents.ReleaseExpiredLease(ctx, a.ID, a.Lease.Holder, now); err != nil {
 			continue
@@ -328,6 +412,19 @@ func (m *Manager) sweepLeases(ctx context.Context) {
 		if _, err := m.handBack(ctx, a.ID, "its attach lease expired"); err != nil {
 			m.opts.Logger.Warn("agents: handing back an expired attach", "agent", a.ID, "err", err)
 		}
+	}
+}
+
+// declare records what the agent says it is doing. Declared from inside an
+// attached TUI, it is also kept in state.db: the hand-back acts on it, and
+// may come after a daemon restart.
+func (m *Manager) declare(ctx context.Context, r *runner, d declared, summary string) {
+	r.declare(d, summary)
+	if r.state() != state.StateAttached {
+		return
+	}
+	if err := m.opts.State.Agents.SetDeclared(ctx, r.id, string(d), summary); err != nil {
+		m.opts.Logger.Warn("agents: recording an attached agent's declaration", "agent", r.id, "err", err)
 	}
 }
 

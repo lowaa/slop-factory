@@ -35,6 +35,7 @@ type AgentWriter interface {
 	SetState(ctx context.Context, t *Transition) (bool, error)
 	SetConversationID(ctx context.Context, id ident.AgentID, conversation string) error
 	SetProgressNote(ctx context.Context, id ident.AgentID, note string) error
+	SetDeclared(ctx context.Context, id ident.AgentID, declared, summary string) error
 	AddNudge(ctx context.Context, id ident.AgentID) (int, error)
 	ResetNudges(ctx context.Context, id ident.AgentID) error
 }
