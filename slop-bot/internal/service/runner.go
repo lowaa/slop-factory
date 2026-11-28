@@ -37,6 +37,11 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) (*Result
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
+	// A command killed by cancellation exits -1; that's no answer, so it
+	// mustn't read as a state.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("service: running %s: %w", name, ctxErr)
+	}
 	res := &Result{Stdout: stdout.String(), Stderr: stderr.String()}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {

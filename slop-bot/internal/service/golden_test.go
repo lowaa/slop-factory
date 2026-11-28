@@ -64,7 +64,7 @@ func TestSystemdAnalyzeVerifiesTheUnit(t *testing.T) {
 	for _, homeName := range []string{"", awkwardHome} {
 		t.Run(homeName, func(t *testing.T) {
 			t.Parallel()
-			f := newFixture(t, &fixtureOpts{goos: "linux", homeName: homeName, extraPATH: awkwardPATH, realBinary: true})
+			f := newFixture(t, &fixtureOpts{goos: "linux", homeName: homeName, extraPATH: awkwardPATH})
 			_, err := f.mgr.Install(context.Background())
 			require.NoError(t, err)
 			// Short, so the sockets of the stock user units the default

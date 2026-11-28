@@ -14,6 +14,7 @@ import (
 var templateFS embed.FS
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
+	"execPath":   systemdExecPath,
 	"execArg":    systemdExecArg,
 	"specifiers": systemdSpecifiers,
 	"envAssign":  systemdEnv,
@@ -24,7 +25,8 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 // path) surface here rather than as a unit that loads differently from what
 // was resolved.
 func render(name string, s *spec) ([]byte, error) {
-	for _, v := range append([]string{s.Binary, s.WorkingDir, s.LogFile}, envStrings(s.Env)...) {
+	values := append([]string{s.Binary, s.WorkingDir, s.LogFile}, s.Args...)
+	for _, v := range append(values, envStrings(s.Env)...) {
 		if strings.ContainsFunc(v, unicode.IsControl) {
 			return nil, fmt.Errorf("service: %q contains a control character, which a unit file can't carry", v)
 		}
@@ -57,11 +59,17 @@ func systemdQuote(v string) string {
 	return `"` + v + `"`
 }
 
-// systemdExecArg is the ExecStart executable: quoted so a space doesn't
+// systemdExecPath is the ExecStart executable: quoted so a space doesn't
 // split it. systemd expands $ only in the arguments after it, so a $ here
 // stays as it is (verified with systemd-analyze).
-func systemdExecArg(v string) string {
+func systemdExecPath(v string) string {
 	return systemdQuote(systemdSpecifiers(v))
+}
+
+// systemdExecArg is an ExecStart argument, where $VAR is expanded, so a
+// literal $ is doubled.
+func systemdExecArg(v string) string {
+	return systemdQuote(strings.ReplaceAll(systemdSpecifiers(v), "$", "$$"))
 }
 
 // systemdEnv is an Environment= assignment. Environment= expands

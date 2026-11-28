@@ -6,16 +6,19 @@ Description=slop-bot: coding agents on tickets
 
 [Service]
 Type=exec
-ExecStart="/home/ada/go/bin/slop-bot" daemon
+ExecStart="/home/ada/go/bin/slop-bot" "daemon"
 WorkingDirectory=/home/ada
 Environment="XDG_CONFIG_HOME=/home/ada/.config"
 Environment="XDG_DATA_HOME=/home/ada/.local/share"
 Environment="XDG_STATE_HOME=/home/ada/.local/state"
 Environment="XDG_CACHE_HOME=/home/ada/.cache"
 Environment="PATH=/home/ada/.local/bin:/home/ada/go/bin:/usr/local/bin:/usr/bin:/bin"
-# systemd sets XDG_RUNTIME_DIR, and creates and removes the socket directory.
+# systemd sets XDG_RUNTIME_DIR and creates the socket directory. It's kept
+# when the service stops: it also holds the instance lock, and removing it
+# under a daemon started by hand would let a second one start.
 RuntimeDirectory=slop-bot
 RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 Restart=on-failure
 RestartSec=5s
 # SIGTERM goes to the daemon alone, so it can stop its agents in order; only

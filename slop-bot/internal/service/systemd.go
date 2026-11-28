@@ -47,6 +47,9 @@ func (s *systemd) Install(ctx context.Context) (*Installed, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.checkManagerReadsUnitDir(ctx); err != nil {
+		return nil, err
+	}
 	if err := writeFile(s.UnitPath(), unit); err != nil {
 		return nil, fmt.Errorf("service: writing %s: %w", s.UnitPath(), err)
 	}
@@ -61,6 +64,29 @@ func (s *systemd) Install(ctx context.Context) (*Installed, error) {
 	res := sp.installed(s.UnitPath())
 	res.Linger = s.linger(ctx)
 	return res, nil
+}
+
+// checkManagerReadsUnitDir refuses to write a unit the user manager won't
+// find. The manager looks under its own $XDG_CONFIG_HOME, not the shell's:
+// a variable exported only in a shell profile would put the unit where
+// `enable` can't see it, and `uninstall` couldn't disable it.
+func (s *systemd) checkManagerReadsUnitDir(ctx context.Context) error {
+	res, err := s.systemctl(ctx, "show-environment")
+	if err != nil {
+		return err
+	}
+	managers := filepath.Join(s.set.Home, ".config")
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if v, ok := strings.CutPrefix(line, "XDG_CONFIG_HOME="); ok && filepath.IsAbs(v) {
+			managers = filepath.Clean(v)
+		}
+	}
+	if ours := filepath.Dir(s.set.Config.Path); ours != managers {
+		return fmt.Errorf("service: your XDG_CONFIG_HOME is %s but systemd's user manager reads units from "+
+			"%s/systemd/user; give the manager the same value (`systemctl --user import-environment "+
+			"XDG_CONFIG_HOME`, or a file in ~/.config/environment.d), or unset it in your shell", ours, managers)
+	}
+	return nil
 }
 
 func (s *systemd) Uninstall(ctx context.Context) error {
@@ -98,6 +124,10 @@ func (s *systemd) Status(ctx context.Context) (*Status, error) {
 	var err error
 	if st.Installed, err = fileExists(s.UnitPath()); err != nil {
 		return nil, err
+	}
+	if !st.Installed {
+		st.State = "not installed"
+		return st, nil
 	}
 	// is-active and is-enabled answer through the exit code, and print the
 	// state either way; no output at all means systemctl itself failed

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,4 +74,25 @@ func TestExecRunnerReportsExitCodesAsResults(t *testing.T) {
 
 	_, err = service.ExecRunner{}.Run(context.Background(), "slop-bot-no-such-command")
 	require.Error(t, err)
+}
+
+// A command killed by cancellation mid-run exits -1, which must not come
+// back as a Result a caller would read as a state. The fifo tells the test
+// the command is running before it cancels.
+func TestExecRunnerReportsCancellationAsAnError(t *testing.T) {
+	t.Parallel()
+	fifo := filepath.Join(t.TempDir(), "started")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		f, err := os.Open(fifo) // #nosec G304 -- the test's own fifo
+		if err == nil {
+			_, _ = f.Read(make([]byte, 1))
+			_ = f.Close()
+		}
+		cancel()
+	}()
+	_, err := service.ExecRunner{}.Run(ctx, "sh", "-c", `echo x > "$0"; exec sleep 1000`, fifo)
+	require.ErrorIs(t, err, context.Canceled)
 }

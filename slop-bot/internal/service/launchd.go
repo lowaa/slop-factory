@@ -139,16 +139,26 @@ func (l *launchd) Status(ctx context.Context) (*Status, error) {
 	return st, nil
 }
 
+// launchctlNoSuchService is the exit code `launchctl print` gives for a job
+// that isn't loaded. Any other failure is an error, not "not loaded": Stop
+// and Uninstall would otherwise report success over a running job.
+const launchctlNoSuchService = 113
+
 // print returns `launchctl print` for the job, or nil when it isn't loaded.
 func (l *launchd) print(ctx context.Context) (*Result, error) {
 	res, err := l.cmd.run(ctx, "launchctl", "print", l.target())
 	if err != nil {
 		return nil, err
 	}
-	if res.ExitCode != 0 {
+	switch res.ExitCode {
+	case 0:
+		return res, nil
+	case launchctlNoSuchService:
 		return nil, nil
+	default:
+		return nil, fmt.Errorf("service: launchctl print %s exited %d: %s",
+			l.target(), res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
-	return res, nil
 }
 
 func (l *launchd) bootout(ctx context.Context) error {

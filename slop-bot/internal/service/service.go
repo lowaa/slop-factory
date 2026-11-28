@@ -76,6 +76,7 @@ const (
 type Installed struct {
 	UnitPath string
 	Binary   string
+	Args     []string
 	Env      []EnvVar
 	Linger   Linger
 	// Warnings are things the user should know but that didn't stop the
@@ -107,9 +108,12 @@ type Options struct {
 	// PATH is the PATH at install time. The daemon and its agents need the
 	// user's toolchains (go, node, gh, ~/.local/bin), which a service
 	// manager's minimal PATH lacks.
-	PATH   string
-	Runner Runner
-	Logger *slog.Logger
+	PATH string
+	// ConfigFile, when set, is an absolute config path the daemon is run
+	// with (`daemon --config`); otherwise it reads the default one.
+	ConfigFile string
+	Runner     Runner
+	Logger     *slog.Logger
 }
 
 // New returns the Manager for opts.GOOS.
@@ -119,7 +123,8 @@ func New(opts *Options) (Manager, error) {
 	}
 	p := opts.Paths
 	set := &settings{
-		Home: opts.Home, UID: opts.UID, Binary: opts.Binary, PATH: opts.PATH, Logger: opts.Logger,
+		Home: opts.Home, UID: opts.UID, Binary: opts.Binary, PATH: opts.PATH,
+		ConfigFile: opts.ConfigFile, Logger: opts.Logger,
 		Config: p.Config, Data: p.Data, State: p.State, Cache: p.Cache, Runtime: p.Runtime,
 		LogDir: p.LogDir(),
 	}
@@ -141,7 +146,7 @@ func New(opts *Options) (Manager, error) {
 type settings struct {
 	Home                                string
 	UID                                 int
-	Binary, PATH                        string
+	Binary, PATH, ConfigFile            string
 	Logger                              *slog.Logger
 	Config, Data, State, Cache, Runtime paths.Dir
 	LogDir                              string
@@ -149,8 +154,10 @@ type settings struct {
 
 // spec is what the unit and plist templates render.
 type spec struct {
-	Label       string
-	Binary      string
+	Label  string
+	Binary string
+	// Args follow Binary: "daemon", and any flags.
+	Args        []string
 	Env         []EnvVar
 	WorkingDir  string
 	LogFile     string
@@ -161,8 +168,15 @@ type spec struct {
 // newSpec builds the render input. withRuntime adds XDG_RUNTIME_DIR, which
 // launchd needs and systemd sets itself.
 func newSpec(set *settings, withRuntime bool) (*spec, error) {
-	if !filepath.IsAbs(set.Binary) {
-		return nil, fmt.Errorf("service: the slop-bot binary must be an absolute path, got %q", set.Binary)
+	if err := checkBinary(set.Binary); err != nil {
+		return nil, err
+	}
+	args := []string{"daemon"}
+	if set.ConfigFile != "" {
+		if !filepath.IsAbs(set.ConfigFile) {
+			return nil, fmt.Errorf("service: the config path must be absolute, got %q", set.ConfigFile)
+		}
+		args = append(args, "--config", set.ConfigFile)
 	}
 	dirs := []paths.Dir{set.Config, set.Data, set.State, set.Cache}
 	if withRuntime {
@@ -170,6 +184,7 @@ func newSpec(set *settings, withRuntime bool) (*spec, error) {
 	}
 	s := &spec{
 		Binary:      set.Binary,
+		Args:        args,
 		WorkingDir:  set.Home,
 		LogFile:     filepath.Join(set.LogDir, "daemon.log"),
 		StopSeconds: int(StopTimeout / time.Second),
@@ -191,6 +206,22 @@ func newSpec(set *settings, withRuntime bool) (*spec, error) {
 		s.Env = append(s.Env, EnvVar{Name: "PATH", Value: path})
 	}
 	return s, nil
+}
+
+// checkBinary refuses a binary the service manager couldn't run, before
+// anything replaces a working unit.
+func checkBinary(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("service: the slop-bot binary must be an absolute path, got %q", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("service: the slop-bot binary: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("service: the slop-bot binary %s isn't an executable file", path)
+	}
+	return nil
 }
 
 // cleanPATH keeps absolute entries, in order, without repeats. Relative and
@@ -249,5 +280,5 @@ func fileExists(path string) (bool, error) {
 }
 
 func (s *spec) installed(unitPath string) *Installed {
-	return &Installed{UnitPath: unitPath, Binary: s.Binary, Env: s.Env, Warnings: s.Warnings}
+	return &Installed{UnitPath: unitPath, Binary: s.Binary, Args: s.Args, Env: s.Env, Warnings: s.Warnings}
 }

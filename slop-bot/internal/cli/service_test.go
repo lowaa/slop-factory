@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -19,7 +20,8 @@ func newServiceHarness(t *testing.T) (*harness, *servicetest.Runner) {
 	h := newHarness(t)
 	runner := servicetest.NewRunner()
 	h.deps.ServiceRunner = runner
-	h.deps.FindBinary = func() (string, error) { return "/usr/local/bin/slop-bot", nil }
+	binary := standInBinary(t, filepath.Join(h.home, "bin", "slop-bot"))
+	h.deps.FindBinary = func() (string, error) { return binary, nil }
 	lookup := h.deps.Env.Lookup
 	h.deps.Env.Lookup = func(k string) (string, bool) {
 		if k == "PATH" {
@@ -28,6 +30,13 @@ func newServiceHarness(t *testing.T) (*harness, *servicetest.Runner) {
 		return lookup(k)
 	}
 	return h, runner
+}
+
+func standInBinary(t *testing.T, path string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o700)) // #nosec G306 -- a test stand-in that must be executable
+	return path
 }
 
 func TestServiceInstallPrintsTheUnitAndItsEnvironment(t *testing.T) {
@@ -40,7 +49,8 @@ func TestServiceInstallPrintsTheUnitAndItsEnvironment(t *testing.T) {
 	unit := filepath.Join(h.home, ".config", "systemd", "user", "slop-bot.service")
 	assert.FileExists(t, unit)
 	assert.Contains(t, out, "installed the slop-bot service: "+unit)
-	assert.Contains(t, out, "it runs: /usr/local/bin/slop-bot daemon")
+	assert.Contains(t, out, "it runs: "+filepath.Join(h.home, "bin", "slop-bot")+" daemon\n")
+	assert.Contains(t, out, "slop-bot health")
 	assert.Contains(t, out, "XDG_CONFIG_HOME="+filepath.Join(h.home, ".config"))
 	assert.Contains(t, out, "default ($XDG_CONFIG_HOME unset)")
 	assert.Contains(t, out, "PATH=/usr/local/bin:/usr/bin")
@@ -53,8 +63,26 @@ func TestServiceInstallPrintsTheUnitAndItsEnvironment(t *testing.T) {
 func TestServiceInstallTakesABinaryOverride(t *testing.T) {
 	t.Parallel()
 	h, _ := newServiceHarness(t)
-	require.Equal(t, 0, h.run(t, "service", "install", "--binary", "/opt/sb/slop-bot"), h.err.String())
-	assert.Contains(t, h.out.String(), "it runs: /opt/sb/slop-bot daemon")
+	other := standInBinary(t, filepath.Join(h.home, "opt", "slop-bot"))
+	require.Equal(t, 0, h.run(t, "service", "install", "--binary", other), h.err.String())
+	assert.Contains(t, h.out.String(), "it runs: "+other+" daemon\n")
+}
+
+func TestServiceInstallRunsTheDaemonWithTheGivenConfig(t *testing.T) {
+	t.Parallel()
+	h, _ := newServiceHarness(t)
+	cfg := filepath.Join(h.home, "my.yaml")
+	require.NoError(t, os.WriteFile(cfg, []byte("{}\n"), 0o600))
+	require.Equal(t, 0, h.run(t, "--config", cfg, "service", "install"), h.err.String())
+	assert.Contains(t, h.out.String(), "daemon --config "+cfg+"\n")
+}
+
+func TestServiceInstallRefusesAMissingConfig(t *testing.T) {
+	t.Parallel()
+	h, runner := newServiceHarness(t)
+	assert.Equal(t, 1, h.run(t, "--config", filepath.Join(h.home, "nope.yaml"), "service", "install"))
+	assert.Contains(t, h.err.String(), "nope.yaml")
+	assert.Empty(t, runner.Calls())
 }
 
 func TestServiceStartBeforeInstallSaysToInstall(t *testing.T) {

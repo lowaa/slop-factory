@@ -23,7 +23,7 @@
 		<key>XDG_CACHE_HOME</key>
 		<string>/Users/ada/.cache</string>
 		<key>XDG_RUNTIME_DIR</key>
-		<string>/Users/ada/tmp</string>
+		<string>/tmp/sbt</string>
 		<key>PATH</key>
 		<string>/Users/ada/.local/bin:/Users/ada/go/bin:/usr/local/bin:/usr/bin:/bin</string>
 	</dict>

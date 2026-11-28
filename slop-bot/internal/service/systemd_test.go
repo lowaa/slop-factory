@@ -31,6 +31,7 @@ func TestSystemdInstallWritesTheUnitAndRestartsIt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	assert.Equal(t, []string{
+		"systemctl --user show-environment",
 		"systemctl --user daemon-reload",
 		"systemctl --user enable slop-bot.service",
 		"systemctl --user restart slop-bot.service",
@@ -46,6 +47,8 @@ func TestSystemdInstallWritesTheUnitAndRestartsIt(t *testing.T) {
 func TestSystemdInstallUsesTheResolvedConfigHome(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, &fixtureOpts{goos: "linux", vars: map[string]string{"XDG_CONFIG_HOME": "~/cfg"}})
+	f.runner.Answer("systemctl --user show-environment",
+		&service.Result{Stdout: "HOME=" + f.home + "\nXDG_CONFIG_HOME=" + filepath.Join(f.home, "cfg") + "\n"})
 	res, err := f.mgr.Install(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(f.home, "cfg", "systemd", "user", "slop-bot.service"), res.UnitPath)
@@ -76,7 +79,7 @@ func TestInstallCleansPATH(t *testing.T) {
 
 func TestSystemdInstallRefusesABinaryPathSystemdRejects(t *testing.T) {
 	t.Parallel()
-	f := newFixture(t, &fixtureOpts{goos: "linux", binary: `/opt/it's/slop-bot`})
+	f := newFixture(t, &fixtureOpts{goos: "linux", binary: `~/it's/slop-bot`})
 	_, err := f.mgr.Install(context.Background())
 	require.ErrorContains(t, err, "quote or backslash")
 	assert.Empty(t, f.runner.Calls())
@@ -105,7 +108,8 @@ func TestSystemdInstallReportsAFailingSystemctl(t *testing.T) {
 		&service.Result{ExitCode: 1, Stderr: "Failed to connect to bus: No medium found\n"})
 	_, err := f.mgr.Install(context.Background())
 	require.ErrorContains(t, err, "Failed to connect to bus")
-	assert.Equal(t, []string{"systemctl --user daemon-reload"}, f.runner.Calls(), "nothing after the failure")
+	assert.Equal(t, []string{"systemctl --user show-environment", "systemctl --user daemon-reload"}, f.runner.Calls(),
+		"nothing after the failure")
 }
 
 func TestSystemdCommandsNeedAnInstalledUnit(t *testing.T) {
@@ -168,7 +172,7 @@ func TestSystemdStatus(t *testing.T) {
 			active:  &service.Result{Stdout: "inactive\n", ExitCode: 3},
 			enabled: &service.Result{Stdout: "not-found\n", ExitCode: 4},
 			linger:  &service.Result{ExitCode: 1, Stderr: "Failed to get user: no such user"},
-			want:    service.Status{State: "inactive", Linger: service.LingerUnknown},
+			want:    service.Status{State: "not installed", Linger: service.LingerUnknown},
 		},
 	}
 	for _, tc := range cases {
@@ -192,7 +196,7 @@ func TestSystemdStatus(t *testing.T) {
 
 func TestSystemdStatusReportsSystemctlItselfFailing(t *testing.T) {
 	t.Parallel()
-	f := newFixture(t, &fixtureOpts{goos: "linux"})
+	f := newInstalledFixture(t)
 	f.runner.Answer("systemctl --user is-active slop-bot.service",
 		&service.Result{ExitCode: 1, Stderr: "Failed to connect to bus"})
 	_, err := f.mgr.Status(context.Background())
@@ -201,10 +205,66 @@ func TestSystemdStatusReportsSystemctlItselfFailing(t *testing.T) {
 
 func TestARunnerThatCannotRunIsAnError(t *testing.T) {
 	t.Parallel()
-	f := newFixture(t, &fixtureOpts{goos: "linux"})
+	f := newInstalledFixture(t)
 	f.runner.Fail("systemctl --user is-active slop-bot.service", errors.New("systemctl: not found"))
 	_, err := f.mgr.Status(context.Background())
 	require.ErrorContains(t, err, "not found")
+}
+
+func TestSystemdStatusOfAnUninstalledUnitAsksSystemctlNothing(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, &fixtureOpts{goos: "linux"})
+	st, err := f.mgr.Status(context.Background())
+	require.NoError(t, err)
+	assert.False(t, st.Installed)
+	assert.Equal(t, []string{lingerCmd}, f.runner.Calls())
+}
+
+func TestSystemdInstallRefusesAConfigHomeTheManagerDoesNotRead(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, &fixtureOpts{goos: "linux", vars: map[string]string{"XDG_CONFIG_HOME": "~/cfg"}})
+	// The user manager has no XDG_CONFIG_HOME, so it reads ~/.config.
+	f.runner.Answer("systemctl --user show-environment", &service.Result{Stdout: "HOME=" + f.home + "\n"})
+	_, err := f.mgr.Install(context.Background())
+	require.ErrorContains(t, err, "import-environment")
+	assert.NoFileExists(t, f.mgr.UnitPath())
+	assert.Equal(t, []string{"systemctl --user show-environment"}, f.runner.Calls())
+}
+
+func TestSystemdInstallRunsTheDaemonWithTheGivenConfig(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, &fixtureOpts{goos: "linux", configFile: "/etc/sb/$x %h.yaml"})
+	res, err := f.mgr.Install(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"daemon", "--config", "/etc/sb/$x %h.yaml"}, res.Args)
+	assert.Contains(t, readFile(t, f.mgr.UnitPath()), `" "daemon" "--config" "/etc/sb/$$x %%h.yaml"`+"\n")
+}
+
+func TestInstallRefusesAMissingBinary(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, &fixtureOpts{goos: "linux"})
+	require.NoError(t, os.Remove(f.opts.Binary))
+	_, err := f.mgr.Install(context.Background())
+	require.ErrorContains(t, err, "no such file")
+	assert.NoFileExists(t, f.mgr.UnitPath())
+	assert.Empty(t, f.runner.Calls())
+}
+
+func TestInstallRefusesANonExecutableBinary(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, &fixtureOpts{goos: "linux"})
+	require.NoError(t, os.Chmod(f.opts.Binary, 0o600))
+	_, err := f.mgr.Install(context.Background())
+	require.ErrorContains(t, err, "isn't an executable file")
+}
+
+func newInstalledFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t, &fixtureOpts{goos: "linux"})
+	_, err := f.mgr.Install(context.Background())
+	require.NoError(t, err)
+	f.runner.Reset()
+	return f
 }
 
 func envNames(env []service.EnvVar) []string {

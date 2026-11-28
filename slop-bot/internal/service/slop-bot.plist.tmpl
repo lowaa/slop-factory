@@ -10,7 +10,9 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>{{xml .Binary}}</string>
-		<string>daemon</string>
+{{- range .Args}}
+		<string>{{xml .}}</string>
+{{- end}}
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>

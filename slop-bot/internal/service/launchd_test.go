@@ -42,7 +42,7 @@ func TestLaunchdInstallWritesThePlistAndBootstrapsIt(t *testing.T) {
 	assert.Equal(t, service.LingerNotApplicable, res.Linger)
 	assert.Equal(t, []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "PATH"},
 		envNames(res.Env))
-	assert.Contains(t, res.Env, service.EnvVar{Name: "XDG_RUNTIME_DIR", Value: filepath.Join(f.home, "tmp")},
+	assert.Contains(t, res.Env, service.EnvVar{Name: "XDG_RUNTIME_DIR", Value: "/tmp/sbt"},
 		"the resolved runtime dir, so the daemon's socket is where the CLI looks")
 }
 
@@ -96,6 +96,20 @@ func TestLaunchdStartAndStop(t *testing.T) {
 			assert.Equal(t, tc.wantStop, f.runner.Calls())
 		})
 	}
+}
+
+func TestLaunchdAFailedPrintIsNotNotLoaded(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, &fixtureOpts{goos: "darwin"})
+	ctx := context.Background()
+	_, err := f.mgr.Install(ctx)
+	require.NoError(t, err)
+	f.runner.Answer(printCmd, &service.Result{ExitCode: -1, Stderr: "signal: killed"})
+	f.runner.Reset()
+	require.ErrorContains(t, f.mgr.Stop(ctx), "signal: killed")
+	require.ErrorContains(t, f.mgr.Uninstall(ctx), "signal: killed")
+	assert.FileExists(t, f.mgr.UnitPath(), "a job that may still run keeps its plist")
+	assert.Equal(t, []string{printCmd, printCmd}, f.runner.Calls())
 }
 
 func TestLaunchdUninstall(t *testing.T) {

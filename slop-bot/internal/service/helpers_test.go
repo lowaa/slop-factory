@@ -31,12 +31,13 @@ type fixtureOpts struct {
 	// vars are extra environment variables; XDG ones are relative to home
 	// when they start with "~/".
 	vars map[string]string
-	// binary replaces the default binary path.
+	// binary replaces the default binary path; "~/" is the home. An
+	// absolute binary is created as an executable stand-in.
 	binary string
-	// realBinary creates the binary as an executable file.
-	realBinary bool
 	// extraPATH is appended to the default install-time PATH.
 	extraPATH string
+	// configFile is passed as Options.ConfigFile.
+	configFile string
 }
 
 func newFixture(t *testing.T, fo *fixtureOpts) *fixture {
@@ -51,7 +52,9 @@ func newFixture(t *testing.T, fo *fixtureOpts) *fixture {
 	vars := map[string]string{}
 	switch fo.goos {
 	case "darwin":
-		vars["TMPDIR"] = filepath.Join(home, "tmp")
+		// Fixed and short: a Mac's own temp dir is long enough that a
+		// runtime dir under it would break the socket length limit.
+		vars["TMPDIR"] = "/tmp/sbt"
 	default:
 		vars["XDG_RUNTIME_DIR"] = "/run/user/1000"
 	}
@@ -67,10 +70,12 @@ func newFixture(t *testing.T, fo *fixtureOpts) *fixture {
 	})
 	require.NoError(t, err)
 	binary := filepath.Join(home, "go", "bin", "slop-bot")
-	if fo.binary != "" {
+	if rest, ok := strings.CutPrefix(fo.binary, "~/"); ok {
+		binary = filepath.Join(home, rest)
+	} else if fo.binary != "" {
 		binary = fo.binary
 	}
-	if fo.realBinary {
+	if filepath.IsAbs(binary) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(binary), 0o700))
 		require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o700)) // #nosec G306 -- a test stand-in that must be executable
 	}
@@ -81,7 +86,7 @@ func newFixture(t *testing.T, fo *fixtureOpts) *fixture {
 	f := &fixture{root: root, home: home, runner: servicetest.NewRunner()}
 	f.opts = &service.Options{
 		Paths: p, Home: home, UID: testUID, GOOS: fo.goos,
-		Binary: binary, PATH: pathVar,
+		Binary: binary, PATH: pathVar, ConfigFile: fo.configFile,
 		Runner: f.runner, Logger: slog.New(slog.DiscardHandler),
 	}
 	f.mgr, err = service.New(f.opts)

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -37,14 +40,34 @@ func (a *app) serviceManager(cmd *cobra.Command, binary string) (service.Manager
 	if err != nil {
 		return nil, nil, err
 	}
+	configFile, err := a.serviceConfigFile()
+	if err != nil {
+		return nil, nil, err
+	}
 	path, _ := a.deps.Env.Lookup("PATH")
 	m, err := service.New(&service.Options{
 		Paths: p, Home: a.deps.Env.Home, UID: a.deps.Env.UID, GOOS: a.deps.Env.GOOS,
-		Binary: binary, PATH: path,
+		Binary: binary, PATH: path, ConfigFile: configFile,
 		Runner: a.deps.ServiceRunner,
 		Logger: slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 	return m, p, err
+}
+
+// serviceConfigFile is --config made absolute, so the service runs with
+// the config the user named rather than silently with the default.
+func (a *app) serviceConfigFile() (string, error) {
+	if a.configPath == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(a.configPath)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return "", fmt.Errorf("--config: %w", err)
+	}
+	return abs, nil
 }
 
 func (a *app) serviceInstallCmd() *cobra.Command {
@@ -81,13 +104,13 @@ func (a *app) serviceInstallCmd() *cobra.Command {
 func printInstalled(out io.Writer, p *paths.Paths, res *service.Installed) error {
 	w := &errWriter{w: out}
 	w.printf("installed the slop-bot service: %s\n", res.UnitPath)
-	w.printf("it runs: %s daemon\n", res.Binary)
+	w.printf("it runs: %s %s\n", res.Binary, strings.Join(res.Args, " "))
 	w.printf("environment written into it:\n")
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	// Not aligned: PATH is long enough to push every other origin off the
+	// screen.
 	for _, e := range res.Env {
-		_, _ = fmt.Fprintf(tw, "  %s=%s\t%s\n", e.Name, e.Value, envOrigin(p, e.Name))
+		w.printf("  %s=%s  (%s)\n", e.Name, e.Value, envOrigin(p, e.Name))
 	}
-	_ = tw.Flush()
 	switch res.Linger {
 	case service.LingerOff:
 		w.printf("linger: off. systemd stops slop-bot when your last session ends; " +
@@ -100,6 +123,9 @@ func printInstalled(out io.Writer, p *paths.Paths, res *service.Installed) error
 	for _, warn := range res.Warnings {
 		w.printf("warning: %s\n", warn)
 	}
+	// The service manager reports the process started, not that the daemon
+	// came up: a bad config or a held lock only shows after.
+	w.printf("check it came up: slop-bot health (or slop-bot service status)\n")
 	return w.err
 }
 

@@ -23,7 +23,7 @@
 		<key>XDG_CACHE_HOME</key>
 		<string>/Users/a b%h$x&amp;&lt;&gt;/.cache</string>
 		<key>XDG_RUNTIME_DIR</key>
-		<string>/Users/a b%h$x&amp;&lt;&gt;/tmp</string>
+		<string>/tmp/sbt</string>
 		<key>PATH</key>
 		<string>/Users/a b%h$x&amp;&lt;&gt;/.local/bin:/Users/a b%h$x&amp;&lt;&gt;/go/bin:/usr/local/bin:/usr/bin:/bin:/opt/q&#34;x\y/bin</string>
 	</dict>
