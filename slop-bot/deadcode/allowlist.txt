@@ -51,3 +51,4 @@ internal/harness/rpcdriver/rpcdriver.go Wire.WriteLine #36
 internal/briefing/ package #36
 internal/harness/claudecode/ package #36
 internal/harness/rpcdriver/rpcdriver.go NewWire #36
+internal/state/ package #36
