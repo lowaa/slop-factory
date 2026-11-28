@@ -25,6 +25,14 @@ const DefaultSocket = "slop-bot"
 // diedChannel is the tmux wait-for channel a session's death is signalled on.
 const diedChannel = "slop-bot-died-"
 
+// helperTimeout bounds the tmux commands WaitExit and Status run for their
+// own bookkeeping (a channel's signal, a reaping child). They answer in
+// milliseconds; the bound only stops a wedged server hanging the caller. It
+// is not the recheck interval: under load a command can outlast a short
+// interval, and one killed before it reached the server leaves undone what
+// it was run for.
+const helperTimeout = 10 * time.Second
+
 // sessionName is what slop-bot names sessions: it keeps every name safe in a
 // tmux target, a wait-for channel and the pane-died hook's shell command.
 var sessionName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -239,7 +247,7 @@ func (t *Tmux) Status(ctx context.Context, session string) (*Status, error) {
 	if err != nil || st.Dead || !closed {
 		return st, err
 	}
-	rctx, cancel := context.WithTimeout(ctx, t.recheck)
+	rctx, cancel := context.WithTimeout(ctx, helperTimeout)
 	_, _ = t.run.do(rctx, &call{args: []string{"run-shell", "true"}})
 	cancel()
 	st, _, err = t.status(ctx, session)
@@ -287,27 +295,73 @@ func (t *Tmux) status(ctx context.Context, session string) (*Status, bool, error
 // fail to come: tmux 3.4 can lose a pane's SIGCHLD (see Status), and so
 // never fire pane-died. The caller's Status check is what makes the exit
 // certain; the signal only makes it prompt.
+//
+// At the bound the wait is ended by signalling its channel, not by killing
+// its client: tmux keeps a killed client's wait registered, and the next
+// signal (the real death) would go to it instead of being kept for the next
+// wait. The signal wakes the registered wait or, if the client hasn't
+// registered yet, is kept until it does, so once the client has returned the
+// channel holds nothing of this wait. One waiter per session is assumed.
+//
+// The signal can miss: two signals with nobody waiting leave nothing kept
+// (tmux drops the channel), so a death signalled just before the bound's
+// would cancel it, and the client, registering after both, would wait on.
+// So that wait is bounded too, and only then is the client killed and its
+// registered wait released by a further signal.
 func (t *Tmux) WaitExit(ctx context.Context, session string) error {
 	channel := diedChannel + session
-	wctx, cancel := context.WithTimeout(ctx, t.recheck)
+	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	_, err := t.run.do(wctx, &call{args: []string{"wait-for", channel}})
-	switch {
-	case errors.Is(err, ErrNoServer):
-		return nil
-	case err != nil && wctx.Err() != nil:
-		// tmux keeps a killed client's wait registered, and the next signal
-		// goes to it instead of being kept for a later wait. So the abandoned
-		// wait is released by signalling it: the caller's Status check stands
-		// in for whatever that signal might have been.
-		rctx, rcancel := context.WithTimeout(context.Background(), t.recheck)
-		defer rcancel()
-		_, _ = t.run.do(rctx, &call{args: []string{"wait-for", "-S", channel}})
-		if ctx.Err() != nil {
-			return ctx.Err()
+	waited := make(chan error, 1)
+	go func() {
+		_, err := t.run.do(wctx, &call{args: []string{"wait-for", channel}})
+		waited <- err
+	}()
+	returned, err := t.awaitWait(ctx, waited)
+	if errors.Is(err, errBound) {
+		_ = t.signal(channel)
+		returned, err = t.awaitWait(ctx, waited)
+	}
+	if errors.Is(err, errBound) || ctx.Err() != nil {
+		cancel()
+		if !returned {
+			<-waited
 		}
+		// The caller's Status check stands in for whatever this signal
+		// might have been.
+		_ = t.signal(channel)
+		return ctx.Err()
+	}
+	if errors.Is(err, ErrNoServer) {
 		return nil
 	}
+	return err
+}
+
+// errBound is a wait that outlasted the recheck interval.
+var errBound = errors.New("sessionhost: wait bound")
+
+// awaitWait is the wait client's result (returned), or else errBound at
+// the recheck interval, or ctx's error.
+func (t *Tmux) awaitWait(ctx context.Context, waited <-chan error) (returned bool, err error) {
+	bound := time.NewTimer(t.recheck)
+	defer bound.Stop()
+	select {
+	case err := <-waited:
+		return true, err
+	case <-bound.C:
+		return false, errBound
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+// signal sends the channel's signal, bounded by helperTimeout and not by
+// any caller's context: it is what keeps the channel's state consistent.
+func (t *Tmux) signal(channel string) error {
+	sctx, cancel := context.WithTimeout(context.Background(), helperTimeout)
+	defer cancel()
+	_, err := t.run.do(sctx, &call{args: []string{"wait-for", "-S", channel}})
 	return err
 }
 
