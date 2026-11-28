@@ -73,6 +73,24 @@ func TestRun_ALocalFallbackRedoesASessionThePrimaryFailsWithATrigger(t *testing.
 	assert.Contains(t, stderr, "SLOP_REVIEW_FALLBACK_PROVIDER", "the keys taken from the .env are named")
 }
 
+// A reported run says which sessions the local fallback ran, as under a
+// central config.
+func TestRun_AReportedLocalFallbackRunSaysWhereEachSessionRan(t *testing.T) {
+	lf := setUpLocalFallback(t, "")
+	rs := setUpFailedRunReporting(t)
+
+	runJSON(t, []string{lf.envFile}, lf.factory(fakeClaudeCLI(t, true, claudeUsageLimitResult)))
+	require.Len(t, rs.all(), 1)
+	run := rs.all()[0].run
+	require.NoError(t, run.Validate())
+	assert.Zero(t, run.ProviderConfigRevision, "no central config")
+	require.NotNil(t, run.Fallback)
+	assert.Equal(t, "openrouter", run.Fallback.To)
+	require.NotEmpty(t, run.Sessions)
+	assert.Equal(t, "openrouter", run.Sessions[0].Provider)
+	assert.Equal(t, "fallback-model", run.Sessions[0].Model)
+}
+
 // A primary that can't start for a class that is not configured fails the
 // run, as with no fallback at all; listed, the same failure takes it.
 func TestRun_ALocalFallbackIsTakenOnlyOnItsClasses(t *testing.T) {

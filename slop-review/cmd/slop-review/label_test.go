@@ -122,4 +122,8 @@ func TestLabel_ReadsTheServerAndTokenFromTheEnvFile(t *testing.T) {
 	require.NoError(t, run([]string{"label", "--env-file=" + path, uuid.NewString(), "--verdict=confirmed"}, &out, &errOut))
 	require.Len(t, *reqs, 2)
 	assert.Equal(t, "Bearer env-tok", (*reqs)[1].auth, "the environment beats the file")
+
+	err := run([]string{"label", "--env-file=" + path, uuid.NewString(), "--verdict=confirmed", "--report-to="}, &out, &errOut)
+	require.ErrorContains(t, err, "no server", "an explicit empty flag beats the file")
+	assert.Len(t, *reqs, 2)
 }

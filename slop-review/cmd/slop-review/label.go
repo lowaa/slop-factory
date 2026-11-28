@@ -38,10 +38,11 @@ func runLabel(ctx context.Context, args []string, stdout, stderr io.Writer, logH
 	if err != nil {
 		return fmt.Errorf("label: %w", err)
 	}
-	if *reportTo == "" {
+	// Changed, not empty: an explicit --report-to= still beats the settings.
+	if !fs.Changed("report-to") {
 		*reportTo = dotEnv.Getenv("SLOP_REVIEW_REPORT_URL")
 	}
-	if *reportTokenCommand == "" {
+	if !fs.Changed("report-token-command") {
 		*reportTokenCommand = dotEnv.Getenv("SLOP_REVIEW_REPORT_TOKEN_COMMAND")
 	}
 	if fs.NArg() != 1 {

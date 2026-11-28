@@ -255,9 +255,9 @@ type Config struct {
 	// whose configured remote isn't the shared identity (a personal fork,
 	// say).
 	ReportRepo string
-	// ReportToken authenticates the post. Env-var-only, like the provider
-	// API keys (see Load) -- never a flag, so it can't land in shell
-	// history or a process listing.
+	// ReportToken authenticates the post. From the environment or the
+	// .env, never a flag, so it can't land in shell history or a process
+	// listing.
 	ReportToken string
 	// ReportTokenCommand, when set, is run for the token before each
 	// request, for a token that expires; an explicit ReportToken
@@ -367,8 +367,9 @@ var boolFlags = map[string]bool{"run-checks": true, "allow-secrets": true}
 
 // reportTokenEnv is where the ingest token comes from. Deliberately absent
 // from flagSpecs/providerProfiles' apiKeyEnv pattern: it must never be
-// bindable as a flag (see Config.ReportToken), so it's read directly with
-// os.Getenv in Load rather than through viper's flag/env precedence.
+// bindable as a flag (see Config.ReportToken), so Load reads it with
+// DotEnv.Getenv (the environment, then the .env) rather than through
+// viper's flag/env precedence.
 const reportTokenEnv = "SLOP_REVIEW_REPORT_TOKEN"
 
 // ReportTokenSource is where the report token comes from: the fixed
@@ -520,6 +521,11 @@ func readLayers(args []string) (*layers, error) {
 	var err error
 	if l.dotEnv, err = ReadDotEnv(l.envFile); err != nil {
 		return nil, err
+	}
+	// An intent belongs to one change, and a relative path in the file
+	// would be taken from review.sh's directory, not the caller's.
+	if _, ok := l.dotEnv["SLOP_REVIEW_INTENT"]; ok {
+		return nil, fmt.Errorf("config: %s: SLOP_REVIEW_INTENT can't be set in a .env: it names one change's intent; give --intent", l.envFile)
 	}
 	fileSettings := make(map[string]any, len(l.dotEnv))
 	for k, val := range l.dotEnv {

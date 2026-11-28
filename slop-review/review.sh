@@ -160,7 +160,8 @@ To change provider: SLOP_REVIEW_PROVIDER=<name> (e.g. in the .env), or
 --provider=<name> for one run. A machine that reports to a report server
 takes the provider from the server's central config instead.
 
-Settings: every SLOP_REVIEW_* variable may also be set in a .env file. This
+Settings: every SLOP_REVIEW_* variable but SLOP_REVIEW_INTENT (one change's,
+not a standing setting) may also be set in a .env file. This
 script reads the one at the root of its own checkout (in a linked worktree,
 which has no copy of the git-ignored file, the main worktree's), never the
 reviewed repository's, and passes it as --env-file=<path>; give
@@ -181,9 +182,9 @@ repo -- unset, nothing is sent anywhere):
   --report-to <url>              also settable as SLOP_REVIEW_REPORT_URL.
                                   Must be https, unless the host is loopback
                                   (127.0.0.0/8, ::1, localhost).
-  SLOP_REVIEW_REPORT_TOKEN       the ingest token. Env-var-only, like the
-                                  provider API keys -- there is no flag for
-                                  it, so it can't land in shell history.
+  SLOP_REVIEW_REPORT_TOKEN       the ingest token, from the environment or
+                                  the .env. There is no flag for it, so it
+                                  can't land in shell history.
   --report-token-command <cmd>   also settable as SLOP_REVIEW_REPORT_TOKEN_COMMAND:
                                   for a token that expires. An executable
                                   (a path, or a name on PATH) whose stdout,

@@ -141,6 +141,12 @@ func TestLoad_EnvFileNeverSuppliesAProviderKey(t *testing.T) {
 	require.ErrorContains(t, err, "OPENAI_API_KEY is required")
 }
 
+func TestLoad_AnIntentInTheEnvFileIsRefused(t *testing.T) {
+	path := writeEnvFile(t, "SLOP_REVIEW_INTENT=pr.md\n")
+	_, err := Load([]string{"--env-file=" + path})
+	require.ErrorContains(t, err, "SLOP_REVIEW_INTENT can't be set in a .env")
+}
+
 func TestLoad_AMalformedEnvFileFails(t *testing.T) {
 	path := writeEnvFile(t, "SLOP_REVIEW_MODEL=\"unterminated\n")
 	_, err := Load([]string{"--env-file=" + path})

@@ -329,13 +329,14 @@ func resolveToolVersion(cfg *config.Config) report.ToolVersion {
 }
 
 // buildSessions maps the sessions across. Which provider and model each ran
-// on is sent only under a central config (v4): without one, every session
-// ran on the run's own provider, which the report already says.
+// on is sent (v4) only under a central config or with a fallback: without
+// either, every session ran on the run's own provider, which the report
+// already says.
 func buildSessions(sessions []orchestrator.SessionReport, cfg *config.Config) []report.Session {
 	out := make([]report.Session, len(sessions))
 	for i, s := range sessions {
 		var provider, model string
-		if cfg.ProviderConfigRevision != 0 {
+		if cfg.ProviderConfigRevision != 0 || cfg.Fallback != nil {
 			provider, model = s.Provider, s.Model
 		}
 		out[i] = report.Session{

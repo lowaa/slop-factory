@@ -84,7 +84,10 @@ The file is parsed, never sourced, since it may hold other tools' secrets:
 only `SLOP_REVIEW_*` lines are read (`KEY=VALUE`, an optional `export `,
 `#` comments, values optionally in `''` or `""`, taken literally with no
 escapes or `$VAR` expansion), and a provider's API key is never taken from
-it. Values are never logged; stderr names the keys a run took from it.
+it. `SLOP_REVIEW_INTENT` is refused there: an intent is one change's, and a
+relative path in the file would not be relative to where you ran
+`review.sh`. Values are never logged; stderr names the keys a run took from
+it.
 
 ## Fallback
 
