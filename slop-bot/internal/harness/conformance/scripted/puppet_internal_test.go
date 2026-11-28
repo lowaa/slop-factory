@@ -20,7 +20,7 @@ func newBarePuppet(t *testing.T) *Puppet {
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	p, err := New(t, &Options{Server: server, Shell: &Shell{Tool: "Bash"}})
+	p, err := New(t, &Options{Server: server, Shell: &Shell{Tool: "Bash", Input: func(c string) map[string]any { return map[string]any{"command": c} }}})
 	require.NoError(t, err)
 	return p
 }

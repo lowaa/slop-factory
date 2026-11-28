@@ -140,23 +140,37 @@ func (h *puppeted) Start(ctx context.Context, ws *harness.Workspace, resume *har
 // process has been launched (the launcher reported its pid) and its
 // conversation started.
 func (p *Puppet) Started(ctx context.Context) (string, bool, error) {
-	var pid int
-	select {
-	case pid = <-p.pids:
-	case <-ctx.Done():
-		return "", false, fmt.Errorf("scripted: no harness was launched: %w", ctx.Err())
+	pid, err := receive(ctx, p.pids, "no harness was launched")
+	if err != nil {
+		return "", false, err
 	}
-	var st *started
-	select {
-	case st = <-p.starts:
-	case <-ctx.Done():
-		return "", false, fmt.Errorf("scripted: no conversation started: %w", ctx.Err())
+	st, err := receive(ctx, p.starts, "no conversation started")
+	if err != nil {
+		return "", false, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.cur = &session{started: *st, pid: pid, from: len(p.server.Recording().Requests)}
 	p.long = nil
 	return st.id, st.resumed, nil
+}
+
+// receive takes what is already waiting on ch before it looks at ctx: with
+// both ready, select would pick at random, and a report that did arrive must
+// not be lost to a context that has since ended.
+func receive[T any](ctx context.Context, ch <-chan T, what string) (T, error) {
+	select {
+	case v := <-ch:
+		return v, nil
+	default:
+	}
+	select {
+	case v := <-ch:
+		return v, nil
+	case <-ctx.Done():
+		var zero T
+		return zero, fmt.Errorf("scripted: %s: %w", what, ctx.Err())
+	}
 }
 
 // Reply implements conformance.Puppet: the model's next turn is text.
