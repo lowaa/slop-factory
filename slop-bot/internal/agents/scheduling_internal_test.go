@@ -111,7 +111,7 @@ func TestStoppingAnAlreadyExitedLastingSessionLetsGoOfNothing(t *testing.T) {
 	r.exited = make(chan struct{})
 	close(r.exited)
 
-	r.shutdown(context.Background())
+	require.NoError(t, r.shutdown(context.Background()))
 
 	assert.Zero(t, conv.closed.Load())
 	assert.True(t, r.stopping)

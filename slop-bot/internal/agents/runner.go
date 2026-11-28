@@ -416,22 +416,47 @@ func (r *runner) exitedWith(ctx context.Context, ev *harness.Event) {
 // outlives the daemon (a TUI's) is let go of as it is, mid-turn or with a
 // person in it, for the next daemon to adopt; any other finishes its turn
 // and stops, resumable by id.
-func (r *runner) shutdown(ctx context.Context) {
+//
+// It is bounded: once ctx is done, a conversation not yet stopped is
+// forced (its graceful stop may not return at all, if the harness ignores
+// it), and one that still hasn't exited ForceStopGrace later is reported,
+// so the daemon never waits on a harness for ever.
+func (r *runner) shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	r.stopping = true
 	r.mu.Unlock()
-	if lasting, ok := r.conv.(harness.Lasting); ok {
-		select {
-		case <-r.exited:
-		default:
-			_ = lasting.Close()
-			r.requeue(ctx, r.conv.Undelivered())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		if lasting, ok := r.conv.(harness.Lasting); ok {
+			select {
+			case <-r.exited:
+			default:
+				_ = lasting.Close()
+				r.requeue(ctx, r.conv.Undelivered())
+			}
+		} else {
+			r.stopConv(ctx, false)
 		}
 		<-r.exited
-		return
+	}()
+	select {
+	case <-stopped:
+		return nil
+	case <-ctx.Done():
 	}
-	r.stopConv(ctx, false)
-	<-r.exited
+	if r.conv != nil {
+		force, cancel := context.WithTimeout(context.WithoutCancel(ctx), ForceStopGrace)
+		defer cancel()
+		go func() { _ = r.conv.Stop(force, true) }()
+	}
+	select {
+	case <-r.exited:
+		return nil
+	case <-r.m.opts.Clock.After(ForceStopGrace):
+		r.m.opts.Logger.Error("agents: a conversation didn't exit when forced to stop", "agent", r.id)
+		return fmt.Errorf("agents: agent %s's conversation didn't exit when forced to stop", r.id)
+	}
 }
 
 // requeue queues again the messages an ended or let-go conversation held,

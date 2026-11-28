@@ -141,6 +141,10 @@ type Manager struct {
 	done chan struct{}
 	// swept is closed when the lease sweeper has stopped.
 	swept chan struct{}
+	// stopped is closed when the first Stop returns, with its result in
+	// stopErr.
+	stopped chan struct{}
+	stopErr error
 }
 
 // New makes a Manager; nothing runs until Start.
@@ -166,6 +170,7 @@ func New(opts *Options) (*Manager, error) {
 		stop:         make(chan struct{}),
 		done:         make(chan struct{}),
 		swept:        make(chan struct{}),
+		stopped:      make(chan struct{}),
 	}, nil
 }
 
@@ -190,13 +195,20 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // Stop drains: each agent finishes its current turn and stops, so it can be
 // resumed by id when the daemon starts again. Starts in flight are
-// abandoned. ctx bounds the wait: past it, agents are killed and Stop
-// returns ctx's error without waiting for the rest.
+// abandoned. ctx bounds the wait: past it, the agents are forced to stop
+// rather than waited for, each within ForceStopGrace, and Stop returns
+// ctx's error. A second Stop waits for the first, within its own ctx, and
+// returns the first's result.
 func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	if m.stopping {
 		m.mu.Unlock()
-		return nil
+		// Not nil while the first still drains: the daemon would close the
+		// databases under it.
+		if err := waitCtx(ctx, m.stopped); err != nil {
+			return err
+		}
+		return m.stopErr
 	}
 	m.stopping = true
 	// Marked now, so a turn that ends from here on starts nothing new;
@@ -207,16 +219,23 @@ func (m *Manager) Stop(ctx context.Context) error {
 		r.mu.Unlock()
 	}
 	m.mu.Unlock()
+	m.stopErr = m.drain(ctx)
+	close(m.stopped)
+	return m.stopErr
+}
+
+func (m *Manager) drain(ctx context.Context) error {
 	close(m.stop)
 	m.cancelBase()
-	if err := waitCtx(ctx, m.done); err != nil {
-		return err
+	// A wait cut short by ctx doesn't skip the agents: they are still
+	// stopped below, and with ctx done that forces them, rather than
+	// leaving harnesses running once the daemon has gone.
+	err := waitCtx(ctx, m.done)
+	if err == nil {
+		err = waitCtx(ctx, m.swept)
 	}
-	if err := waitCtx(ctx, m.swept); err != nil {
-		return err
-	}
-	if err := waitGroup(ctx, &m.starts); err != nil {
-		return err
+	if err == nil {
+		err = waitGroup(ctx, &m.starts)
 	}
 	// Only now is the set of runners final: a start that was in flight has
 	// adopted its runner, or given up.
@@ -226,15 +245,29 @@ func (m *Manager) Stop(ctx context.Context) error {
 		runners = append(runners, r)
 	}
 	m.mu.Unlock()
+	// Each shutdown is bounded (by ctx, then ForceStopGrace), so this is.
+	errs := make([]error, len(runners))
 	var wg sync.WaitGroup
-	for _, r := range runners {
-		wg.Go(func() { r.shutdown(ctx) })
+	for i, r := range runners {
+		wg.Go(func() { errs[i] = r.shutdown(ctx) })
 	}
 	wg.Wait()
 	// An agent that finished during the drain is cleaned up before the
 	// daemon closes the databases under it.
-	return waitGroup(ctx, &m.ends)
+	if err == nil {
+		err = waitGroup(ctx, &m.ends)
+	}
+	if err == nil {
+		// The deadline passed as the agents stopped: some were forced.
+		err = ctx.Err()
+	}
+	return errors.Join(append([]error{err}, errs...)...)
 }
+
+// ForceStopGrace bounds the wait for a conversation forced to stop once the
+// drain's deadline has passed: one that still hasn't exited is reported,
+// not waited on for ever.
+const ForceStopGrace = 10 * time.Second
 
 // startTimeout is Options.StartTimeout, defaulted.
 func (m *Manager) startTimeout() time.Duration {
@@ -335,6 +368,12 @@ func (m *Manager) isStarting(ticket ident.TicketID) bool {
 }
 
 func waitCtx(ctx context.Context, done <-chan struct{}) error {
+	// Done first: with both ready, select picks at random.
+	select {
+	case <-done:
+		return nil
+	default:
+	}
 	select {
 	case <-done:
 		return nil

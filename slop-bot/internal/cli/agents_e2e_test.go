@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -267,4 +268,29 @@ func TestInboxFollowPrintsWhatIsWaitingThenStopsWhenCancelled(t *testing.T) {
 	code, out := e.runUntilSeen("waiting for you", "inbox", "--follow")
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out, "waiting for you")
+}
+
+// A daemon whose stop runs out of time kills the agent it was waiting on,
+// rather than exiting with its harness left running, and says so with its
+// exit code; the next daemon resumes the agent, told its turn may have been
+// cut short. The bound is so short the deadline has passed before the
+// drain reaches the agents.
+func TestADaemonStopPastItsDeadlineKillsTheAgentItWaitsOn(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.deps.stopTimeout, h.wantExit = time.Nanosecond, 1
+	e := newE2EFrom(t, h, "", nil)
+	s, _ := e.started()
+	e.stop()
+	_, err := s.Await(e.ctx(), "never sent")
+	require.ErrorContains(t, err, "session ended", "the agent stuck mid-turn was killed")
+
+	h.deps.stopTimeout, h.wantExit = 0, 0
+	e.restart()
+	resumed, err := e.ctl.Next(e.ctx())
+	require.NoError(t, err)
+	assert.Equal(t, s.ID, resumed.ID)
+	msg, err := resumed.Expect(e.ctx(), fake.RepUser)
+	require.NoError(t, err)
+	assert.Contains(t, msg.Text, "slop-bot restarted")
 }

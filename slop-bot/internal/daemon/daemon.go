@@ -62,6 +62,9 @@ type Options struct {
 	// TmuxSocket names the daemon's tmux server (tmux -L); "" is
 	// sessionhost.DefaultSocket. Tests use one each.
 	TmuxSocket string
+	// StopTimeout bounds the shutdown; 0 is StopTimeout. Tests shorten it to
+	// see what a drain past its deadline does.
+	StopTimeout time.Duration
 }
 
 // Daemon is the running slop-bot.
@@ -246,7 +249,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	close(d.ready)
 	<-ctx.Done()
 	d.opts.Logger.Info("slop-bot daemon stopping")
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopTimeout)
+	timeout := d.opts.StopTimeout
+	if timeout <= 0 {
+		timeout = StopTimeout
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	return d.group.Stop(stopCtx)
 }

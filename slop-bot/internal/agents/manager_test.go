@@ -473,6 +473,12 @@ func (f *fixture) restartWith(between func()) *agents.Manager {
 	if between != nil {
 		between()
 	}
+	return f.startAgain()
+}
+
+// startAgain starts a new manager over the state f's stopped one left.
+func (f *fixture) startAgain() *agents.Manager {
+	f.t.Helper()
 	self, err := os.Executable()
 	require.NoError(f.t, err)
 	m := f.newManager(&fakeHarness{h: &fake.Harness{Binary: self, Control: f.ctl.Socket(), TranscriptDir: f.transcripts, Logger: slog.New(slog.DiscardHandler), Clock: clock.Real{}}, hooks: f.hooks})

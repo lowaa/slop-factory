@@ -64,6 +64,8 @@ type Deps struct {
 	clock clock.Clock
 	// tuiGrace shortens the daemon's wait for a hung-up TUI in tests.
 	tuiGrace time.Duration
+	// stopTimeout shortens the daemon's shutdown bound in tests.
+	stopTimeout time.Duration
 	// daemonAnswers lets in-package tests stand a daemon in for the one at
 	// a socket they can't listen on; nil dials it.
 	daemonAnswers func(ctx context.Context, socket string) bool
@@ -205,7 +207,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			}
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 			opts := &daemon.Options{
-				Config: cfg, Paths: p, Logger: logger, Clock: clock.Or(a.deps.clock), TUIGrace: a.deps.tuiGrace,
+				Config: cfg, Paths: p, Logger: logger, Clock: clock.Or(a.deps.clock), TUIGrace: a.deps.tuiGrace, StopTimeout: a.deps.stopTimeout,
 				TUIHarnesses: a.deps.tuiHarnesses, TmuxSocket: a.deps.tmuxSocket,
 				CLIReference: AgentReference(cmd.Root()),
 			}

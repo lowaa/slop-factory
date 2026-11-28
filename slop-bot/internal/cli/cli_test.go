@@ -28,6 +28,9 @@ type harness struct {
 	config string
 	// built is the daemon startDaemon last ran.
 	built atomic.Pointer[daemon.Daemon]
+	// wantExit is the exit code startDaemon's stop expects: 0, a clean
+	// shutdown, unless a test makes it otherwise.
+	wantExit int
 }
 
 func newHarness(t *testing.T) *harness {
@@ -136,10 +139,11 @@ func startDaemon(t *testing.T, h *harness) (stop func()) {
 		require.FailNowf(t, "daemon exited", "code %d: %s", code, daemonDeps.Stderr)
 	}
 	var once sync.Once
+	want := h.wantExit
 	stop = func() {
 		once.Do(func() {
 			cancel()
-			assert.Equal(t, 0, <-done, "daemon: %s", daemonDeps.Stderr)
+			assert.Equal(t, want, <-done, "daemon: %s", daemonDeps.Stderr)
 		})
 	}
 	t.Cleanup(stop)
