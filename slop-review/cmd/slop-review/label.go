@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 
@@ -29,10 +28,21 @@ func runLabel(ctx context.Context, args []string, stdout, stderr io.Writer, logH
 	verdict := fs.String("verdict", "", "one of: "+strings.Join(labelVerdicts, ", "))
 	reason := fs.String("reason", "", "why")
 	fixedIn := fs.String("fixed-in", "", "commit that fixed the finding (confirmed only)")
-	reportTo := fs.String("report-to", os.Getenv("SLOP_REVIEW_REPORT_URL"), "report server URL; also SLOP_REVIEW_REPORT_URL")
-	fs.String("report-token-command", os.Getenv("SLOP_REVIEW_REPORT_TOKEN_COMMAND"), "executable whose output is the token; also SLOP_REVIEW_REPORT_TOKEN_COMMAND")
+	reportTo := fs.String("report-to", "", "report server URL; also SLOP_REVIEW_REPORT_URL")
+	reportTokenCommand := fs.String("report-token-command", "", "executable whose output is the token; also SLOP_REVIEW_REPORT_TOKEN_COMMAND")
+	envFile := fs.String("env-file", "", "a .env file whose SLOP_REVIEW_* settings apply below the environment's")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("label: %w", err)
+	}
+	dotEnv, err := config.ReadDotEnv(*envFile)
+	if err != nil {
+		return fmt.Errorf("label: %w", err)
+	}
+	if *reportTo == "" {
+		*reportTo = dotEnv.Getenv("SLOP_REVIEW_REPORT_URL")
+	}
+	if *reportTokenCommand == "" {
+		*reportTokenCommand = dotEnv.Getenv("SLOP_REVIEW_REPORT_TOKEN_COMMAND")
 	}
 	if fs.NArg() != 1 {
 		return errors.New("label: usage: slop-review label <finding-id> --verdict=<verdict> [--reason=...] [--fixed-in=<commit>]")
@@ -50,12 +60,11 @@ func runLabel(ctx context.Context, args []string, stdout, stderr io.Writer, logH
 	if *reportTo == "" {
 		return errors.New("label: no server: set --report-to or SLOP_REVIEW_REPORT_URL")
 	}
-	reportTokenCommand := fs.Lookup("report-token-command").Value.String()
-	staticToken := os.Getenv("SLOP_REVIEW_REPORT_TOKEN")
-	if note := config.TokenCommandIgnoredNote(staticToken, reportTokenCommand); note != "" {
+	staticToken := dotEnv.Getenv("SLOP_REVIEW_REPORT_TOKEN")
+	if note := config.TokenCommandIgnoredNote(staticToken, *reportTokenCommand); note != "" {
 		_, _ = fmt.Fprintln(stderr, "slop-review: "+note)
 	}
-	tokens, err := config.ReportTokenSource(staticToken, reportTokenCommand)
+	tokens, err := config.ReportTokenSource(staticToken, *reportTokenCommand)
 	if err != nil {
 		return fmt.Errorf("label: %w", err)
 	}

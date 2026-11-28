@@ -19,3 +19,8 @@ go vet ./...
 go test -race ./... "$@"
 # review.sh itself, with go stubbed.
 "$(git rev-parse --show-toplevel)/bats/run.sh" review.bats
+command -v shellspec > /dev/null || {
+  echo "test.sh: shellspec is not installed: see dev-tools/quality/README.md" >&2
+  exit 127
+}
+shellspec

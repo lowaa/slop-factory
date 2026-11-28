@@ -20,7 +20,8 @@ Before calling a change done:
 3. Run `slop-review/review.sh --intent <file> > <out>.json` once. It is a fresh session that sees only the intent, the repo and the diff: the branch against its merge-base with `main`, uncommitted work included. On `main`, pass `--from-commit-hash=$(git rev-parse HEAD)`.
    - Run it from the root of the service the change touches (e.g. `slop-haus/server`), so the one pass sees the trust boundaries between its packages
    - Its defaults are the single large-context pass: the `standard` persona over the whole diff in one session, 40 turns, `xhigh` effort where the provider takes one. Other personas are an explicit `--persona=<p>`, never required
-   - The default provider is the Claude Code CLI; `review.sh --help` lists the others. If the provider fails (usage limit, lost login), the change isn't done: say so, and don't switch provider on your own
+   - The default provider is the Claude Code CLI; `review.sh --help` lists the others. Settings come from the flags, the environment, then the repo-root `.env`
+   - A fallback provider configured there (`SLOP_REVIEW_FALLBACK_*`) or centrally is the user's choice: slop-review takes it itself, and `.meta.fell_back` says so. If the review still fails (usage limit, lost login, no fallback or the fallback failing too), the change isn't done: say so, and don't switch provider on your own
    - Runs report to slop-haus when `SLOP_REVIEW_REPORT_URL` and a token (`SLOP_REVIEW_REPORT_TOKEN` or `SLOP_REVIEW_REPORT_TOKEN_COMMAND`) are set; otherwise nothing is sent
 4. Read `.review.verdict` (`approve`, `approve_with_comments`, `request_changes`, or `incomplete`, which means part of the change went unreviewed and is not an approval), `.review.findings[]` and `.review.warnings[]`.
 5. Compare your review with theirs: what both found, what only one found, where you disagree, and why each side missed what it did.

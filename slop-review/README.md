@@ -66,6 +66,70 @@ whole, since claude reads its own settings from it; only its
 files themselves, their reviews carry a warning that the denylist can't
 cover everything.
 
+## Settings and the .env
+
+Every `SLOP_REVIEW_*` setting is a flag, an environment variable or a line
+in a `.env` file, in that order of precedence: a flag beats the
+environment, which beats the `.env` (an empty environment variable counts as
+unset), which beats the defaults. `review.sh` reads the `.env` at the root of
+its own checkout, or, in a linked worktree (which has no copy of the
+git-ignored file), the main worktree's, and passes it as
+`--env-file=<path>`; `--env-file=<path>` chooses another, and `--env-file=`
+none. It is never the reviewed repository's: a change under review must not
+choose its own reviewer, or where its report goes. A program that runs
+`review.sh` with settings of its own, as a supervisor does, passes
+`--env-file=` so that a checkout's `.env` doesn't fill in what it left unset.
+
+The file is parsed, never sourced, since it may hold other tools' secrets:
+only `SLOP_REVIEW_*` lines are read (`KEY=VALUE`, an optional `export `,
+`#` comments, values optionally in `''` or `""`, taken literally with no
+escapes or `$VAR` expansion), and a provider's API key is never taken from
+it. Values are never logged; stderr names the keys a run took from it.
+
+## Fallback
+
+A fallback is a second provider a session is redone on, from the start,
+when the primary fails it with one of the chosen failure classes:
+`usage_limit` (the default), `credits`, `auth` or `backend`
+(`providerconfig.TriggerClasses`). Anything else (a config mistake, running
+out of turns, an error not recognised as one of those) fails the run as
+before. A primary that can't start at all, its login gone, takes the
+fallback for every session if `auth` is chosen. slop-review never switches
+provider by itself: only to a fallback someone configured.
+
+It comes from one of two places, never both:
+
+- the central provider config, on a run that reports to a server that has
+  one (see Reporting); it wins unchanged.
+- otherwise, the local settings: `SLOP_REVIEW_FALLBACK_PROVIDER`,
+  `_FALLBACK_MODEL`, `_FALLBACK_REASONING_EFFORT` and `_FALLBACK_ON`
+  (comma-separated classes), or `--fallback-provider`, `--fallback-model`,
+  `--fallback-reasoning-effort` and `--fallback-on`. They are built into the
+  same `providerconfig.Settings` a central config carries, so the same
+  validation (a provider other than the primary, classes from the list
+  above), defaults and run-time path apply. For example, in the `.env`:
+
+  ```
+  SLOP_REVIEW_PROVIDER=codex
+  SLOP_REVIEW_MODEL=gpt-5.6-luna
+  SLOP_REVIEW_REASONING_EFFORT=xhigh
+  SLOP_REVIEW_FALLBACK_PROVIDER=claude
+  SLOP_REVIEW_FALLBACK_MODEL=claude-haiku-5-5
+  SLOP_REVIEW_FALLBACK_REASONING_EFFORT=xhigh
+  ```
+
+`--provider`, `--model` or `--reasoning-effort` make a run a local one-off,
+and a one-off runs without the `SLOP_REVIEW_FALLBACK_*` fallback: that was
+chosen to back up `SLOP_REVIEW_PROVIDER`, not whatever the command line
+names. The fallback flags give a one-off its own, taken from the command
+line alone (`--fallback-provider=codex` never picks up a
+`SLOP_REVIEW_FALLBACK_MODEL` meant for claude).
+
+When a fallback is taken, stderr says why (the primary's error), the output's
+`.meta.fell_back` has `from`, `to` and `class`, each of `.sessions[]` says the
+provider and model it ran on, and the review carries a warning. A run that
+reports records it as the run's `fallback`.
+
 Under a slop-haus supervisor, which runs this for its agents' changes, logins
 are the supervisor's scoped ones, never those of the user it runs as:
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `PI_CODING_AGENT_DIR` point under its
@@ -107,5 +171,5 @@ scrubbed.
 ## Tests
 
 `test.sh` and `report/test.sh`: plain Go (gofmt, vet, race-enabled
-tests), plus `review.bats` for the wrapper script. Neither needs Docker or a
-model.
+tests), plus `review.bats` and the shellspec suite (`spec/`) for the wrapper
+script. Neither needs Docker or a model.
