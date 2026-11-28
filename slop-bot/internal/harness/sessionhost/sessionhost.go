@@ -42,7 +42,8 @@ type SessionHost interface {
 type StartSpec struct {
 	Name string
 	Argv []string
-	// Env is the process's complete environment, as KEY=VALUE.
+	// Env is the process's environment, as KEY=VALUE: all of it, but for
+	// the TERM a terminal sets.
 	Env []string
 	Dir string
 }

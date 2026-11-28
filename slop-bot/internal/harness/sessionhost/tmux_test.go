@@ -65,6 +65,8 @@ func TestEnvironmentIsExactlyTheSpecs(t *testing.T) {
 	assert.Equal(t, "second", env2["SLOP_BOT_AGENT_TOKEN"])
 	assert.NotContains(t, env2, "ONLY_ONE", "one session's environment leaked into another's")
 	assert.NotContains(t, env2, "HOME", "the test process's environment leaked into the session")
+	assert.NotContains(t, env2, "TMUX", "an agent's own tmux would reach slop-bot's server")
+	assert.NotContains(t, env2, "TMUX_PANE")
 }
 
 func readEnv(t *testing.T, dir string) map[string]string {

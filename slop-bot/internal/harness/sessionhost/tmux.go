@@ -132,6 +132,9 @@ func (t *Tmux) ensureServer(ctx context.Context) error {
 		[]string{"set-option", "-s", "extended-keys", "on"},
 		// A dead pane stays, so its exit status can be read.
 		[]string{"set-option", "-g", "remain-on-exit", "on"},
+		// Without its "Pane is dead" banner, which overwrites the last line:
+		// the harness's own last words are what explain a crash.
+		[]string{"set-option", "-g", "remain-on-exit-format", ""},
 		[]string{"set-hook", "-g", "pane-died", died},
 	)})
 	return err
@@ -156,8 +159,11 @@ func (t *Tmux) Start(ctx context.Context, spec *StartSpec) error {
 		newSession = append(newSession, "-c", spec.Dir)
 	}
 	// tmux runs a one-element command through `sh -c`; through env(1) it is
-	// exec'd as given, like any other.
-	newSession = append(append(newSession, "--", t.env), spec.Argv...)
+	// exec'd as given, like any other. env also drops the TMUX and TMUX_PANE
+	// tmux adds: with them, a plain `tmux kill-server` in an agent's script
+	// would end slop-bot's server, every agent's session with it. (TERM, which
+	// tmux sets too, stays: the TUI needs it.)
+	newSession = append(append(newSession, "--", t.env, "-u", "TMUX", "-u", "TMUX_PANE"), spec.Argv...)
 	t.startMu.Lock()
 	defer t.startMu.Unlock()
 	_, err := t.run.do(ctx, &call{env: spec.Env, args: chain(

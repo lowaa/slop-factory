@@ -3,6 +3,7 @@ package tuidriver_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 
@@ -55,11 +56,57 @@ func TestAClosedConversationNoLongerDrives(t *testing.T) {
 	assert.False(t, st.Dead, "the session lives on")
 }
 
-// flakyHost fails Status while armed, as when tmux can't be run.
+// flakyHost fails Status, or Paste, while armed, as when tmux can't be run.
 type flakyHost struct {
 	*sessionhost.Tmux
-	fail   atomic.Int32
-	failed chan struct{}
+	fail      atomic.Int32
+	failed    chan struct{}
+	failPaste atomic.Int32
+}
+
+func (h *flakyHost) Paste(ctx context.Context, session, text string) error {
+	if h.failPaste.Add(-1) >= 0 {
+		return errors.New("fork/exec tmux: resource temporarily unavailable")
+	}
+	return h.Tmux.Paste(ctx, session, text)
+}
+
+// logged signals each time the kit logs msg: the one place a held message's
+// requeue shows.
+type logged struct {
+	msg string
+	ch  chan struct{}
+}
+
+func (l *logged) Enabled(context.Context, slog.Level) bool { return true }
+func (l *logged) WithAttrs([]slog.Attr) slog.Handler       { return l }
+func (l *logged) WithGroup(string) slog.Handler            { return l }
+func (l *logged) Handle(_ context.Context, r slog.Record) error {
+	if r.Message == l.msg {
+		l.ch <- struct{}{}
+	}
+	return nil
+}
+
+func TestAHeldMessageIsRetriedOnAnIdleAgent(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	host := &flakyHost{Tmux: r.Host, failed: make(chan struct{}, 1)}
+	held := &logged{msg: "tuidriver: holding messages", ch: make(chan struct{}, 1)}
+	r.Harness.Host = host
+	r.Harness.Logger = slog.New(held)
+	r.conv = r.launch(t, nil)
+
+	r.inTurn(t)
+	require.NoError(t, r.conv.Send(r.ctx, msg("held")))
+	host.failPaste.Store(1)
+	// A cancelled turn can't carry it, so it is typed once idle: that paste
+	// fails, nothing was typed, and it is held.
+	require.NoError(t, r.conv.Interrupt(r.ctx))
+	<-held.ch
+	// No turn will end on an idle agent: the next screen poll retries.
+	r.clk.Advance(poll)
+	assert.Equal(t, pointer("held"), r.await(t, fake.RepUser).Text)
 }
 
 func (h *flakyHost) Status(ctx context.Context, session string) (*sessionhost.Status, error) {

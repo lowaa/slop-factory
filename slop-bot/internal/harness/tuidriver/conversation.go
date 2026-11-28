@@ -29,13 +29,9 @@ const (
 )
 
 var (
-	// ErrAttached means a person is attached to the session, so the kit
-	// won't type into it. The message wasn't delivered; send it later.
-	ErrAttached = errors.New("tuidriver: a person is attached to the session")
-	// ErrUnsubmitted means a person attached after the pointer was pasted
-	// and before it was submitted: it is in their prompt, not sent. Sending
-	// again would paste it twice.
-	ErrUnsubmitted = errors.New("tuidriver: a person attached before the pasted pointer was submitted")
+	// ErrAttached and ErrUnsubmitted are the core's (see harness.Conversation).
+	ErrAttached    = harness.ErrAttached
+	ErrUnsubmitted = harness.ErrUnsubmitted
 	// ErrUnconfirmed means keys were sent, retried, and the harness never
 	// showed that it acted on them.
 	ErrUnconfirmed = errors.New("tuidriver: the harness didn't confirm")
@@ -136,8 +132,8 @@ type Conversation struct {
 	submitted chan struct{}
 	// pending are messages waiting for an injecting hook, or for idle.
 	pending []*harness.Message
-	// heldForAttach means pending is waiting for the person to detach.
-	heldForAttach bool
+	// flushing means a flush is running or about to: one at a time.
+	flushing bool
 	// hookGen counts hooks, and lastHook is when the last arrived: a screen
 	// read that overlaps a hook, or follows it closely, is stale.
 	hookGen      uint64
@@ -395,9 +391,10 @@ func (c *Conversation) signalSubmitted() {
 
 // spawnFlush types the pointer for pending messages, once idle.
 func (c *Conversation) spawnFlush() {
-	if c.closing || c.stopping {
+	if c.closing || c.stopping || c.flushing {
 		return
 	}
+	c.flushing = true
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -424,7 +421,10 @@ func (c *Conversation) hook(ctx context.Context, event string, payload []byte) (
 		if call.Submitted {
 			c.signalSubmitted()
 		}
-		if c.p.Injects && call.Inject != InjectNone && !c.stopping && len(c.pending) > 0 {
+		// Not into a turn being cancelled: kept going, it would carry the
+		// message past the cancel, which then cancels it too.
+		cancelling := call.Inject == InjectTurnEnd && c.interrupting
+		if c.p.Injects && call.Inject != InjectNone && !c.stopping && !cancelling && len(c.pending) > 0 {
 			inject, c.pending = c.pending, nil
 		}
 		return c.hookEvents(call, len(inject) > 0)
@@ -525,12 +525,13 @@ func (c *Conversation) screenEvents(st screenState, cancelled bool) []harness.Ev
 	return nil
 }
 
-// retryHeld retries pending messages held while a person was attached.
+// retryHeld retries held messages once idle, on every screen poll: a
+// flush that typed nothing (a person attached, tmux failed) leaves them for
+// it, and an idle agent has no turn end to trigger another.
 func (c *Conversation) retryHeld() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.heldForAttach && !c.inTurn && len(c.pending) > 0 {
-		c.heldForAttach = false
+	if !c.inTurn && len(c.pending) > 0 {
 		c.spawnFlush()
 	}
 }
@@ -682,20 +683,24 @@ func (c *Conversation) flush(ctx context.Context) {
 	c.mu.Lock()
 	msgs := c.pending
 	if c.inTurn || c.stopping || len(msgs) == 0 {
+		c.flushing = false
 		c.mu.Unlock()
 		return
 	}
 	c.pending = nil
 	c.mu.Unlock()
 	pasted, err := c.typePointer(ctx, msgs)
+	c.mu.Lock()
+	// Before the messages are back, so the next poll can flush them again.
+	c.flushing = false
+	if err != nil && !pasted {
+		// Nothing was typed, so trying again later can't double anything.
+		c.pending = append(msgs, c.pending...)
+	}
+	c.mu.Unlock()
 	switch {
 	case err == nil:
 	case !pasted:
-		// Nothing was typed, so trying again later can't double anything.
-		c.mu.Lock()
-		c.pending = append(msgs, c.pending...)
-		c.heldForAttach = c.heldForAttach || errors.Is(err, ErrAttached)
-		c.mu.Unlock()
 		c.opts.Logger.Info("tuidriver: holding messages", "count", len(msgs), "err", err)
 	default:
 		// Not retried: the pointer is in the prompt, and a second paste
@@ -722,22 +727,25 @@ func (c *Conversation) typePointer(ctx context.Context, msgs []*harness.Message)
 	if err := c.host.Paste(ctx, c.opts.Session, text); err != nil {
 		return false, err
 	}
-	if err := c.awaitRendered(ctx, before, text); err != nil {
-		return true, err
-	}
-	err = c.confirmed(ctx, c.p.SubmitKey, submitted)
-	if errors.Is(err, ErrAttached) {
-		return true, ErrUnsubmitted
-	}
+	err = c.awaitRendered(ctx, before, text)
 	if err == nil {
-		c.mu.Lock()
-		// Unless its turn already started (and maybe ended) meanwhile.
-		if c.turnsStarted == started {
-			c.openTurn()
-		}
-		c.mu.Unlock()
+		err = c.confirmed(ctx, c.p.SubmitKey, submitted)
 	}
-	return true, err
+	switch {
+	case errors.Is(err, ErrAttached):
+		// Not ErrAttached itself, which promises nothing was typed.
+		return true, ErrUnsubmitted
+	case err != nil:
+		// Whatever failed, the pointer may be in the prompt.
+		return true, fmt.Errorf("%w: %w", ErrUnsubmitted, err)
+	}
+	c.mu.Lock()
+	// Unless its turn already started (and maybe ended) meanwhile.
+	if c.turnsStarted == started {
+		c.openTurn()
+	}
+	c.mu.Unlock()
+	return true, nil
 }
 
 // confirmed presses key until done closes: twice at most, because the
@@ -756,6 +764,8 @@ func (c *Conversation) confirmed(ctx context.Context, key string, done <-chan st
 			return nil
 		case <-c.exited:
 			return errExited
+		case <-c.bg.Done():
+			return c.ended()
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-c.opts.Clock.After(c.opts.ConfirmTimeout):
@@ -854,6 +864,8 @@ func (c *Conversation) Stop(ctx context.Context, force bool) error {
 		case <-settled:
 		case <-c.exited:
 			return nil
+		case <-c.bg.Done():
+			return stopped(c.ended())
 		case <-ctx.Done():
 			return c.kill(c.boundedContext())
 		}
@@ -874,11 +886,32 @@ func (c *Conversation) Stop(ctx context.Context, force bool) error {
 	select {
 	case <-c.exited:
 		return nil
+	case <-c.bg.Done():
+		return stopped(c.ended())
 	case <-ctx.Done():
 	case <-c.opts.Clock.After(c.opts.ConfirmTimeout):
 		c.opts.Logger.Warn("tuidriver: the harness didn't quit; killing it")
 	}
 	return c.kill(c.boundedContext())
+}
+
+// ended is why a wait ended with bg: the session exited, or Close let go of
+// it.
+func (c *Conversation) ended() error {
+	select {
+	case <-c.exited:
+		return errExited
+	default:
+		return ErrClosed
+	}
+}
+
+// stopped is Stop's result for ended's: an exit is what Stop wanted.
+func stopped(err error) error {
+	if errors.Is(err, errExited) {
+		return nil
+	}
+	return err
 }
 
 // beginQuit takes the keys for the quit sequence, unless a turn started
@@ -893,6 +926,9 @@ func (c *Conversation) beginQuit() bool {
 		return false
 	}
 	c.stopping = true
+	if len(c.pending) > 0 {
+		c.opts.Logger.Warn("tuidriver: stopping with undelivered messages", "count", len(c.pending))
+	}
 	return true
 }
 
@@ -919,6 +955,11 @@ func (c *Conversation) quit(ctx context.Context) error {
 // kill ends the session and waits for the exit to be reported.
 func (c *Conversation) kill(ctx context.Context) error {
 	c.mu.Lock()
+	if c.closing {
+		// Close promised the session lives on, for Adopt.
+		c.mu.Unlock()
+		return ErrClosed
+	}
 	c.killed = true
 	c.mu.Unlock()
 	if err := c.host.Kill(ctx, c.opts.Session); err != nil && !errors.Is(err, sessionhost.ErrNoSession) {
@@ -932,6 +973,8 @@ func (c *Conversation) kill(ctx context.Context) error {
 	select {
 	case <-c.exited:
 		return nil
+	case <-c.bg.Done():
+		return stopped(c.ended())
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -955,10 +998,16 @@ func (c *Conversation) Close() error {
 		c.cancel()
 		// A hook in flight may be blocked handing an event to a consumer
 		// that has stopped reading; drain, so it, and so Close, can finish.
-		go func() {
-			for range c.events {
-			}
-		}()
+		// Not once exited: then nothing is blocked, and the drain would take
+		// the consumer's Exited.
+		select {
+		case <-c.exited:
+		default:
+			go func() {
+				for range c.events {
+				}
+			}()
+		}
 		c.wg.Wait()
 		c.emitMu.Lock()
 		if !c.eventsClosed {
