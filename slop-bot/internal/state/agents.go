@@ -387,6 +387,15 @@ func (a *Agents) SetConversationID(ctx context.Context, id ident.AgentID, conver
 	})
 }
 
+// RotateTokenHash replaces the agent's token hash. state.db keeps only
+// hashes, so an agent resumed after a daemon restart gets a fresh token,
+// and the old one stops resolving.
+func (a *Agents) RotateTokenHash(ctx context.Context, id ident.AgentID, hash string) error {
+	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {
+		return q.Set("token_hash = ?", hash)
+	})
+}
+
 // SetProgressNote records the agent's own one-line note.
 func (a *Agents) SetProgressNote(ctx context.Context, id ident.AgentID, note string) error {
 	return a.updateLive(ctx, id, func(q *bun.UpdateQuery) *bun.UpdateQuery {

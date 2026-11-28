@@ -491,3 +491,20 @@ func TestRenewingTheLeaseOfAnEndedAgentIsErrEnded(t *testing.T) {
 	assert.ErrorIs(t, f.Agents.RenewLease(ctx, "a1", &state.Lease{Holder: "cli", ExpiresAt: t0.Add(time.Hour)}), state.ErrEnded)
 	assert.ErrorIs(t, f.Agents.RenewLease(ctx, "nope", &state.Lease{Holder: "cli", ExpiresAt: t0.Add(time.Hour)}), state.ErrNotFound)
 }
+
+func TestRotateTokenHashRetiresTheOldToken(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	n := newAgent("a1", "1")
+	n.TokenHash = control.HashToken("old")
+	_, err := f.Agents.Create(ctx, n)
+	require.NoError(t, err)
+
+	require.NoError(t, f.Agents.RotateTokenHash(ctx, "a1", control.HashToken("new")))
+	_, err = f.Agents.AgentForTokenHash(ctx, control.HashToken("old"))
+	assert.ErrorIs(t, err, state.ErrNotFound)
+	got, err := f.Agents.AgentForTokenHash(ctx, control.HashToken("new"))
+	require.NoError(t, err)
+	assert.Equal(t, ident.AgentPrincipal("a1", "1"), got)
+}
