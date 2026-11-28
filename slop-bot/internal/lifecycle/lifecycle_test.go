@@ -129,6 +129,24 @@ func TestStopWaitsForAComponentThatOutlivedItsStop(t *testing.T) {
 	assert.ErrorContains(t, <-stopped, "gave up at its deadline")
 }
 
+// One that had exited by the time its Stop failed holds nothing up.
+func TestStopDoesntWaitForAComponentThatHasExited(t *testing.T) {
+	t.Parallel()
+	sweep := &exiter{exited: make(chan struct{})}
+	close(sweep.exited)
+	r := &recorder{}
+	h := &warned{Handler: slog.DiscardHandler, logged: make(chan struct{})}
+	g := NewGroup(slog.New(h), r.comp("store", nil, nil), sweep)
+	require.NoError(t, g.Start(context.Background()))
+	require.ErrorContains(t, g.Stop(context.Background()), "gave up at its deadline")
+	assert.Equal(t, []string{"start store", "stop store"}, r.calls)
+	select {
+	case <-h.logged:
+		assert.Fail(t, "warned of a wait that didn't happen")
+	default:
+	}
+}
+
 func TestFuncWithoutHooks(t *testing.T) {
 	t.Parallel()
 	f := &Func{N: "noop"}

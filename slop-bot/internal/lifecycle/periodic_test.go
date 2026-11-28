@@ -87,5 +87,10 @@ func TestPeriodicExitedOutlivesAStopThatGaveUp(t *testing.T) {
 
 func TestPeriodicNeedsItsFields(t *testing.T) {
 	t.Parallel()
-	assert.Error(t, (&Periodic{N: "x"}).Start(context.Background()))
+	p := &Periodic{N: "x"}
+	assert.Equal(t, "x", p.Name())
+	assert.Error(t, p.Start(context.Background()))
+	// Never started: nothing to stop, and nothing still running.
+	assert.NoError(t, p.Stop(context.Background()))
+	<-p.Exited()
 }

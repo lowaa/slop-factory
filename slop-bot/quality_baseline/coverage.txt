@@ -12,7 +12,7 @@
 ./internal/config 97.2
 ./internal/control 87.7
 ./internal/daemon 83.8
-./internal/doctor 93.9
+./internal/doctor 94.0
 ./internal/doctor/doctortest 100.0
 ./internal/gitx 95.3
 ./internal/gitx/gitxtest 100.0
@@ -20,7 +20,7 @@
 ./internal/harness/agy 89.2
 ./internal/harness/agy/agytest 86.2
 ./internal/harness/claudecode 95.4
-./internal/harness/codex 86.3
+./internal/harness/codex 86.8
 ./internal/harness/conformance 96.7
 ./internal/harness/conformance/scripted 90.6
 ./internal/harness/fake 91.6
@@ -31,8 +31,8 @@
 ./internal/harness/sessionhost/tmuxtest 97.6
 ./internal/harness/tuidriver 85.6
 ./internal/ident 100.0
-./internal/lifecycle 95.3
-./internal/mergeguard 90.6
+./internal/lifecycle 100.0
+./internal/mergeguard 90.7
 ./internal/paths 92.5
 ./internal/scriptedmodel 94.5
 ./internal/service 86.4
@@ -40,13 +40,13 @@
 ./internal/setup 86.1
 ./internal/sqlitex 91.5
 ./internal/sqlitex/sqlitextest 100.0
-./internal/state 90.6
+./internal/state 91.0
 ./internal/statusview 95.9
 ./internal/testexec 100.0
 ./internal/tickets 100.0
 ./internal/tickets/conformance 99.4
 ./internal/tickets/local 91.5
-./internal/transcript 84.3
+./internal/transcript 84.9
 ./internal/version 100.0
 ./internal/worktree 87.4
 total 89.7
