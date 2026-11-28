@@ -11,9 +11,10 @@ FROM golang:1.27.4-bookworm AS go
 FROM node:22.23.3-bookworm-slim AS base
 
 # gcc and libc6-dev for -race (cgo); git and procps because the harnesses'
-# tools run them; ca-certificates for npm and the module download at build.
+# tools run them; tmux for the TUI harnesses (agy); ca-certificates for npm,
+# agy's download and the module download at build; curl for agy's.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends gcc libc6-dev git procps ca-certificates \
+  && apt-get install -y --no-install-recommends gcc libc6-dev git procps tmux curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=go /usr/local/go /usr/local/go
 
@@ -28,9 +29,20 @@ RUN test -n "${CLAUDE_CODE_VERSION}" && test -n "${CODEX_VERSION}" && test -n "$
     "@openai/codex@${CODEX_VERSION}" \
     "@earendil-works/pi-coding-agent@${PI_VERSION}" \
   && npm cache clean --force
+# agy is no npm package: a checksummed tarball from Google's bucket, which
+# needs the network only here, and no sign-in (install_agy.sh).
+ARG AGY_VERSION
+ARG AGY_RELEASE
+ARG AGY_SHA512_AMD64
+ARG AGY_SHA512_ARM64
+COPY slop-bot/tier2/install_agy.sh /usr/local/bin/install_agy.sh
+RUN test -n "${AGY_VERSION}" \
+  && if [ "${AGY_VERSION}" = latest ]; then install_agy.sh latest; \
+     else install_agy.sh "${AGY_VERSION}" "${AGY_RELEASE}" "${AGY_SHA512_AMD64}" "${AGY_SHA512_ARM64}"; fi
 ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     CODEX_VERSION=${CODEX_VERSION} \
-    PI_VERSION=${PI_VERSION}
+    PI_VERSION=${PI_VERSION} \
+    AGY_VERSION=${AGY_VERSION}
 
 # /srv is node's: WORKDIR doesn't re-own a directory the base image already
 # has as root's, and `go work init` there exits 0 without writing go.work

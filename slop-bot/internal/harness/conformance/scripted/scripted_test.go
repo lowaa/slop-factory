@@ -22,6 +22,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake/faketest"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
 )
@@ -43,7 +44,8 @@ const stepTimeout = 60 * time.Second
 func TestMain(m *testing.M) {
 	scripted.ExecIfLauncher()
 	execIfHook()
-	os.Exit(m.Run())
+	// Last: as the fake harness, this binary is agy's hook relay (agy_test.go).
+	faketest.Main(m)
 }
 
 func optIn(t *testing.T) {
@@ -79,17 +81,23 @@ type fixture struct {
 	ws  *harness.Workspace
 }
 
-func newFixture(t *testing.T, name, target string, shell *scripted.Shell) *fixture {
+// newFixture fills in opts' Server and Briefing; the rest is the harness's.
+func newFixture(t *testing.T, name, target string, opts *scripted.Options) *fixture {
 	t.Helper()
+	// The first TempDir registers their removal, and cleanups run last
+	// first: so it runs after the puppet's, which ends the harnesses still
+	// writing to them.
+	briefingFile := filepath.Join(t.TempDir(), "briefing.md")
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
 	briefing := "TIER2-BRIEFING-" + name + "-5c1e"
-	puppet, err := scripted.New(t, &scripted.Options{Server: server, Shell: shell, Briefing: briefing})
+	o := *opts
+	o.Server, o.Briefing = server, briefing
+	puppet, err := scripted.New(t, &o)
 	require.NoError(t, err)
 	bin, env, err := puppet.Launcher(target)
 	require.NoError(t, err)
-	briefingFile := filepath.Join(t.TempDir(), "briefing.md")
 	require.NoError(t, os.WriteFile(briefingFile, []byte(briefing), 0o600))
 	return &fixture{
 		server: server, puppet: puppet, bin: bin, env: env,
@@ -128,9 +136,9 @@ func TestClaudeCodeConformance(t *testing.T) {
 	optIn(t)
 	target := binary(t, "claude")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		f := newFixture(t, "claude", target, &scripted.Shell{Tool: "Bash", Input: func(cmd string) map[string]any {
+		f := newFixture(t, "claude", target, &scripted.Options{Shell: &scripted.Shell{Tool: "Bash", Input: func(cmd string) map[string]any {
 			return map[string]any{"command": cmd, "description": "Wait for the test"}
-		}})
+		}}})
 		h := &claudecode.Harness{
 			Binary: f.bin, Logger: logger(), Clock: clock.Real{},
 			// The key is in the base environment, which agentproc passes on
@@ -160,13 +168,13 @@ func TestCodexConformance(t *testing.T) {
 	optIn(t)
 	target := binary(t, "codex")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		f := newFixture(t, "codex", target, &scripted.Shell{Tool: "exec_command", Input: func(cmd string) map[string]any {
+		f := newFixture(t, "codex", target, &scripted.Options{Shell: &scripted.Shell{Tool: "exec_command", Input: func(cmd string) map[string]any {
 			// exec_command hands the model a still-running command back
 			// after yield_time_ms, capped at 30s (its schema, 0.172.0): the
 			// most a long tool can last. The suite releases one within
 			// milliseconds of it starting.
 			return map[string]any{"cmd": cmd, "yield_time_ms": 30000}
-		}})
+		}}})
 		h := &codex.Harness{
 			Binary: f.bin, Logger: logger(), Clock: clock.Real{},
 			// A CODEX_HOME of its own: the user's login, config and
@@ -187,9 +195,9 @@ func TestPiConformance(t *testing.T) {
 	optIn(t)
 	target := binary(t, "pi")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		f := newFixture(t, "pi", target, &scripted.Shell{Tool: "bash", Input: func(cmd string) map[string]any {
+		f := newFixture(t, "pi", target, &scripted.Options{Shell: &scripted.Shell{Tool: "bash", Input: func(cmd string) map[string]any {
 			return map[string]any{"command": cmd}
-		}})
+		}}})
 		h := &pi.Harness{
 			Binary: f.bin, Logger: logger(), Clock: clock.Real{},
 			// An agent dir of its own: the user's ~/.pi/agent (login,
@@ -277,6 +285,7 @@ func TestContainerHarnessVersions(t *testing.T) {
 		"claude": os.Getenv("CLAUDE_CODE_VERSION"),
 		"codex":  os.Getenv("CODEX_VERSION"),
 		"pi":     os.Getenv("PI_VERSION"),
+		"agy":    os.Getenv("AGY_VERSION"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

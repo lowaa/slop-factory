@@ -1,5 +1,5 @@
 // Package scripted is the conformance Puppet for the real harness CLIs: it
-// makes Claude Code, Codex or pi do what the suite asks by scripting the
+// makes Claude Code, Codex, pi or agy do what the suite asks by scripting the
 // model they talk to (scriptedmodel), and checks what they did by what that
 // model was sent. One puppet serves every wire API; only the harness's shell
 // tool differs (Shell).
@@ -45,15 +45,21 @@ type Options struct {
 	// carry, in its system prompt or its messages: the check that the
 	// harness delivered the briefing.
 	Briefing string
+	// BootReply, when set, is scripted as the model's answer to a turn the
+	// harness runs by itself at each new conversation, before slop-bot sends
+	// anything (agy's boot prompt, which it needs to name a conversation).
+	// Without it that turn would take the test's first scripted turn.
+	BootReply string
 }
 
 // Puppet implements conformance.Puppet for one Subject: one conversation at
 // a time, the latest started being the current one.
 type Puppet struct {
-	t        *testing.T
-	server   *scriptedmodel.Server
-	shell    *Shell
-	briefing string
+	t         *testing.T
+	server    *scriptedmodel.Server
+	shell     *Shell
+	briefing  string
+	bootReply string
 	// dir holds the launcher's socket and the long tools' FIFOs. It is not a
 	// t.TempDir: a socket path has a length limit those can exceed.
 	dir      string
@@ -65,6 +71,8 @@ type Puppet struct {
 	cur   *session
 	long  *longTool
 	longs []*longTool
+	// procs are pidfds of the harnesses launched (proc_linux.go).
+	procs []int
 }
 
 type started struct {
@@ -105,7 +113,7 @@ func New(t *testing.T, opts *Options) (*Puppet, error) {
 		return nil, err
 	}
 	p := &Puppet{
-		t: t, server: opts.Server, shell: opts.Shell, briefing: opts.Briefing,
+		t: t, server: opts.Server, shell: opts.Shell, briefing: opts.Briefing, bootReply: opts.BootReply,
 		dir: dir, listener: listener,
 		// Buffered: a launch is reported whether or not Started is waiting.
 		pids:   make(chan int, 16),
@@ -128,9 +136,24 @@ type puppeted struct {
 }
 
 func (h *puppeted) Start(ctx context.Context, ws *harness.Workspace, resume *harness.ConversationRef) (harness.Conversation, error) {
+	// Scripted before the start, which waits for the boot turn to end: agy
+	// is ready only once it has.
+	boot := resume == nil && h.p.bootReply != ""
+	unplayed := h.p.server.Remaining()
+	if boot {
+		if err := h.p.Reply(ctx, h.p.bootReply); err != nil {
+			return nil, err
+		}
+	}
 	conv, err := h.AIHarness.Start(ctx, ws, resume)
 	if err != nil {
 		return nil, err
+	}
+	// A boot turn that failed without reaching the model (agy with no
+	// sign-in it can use) still ends, and so still makes the harness ready.
+	if boot && h.p.server.Remaining() != unplayed {
+		_ = conv.Stop(ctx, true)
+		return nil, errors.New("scripted: the harness was ready without asking the model for its boot turn")
 	}
 	h.p.starts <- &started{id: conv.Ref().ID, resumed: resume != nil}
 	return conv, nil
@@ -348,6 +371,7 @@ func (p *Puppet) split(at int) (before, after []*scriptedmodel.Request) {
 }
 
 func (p *Puppet) close() {
+	p.endLaunched()
 	p.mu.Lock()
 	longs := p.longs
 	p.mu.Unlock()
