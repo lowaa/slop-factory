@@ -4,6 +4,7 @@
 # whether test-support packages belong here or in a deadcode filter.
 internal/control/server.go Server.Handle #36
 internal/daemon/daemon.go Daemon.Ready #36
+internal/daemon/guard_routes.go Daemon.MergeGuard #36
 internal/doctor/doctortest/ package #36
 internal/gitx/gitxtest/ package #36
 internal/harness/agy/agytest/ package #36

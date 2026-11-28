@@ -45,11 +45,13 @@ type terminal struct {
 func (e *e2e) attachTerminal(args ...string) *terminal {
 	e.t.Helper()
 	cmd := exec.Command(e.self, append([]string{"attach"}, args...)...) // #nosec G204 -- the test binary
-	// TERM: a joined attach runs a tmux client, which needs one, and the
-	// test's own environment may have none.
+	// TERM: a joined attach runs a tmux client, and a hand-over a real
+	// harness's TUI, which both need one; the test's own environment (the
+	// tier 2 container) may have none.
 	cmd.Env = append(os.Environ(), cliReexec+"=1", fakeReexec+"=", control.TokenEnv+"=",
 		"HOME="+e.h.home, "XDG_RUNTIME_DIR="+e.h.runtime, "GORACE=atexit_sleep_ms=0", "TERM=xterm-256color")
-	f, err := pty.Start(cmd)
+	// A size, as a person's terminal has: a real TUI lays itself out by it.
+	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	require.NoError(e.t, err)
 	term := &terminal{t: e.t, cmd: cmd, pty: f, read: make(chan struct{}), exited: make(chan int, 1), wrote: make(chan struct{}, 1)}
 	go func() {

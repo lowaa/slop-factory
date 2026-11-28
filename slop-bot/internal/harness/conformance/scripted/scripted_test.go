@@ -2,7 +2,6 @@ package scripted_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -16,26 +15,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/claudecode"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/fake/faketest"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
 )
 
 // Tier 2: the conformance suite against the real harness CLIs, each pointed
 // at an in-process scripted model. Opt-in, since it needs the CLIs installed
 // (tier2.sh runs it, in Docker or natively); it spends no tokens.
-const (
-	tier2Env = "SLOP_BOT_TIER2"
-	// containerEnv is set by tier2.sh's Docker mode, where every harness
-	// must be installed at its pinned version and the network must be cut.
-	containerEnv = "SLOP_BOT_TIER2_CONTAINER"
-)
 
 // A step's bound: a safety net for a stuck harness, never a wait. Each step
 // takes well under a second when it works.
@@ -50,23 +39,12 @@ func TestMain(m *testing.M) {
 
 func optIn(t *testing.T) {
 	t.Helper()
-	if os.Getenv(tier2Env) != "1" {
-		t.Skipf("set %s=1 to run the real harnesses against the scripted model (tier2.sh)", tier2Env)
-	}
+	scripted.OptIn(t)
 }
 
-// binary finds a harness CLI: a skip on a dev box without it, a failure in
-// the container, which installs them all.
 func binary(t *testing.T, name string) string {
 	t.Helper()
-	path, err := exec.LookPath(name)
-	if err != nil {
-		if os.Getenv(containerEnv) == "1" {
-			require.NoError(t, err, "the tier 2 image installs %s", name)
-		}
-		t.Skipf("%s is not installed", name)
-	}
-	return path
+	return scripted.Binary(t, name)
 }
 
 // fixture is what every harness's subject shares: a scripted model, a
@@ -121,6 +99,21 @@ func (f *fixture) subject(h harness.AIHarness, extraEnv map[string]string) *conf
 	}
 }
 
+// newTarget is one of scripted's Target constructors.
+type newTarget func(*testing.T, *scripted.TargetOptions) *scripted.Target
+
+// targetSubject is the subject for a harness scripted has a Target for,
+// launched through the puppet's launcher; o says how the Target is built,
+// less its binary and server, which are the fixture's.
+func targetSubject(t *testing.T, name, bin string, shell *scripted.Shell, target newTarget, o scripted.TargetOptions) *conformance.Subject {
+	t.Helper()
+	f := newFixture(t, name, bin, &scripted.Options{Shell: shell})
+	o.Binary, o.ServerURL = f.bin, f.server.URL()
+	tg := target(t, &o)
+	tg.Workspace(f.ws)
+	return f.subject(tg.Harness, f.ws.Env)
+}
+
 // environ is a harness's whole base environment: nothing of the user's
 // beyond PATH, so no credential or config of theirs can reach it.
 func environ(home string, extra ...string) func() []string {
@@ -134,112 +127,30 @@ func logger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 func TestClaudeCodeConformance(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	target := binary(t, "claude")
+	bin := binary(t, "claude")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		f := newFixture(t, "claude", target, &scripted.Options{Shell: &scripted.Shell{Tool: "Bash", Input: func(cmd string) map[string]any {
-			return map[string]any{"command": cmd, "description": "Wait for the test"}
-		}}})
-		h := &claudecode.Harness{
-			Binary: f.bin, Logger: logger(), Clock: clock.Real{},
-			// The key is in the base environment, which agentproc passes on
-			// only because the workspace opts in: the production path for
-			// an API-key agent.
-			Environ: environ(t.TempDir(), "ANTHROPIC_API_KEY=sk-ant-scripted-model-not-a-real-key"),
-		}
-		f.ws.APIKeyOptIn = true
-		return f.subject(h, map[string]string{
-			// A config dir of its own: nothing is written to ~/.claude or
-			// ~/.claude.json, and no login of the user's is seen.
-			"CLAUDE_CONFIG_DIR":   t.TempDir(),
-			"ANTHROPIC_BASE_URL":  f.server.URL(),
-			"DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
-			// CLAUDE_CODE_* is dropped from the base environment (a parent
-			// session's), so these go in the workspace's.
-			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-			// A suggested next prompt is a request with tools that the
-			// script has no turn for.
-			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
-		})
+		return targetSubject(t, "claude", bin, scripted.ClaudeCodeShell, scripted.ClaudeCode, scripted.TargetOptions{})
 	})
 }
 
 func TestCodexConformance(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	target := binary(t, "codex")
+	bin := binary(t, "codex")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		f := newFixture(t, "codex", target, &scripted.Options{Shell: &scripted.Shell{Tool: "exec_command", Input: func(cmd string) map[string]any {
-			// exec_command hands the model a still-running command back
-			// after yield_time_ms, capped at 30s (its schema, 0.172.0): the
-			// most a long tool can last. The suite releases one within
-			// milliseconds of it starting.
-			return map[string]any{"cmd": cmd, "yield_time_ms": 30000}
-		}}})
-		h := &codex.Harness{
-			// Guarded, as the daemon runs it: every command goes through
-			// an approval, which must not slow or break anything else.
-			Binary: f.bin, Logger: logger(), Clock: clock.Real{}, Guard: codexGuard(t),
-			// A CODEX_HOME of its own: the user's login, config and
-			// sessions are never read or written.
-			Environ:       environ(t.TempDir(), "CODEX_HOME="+t.TempDir(), "SCRIPTED_MODEL_API_KEY=scripted-model-not-a-real-key"),
-			ModelProvider: &codex.ModelProvider{ID: "scripted", BaseURL: f.server.URL() + "/v1", EnvKey: "SCRIPTED_MODEL_API_KEY"},
-			Config:        []string{"check_for_update_on_startup=false", "analytics.enabled=false", "feedback.enabled=false"},
-		}
-		// A model Codex has no metadata for keeps its tools plain
-		// (scriptedmodel's README).
-		f.ws.Model = "scripted-model-1"
-		return f.subject(h, map[string]string{})
+		// Guarded, as the daemon runs it: every command goes through an
+		// approval, which must not slow or break anything else.
+		return targetSubject(t, "codex", bin, scripted.CodexShell, scripted.Codex, scripted.TargetOptions{Guard: codexGuard(t)})
 	})
 }
 
 func TestPiConformance(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	target := binary(t, "pi")
+	bin := binary(t, "pi")
 	conformance.Run(t, func(t *testing.T) *conformance.Subject {
-		f := newFixture(t, "pi", target, &scripted.Options{Shell: &scripted.Shell{Tool: "bash", Input: func(cmd string) map[string]any {
-			return map[string]any{"command": cmd}
-		}}})
-		h := &pi.Harness{
-			Binary: f.bin, Logger: logger(), Clock: clock.Real{},
-			// An agent dir of its own: the user's ~/.pi/agent (login,
-			// settings, sessions) is never read or written. pi's launcher
-			// still finds its install under the real HOME.
-			AgentDir: piAgentDir(t, f.server.URL()),
-			Environ:  environ(os.Getenv("HOME")),
-		}
-		f.ws.Model = "scripted/scripted-model-1"
-		return f.subject(h, map[string]string{
-			"SCRIPTED_MODEL_API_KEY": "scripted-model-not-a-real-key",
-			"PI_OFFLINE":             "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0",
-		})
+		return targetSubject(t, "pi", bin, scripted.PiShell, scripted.Pi, scripted.TargetOptions{})
 	})
-}
-
-// piAgentDir defines the scripted model as a pi provider: OpenAI chat
-// completions, with the dummy key from the environment.
-func piAgentDir(t *testing.T, serverURL string) string {
-	t.Helper()
-	dir := t.TempDir()
-	models := map[string]any{"providers": map[string]any{"scripted": map[string]any{
-		"baseUrl": serverURL + "/v1",
-		"api":     "openai-completions",
-		"apiKey":  "$SCRIPTED_MODEL_API_KEY",
-		"models": []any{map[string]any{
-			"id": "scripted-model-1", "name": "scripted-model-1", "reasoning": true, "input": []string{"text"},
-			"contextWindow": 128000, "maxTokens": 8192,
-			"cost": map[string]int{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-		}},
-	}}}
-	for name, v := range map[string]any{
-		"models.json":   models,
-		"settings.json": map[string]any{"enableInstallTelemetry": false, "collapseChangelog": true},
-	} {
-		b, err := json.Marshal(v)
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), b, 0o600))
-	}
-	return dir
 }
 
 // The scenarios pass on a machine with internet too, so this is what says
@@ -248,8 +159,8 @@ func piAgentDir(t *testing.T, serverURL string) string {
 func TestContainerNetworkIsolation(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	if os.Getenv(containerEnv) != "1" {
-		t.Skipf("%s=1 is the container, whose network is cut", containerEnv)
+	if os.Getenv(scripted.ContainerEnv) != "1" {
+		t.Skipf("%s=1 is the container, whose network is cut", scripted.ContainerEnv)
 	}
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
@@ -280,8 +191,8 @@ func TestContainerNetworkIsolation(t *testing.T) {
 func TestContainerHarnessVersions(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	if os.Getenv(containerEnv) != "1" {
-		t.Skipf("%s=1 is the container, which installs the pinned versions", containerEnv)
+	if os.Getenv(scripted.ContainerEnv) != "1" {
+		t.Skipf("%s=1 is the container, which installs the pinned versions", scripted.ContainerEnv)
 	}
 	for name, pin := range map[string]string{
 		"claude": os.Getenv("CLAUDE_CODE_VERSION"),
@@ -310,8 +221,8 @@ func TestContainerHarnessVersions(t *testing.T) {
 func TestContainerTmuxIsSupported(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	if os.Getenv(containerEnv) != "1" {
-		t.Skipf("%s=1 is the container, which installs tmux", containerEnv)
+	if os.Getenv(scripted.ContainerEnv) != "1" {
+		t.Skipf("%s=1 is the container, which installs tmux", scripted.ContainerEnv)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), stepTimeout)
 	defer cancel()

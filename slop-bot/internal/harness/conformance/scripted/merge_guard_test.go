@@ -10,13 +10,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lowaa/slop-factory/go-clock"
 	"github.com/lowaa/slop-factory/slop-bot/internal/cli"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/claudecode"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex"
-	"github.com/lowaa/slop-factory/slop-bot/internal/harness/pi"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/conformance/scripted"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/mergeguard"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
@@ -108,33 +106,28 @@ func assertGuarded(t *testing.T, server *scriptedmodel.Server) {
 	assert.Zero(t, server.Remaining())
 }
 
-func TestClaudeCodeMergeGuard(t *testing.T) {
-	t.Parallel()
-	optIn(t)
-	bin := binary(t, "claude")
+// guardTest runs the merge guard's script on one harness, with guard for
+// Codex (the others run the real hook). Permissive is
+// --dangerously-skip-permissions for Claude Code: the hook's deny must hold
+// even there.
+func guardTest(t *testing.T, name string, target newTarget, guard codex.Guard) {
+	t.Helper()
+	bin := binary(t, name)
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	require.NoError(t, server.Load(guardScript("Bash", func(cmd string) map[string]any {
-		return map[string]any{"command": cmd, "description": "run it"}
-	})))
 	ws, hook := guardWorkspace(t)
-	ws.APIKeyOptIn = true
-	for k, v := range map[string]string{
-		"CLAUDE_CONFIG_DIR": t.TempDir(), "ANTHROPIC_BASE_URL": server.URL(),
-		"DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
-		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
-	} {
-		ws.Env[k] = v
-	}
-	// Permissive is --dangerously-skip-permissions: the hook's deny must
-	// hold even there.
-	h := &claudecode.Harness{
-		Binary: bin, Logger: logger(), Clock: clock.Real{}, PreToolHook: hook,
-		Environ: environ(t.TempDir(), "ANTHROPIC_API_KEY=sk-ant-scripted-model-not-a-real-key"),
-	}
-	runGuardTurn(t, h, ws, nil)
+	tg := target(t, &scripted.TargetOptions{Binary: bin, ServerURL: server.URL(), PreToolHook: hook, Guard: guard})
+	require.NoError(t, server.Load(guardScript(tg.Shell.Tool, tg.Shell.Input)))
+	tg.Workspace(ws)
+	runGuardTurn(t, tg.Harness, ws, nil)
 	assertGuarded(t, server)
+}
+
+func TestClaudeCodeMergeGuard(t *testing.T) {
+	t.Parallel()
+	optIn(t)
+	guardTest(t, "claude", scripted.ClaudeCode, nil)
 }
 
 // codexGuard is the real guard, classifier and all, for an agent on ticket
@@ -171,29 +164,7 @@ func (noGrants) Granted(context.Context, ident.TicketID) (bool, error) { return 
 func TestCodexMergeGuard(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	bin := binary(t, "codex")
-	server, err := scriptedmodel.New(nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = server.Close() })
-	require.NoError(t, server.Load(guardScript("exec_command", func(cmd string) map[string]any {
-		return map[string]any{"cmd": cmd}
-	})))
-	ws, _ := guardWorkspace(t)
-	ws.Model = "scripted-model-1"
-	runGuardTurn(t, codexHarness(t, bin, server, codexGuard(t)), ws, nil)
-	assertGuarded(t, server)
-}
-
-// codexHarness is Codex on the scripted model, with guard.
-func codexHarness(t *testing.T, bin string, server *scriptedmodel.Server, guard codex.Guard) *codex.Harness {
-	t.Helper()
-	return &codex.Harness{
-		Binary: bin, Logger: logger(), Clock: clock.Real{}, Guard: guard,
-		// A CODEX_HOME of its own, so the threads it makes are gone with it.
-		Environ:       environ(t.TempDir(), "CODEX_HOME="+t.TempDir(), "SCRIPTED_MODEL_API_KEY=scripted-model-not-a-real-key"),
-		ModelProvider: &codex.ModelProvider{ID: "scripted", BaseURL: server.URL() + "/v1", EnvKey: "SCRIPTED_MODEL_API_KEY"},
-		Config:        []string{"check_for_update_on_startup=false", "analytics.enabled=false", "feedback.enabled=false"},
-	}
+	guardTest(t, "codex", scripted.Codex, codexGuard(t))
 }
 
 // TestCodexMergeGuardAfterResume: a thread started unguarded (approvalPolicy
@@ -206,44 +177,22 @@ func TestCodexMergeGuardAfterResume(t *testing.T) {
 	server, err := scriptedmodel.New(nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	script := guardScript("exec_command", func(cmd string) map[string]any {
-		return map[string]any{"cmd": cmd}
-	})
+	ws, _ := guardWorkspace(t)
+	unguarded := scripted.Codex(t, &scripted.TargetOptions{Binary: bin, ServerURL: server.URL()})
+	guarded := scripted.Codex(t, &scripted.TargetOptions{Binary: bin, ServerURL: server.URL(), Guard: codexGuard(t)})
+	script := guardScript(unguarded.Shell.Tool, unguarded.Shell.Input)
 	script.Turns = append([]*scriptedmodel.Turn{{Text: "hello"}}, script.Turns...)
 	require.NoError(t, server.Load(script))
-	ws, _ := guardWorkspace(t)
-	ws.Model = "scripted-model-1"
-	unguarded := codexHarness(t, bin, server, nil)
-	ref := runGuardTurn(t, unguarded, ws, nil)
-	guarded := codexHarness(t, bin, server, codexGuard(t))
+	unguarded.Workspace(ws)
+	ref := runGuardTurn(t, unguarded.Harness, ws, nil)
 	// The same Codex home, so the thread is there to resume.
-	guarded.Environ = unguarded.Environ
-	runGuardTurn(t, guarded, ws, &ref)
+	guarded.Harness.(*codex.Harness).Environ = unguarded.Harness.(*codex.Harness).Environ
+	runGuardTurn(t, guarded.Harness, ws, &ref)
 	assertGuarded(t, server)
 }
 
 func TestPiMergeGuard(t *testing.T) {
 	t.Parallel()
 	optIn(t)
-	bin := binary(t, "pi")
-	server, err := scriptedmodel.New(nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = server.Close() })
-	require.NoError(t, server.Load(guardScript("bash", func(cmd string) map[string]any {
-		return map[string]any{"command": cmd}
-	})))
-	ws, hook := guardWorkspace(t)
-	ws.Model = "scripted/scripted-model-1"
-	for k, v := range map[string]string{
-		"SCRIPTED_MODEL_API_KEY": "scripted-model-not-a-real-key",
-		"PI_OFFLINE":             "1", "PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0",
-	} {
-		ws.Env[k] = v
-	}
-	h := &pi.Harness{
-		Binary: bin, Logger: logger(), Clock: clock.Real{}, PreToolHook: hook,
-		AgentDir: piAgentDir(t, server.URL()), Environ: environ(os.Getenv("HOME")),
-	}
-	runGuardTurn(t, h, ws, nil)
-	assertGuarded(t, server)
+	guardTest(t, "pi", scripted.Pi, nil)
 }

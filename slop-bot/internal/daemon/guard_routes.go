@@ -10,6 +10,7 @@ import (
 	"github.com/lowaa/slop-factory/slop-bot/internal/api"
 	"github.com/lowaa/slop-factory/slop-bot/internal/control"
 	"github.com/lowaa/slop-factory/slop-bot/internal/gitx"
+	"github.com/lowaa/slop-factory/slop-bot/internal/harness/codex"
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness/tuidriver"
 	"github.com/lowaa/slop-factory/slop-bot/internal/ident"
 	"github.com/lowaa/slop-factory/slop-bot/internal/lifecycle"
@@ -87,6 +88,13 @@ func (d *Daemon) tuiGuard(ctx context.Context, call *tuidriver.ToolCall) string 
 // (through reflection), which would hide the daemon's and state.db's dead
 // code.
 type guardFunc func(ctx context.Context, by ident.Principal, call *mergeguard.Call) *mergeguard.Verdict
+
+// MergeGuard is the guard the daemon gives Codex, for a Codex harness made
+// outside it (Options.Harnesses: the tier 2 scenarios run the real Codex
+// that way): refusals are recorded as for the daemon's own.
+func (d *Daemon) MergeGuard() codex.Guard {
+	return guardFunc(d.checkTool)
+}
 
 // Check implements codex.Guard.
 func (f guardFunc) Check(ctx context.Context, by ident.Principal, call *mergeguard.Call) *mergeguard.Verdict {

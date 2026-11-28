@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/sys/unix"
 
 	"github.com/lowaa/slop-factory/slop-bot/internal/harness"
 	"github.com/lowaa/slop-factory/slop-bot/internal/scriptedmodel"
@@ -69,8 +68,8 @@ type Puppet struct {
 
 	mu    sync.Mutex
 	cur   *session
-	long  *longTool
-	longs []*longTool
+	long  *LongCommand
+	longs []*LongCommand
 	// procs are pidfds of the harnesses launched (proc_linux.go).
 	procs []int
 }
@@ -86,11 +85,6 @@ type session struct {
 	// from is where the session's requests start in the recording: those
 	// before it are an earlier session's.
 	from int
-}
-
-type longTool struct {
-	fifo   string
-	marker string
 }
 
 // New makes a puppet for one test and loads an empty scenario, which the
@@ -207,16 +201,11 @@ func (p *Puppet) Reply(_ context.Context, text string) error {
 // until the command ends, and an interrupted tool must not leave a reply in
 // the script for the next turn to receive.
 func (p *Puppet) LongTool(context.Context) (func(context.Context) error, error) {
-	p.mu.Lock()
-	n := len(p.longs) + 1
-	l := &longTool{fifo: filepath.Join(p.dir, fmt.Sprintf("long-%d.fifo", n)), marker: fmt.Sprintf("long-tool-%d-released", n)}
-	p.longs = append(p.longs, l)
-	p.long = l
-	p.mu.Unlock()
-	if err := unix.Mkfifo(l.fifo, 0o600); err != nil {
-		return nil, fmt.Errorf("scripted: %w", err)
+	l, err := p.newLong()
+	if err != nil {
+		return nil, err
 	}
-	call := &scriptedmodel.ToolCall{Name: p.shell.Tool, Input: p.shell.Input("cat " + shellQuote(l.fifo))}
+	call := &scriptedmodel.ToolCall{Name: p.shell.Tool, Input: p.shell.Input(l.Command())}
 	if err := p.server.Append(&scriptedmodel.Turn{ToolCalls: []*scriptedmodel.ToolCall{call}, Usage: scriptedmodel.Usage{InputTokens: 10, OutputTokens: 4}}); err != nil {
 		return nil, err
 	}
@@ -224,49 +213,20 @@ func (p *Puppet) LongTool(context.Context) (func(context.Context) error, error) 
 		if err := p.Reply(ctx, "the long tool is done"); err != nil {
 			return err
 		}
-		return l.release(ctx)
+		return l.Release(ctx)
 	}, nil
 }
 
-// release writes the marker to the FIFO. Opening it for writing waits for the
-// command to open it for reading, so it is also the point at which the tool
-// is known to be running.
-func (l *longTool) release(ctx context.Context) error {
-	done := make(chan error, 1)
-	go func() {
-		f, err := os.OpenFile(l.fifo, os.O_WRONLY, 0)
-		if err != nil {
-			done <- err
-			return
-		}
-		_, err = f.WriteString(l.marker + "\n")
-		done <- errors.Join(err, f.Close())
-	}()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		// A reader of our own lets the blocked open return, so the
-		// goroutine does not outlive the test.
-		var writeErr error
-		if f, err := os.OpenFile(l.fifo, os.O_RDONLY|unix.O_NONBLOCK, 0); err == nil {
-			writeErr = <-done
-			_ = f.Close()
-		}
-		return fmt.Errorf("scripted: the long tool never read its FIFO: %w", errors.Join(ctx.Err(), writeErr))
-	}
-}
-
-// unblock ends a command still waiting on the FIFO, so a test that never
-// released it (an interrupt, a forced stop) leaves no process behind, should
-// the harness have left it running. With no reader there is nothing to do.
-func (l *longTool) unblock() {
-	f, err := os.OpenFile(l.fifo, os.O_WRONLY|unix.O_NONBLOCK, 0)
+func (p *Puppet) newLong() (*LongCommand, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	l, err := NewLongCommand(p.dir, len(p.longs)+1)
 	if err != nil {
-		return
+		return nil, err
 	}
-	_, _ = f.WriteString("cleanup\n")
-	_ = f.Close()
+	p.longs = append(p.longs, l)
+	p.long = l
+	return l, nil
 }
 
 // Accepted implements conformance.Puppet. A real harness shows a steer to
@@ -347,7 +307,7 @@ func (p *Puppet) Crash(context.Context) error {
 	return syscall.Kill(cur.pid, syscall.SIGKILL)
 }
 
-func (p *Puppet) current() (*session, *longTool) {
+func (p *Puppet) current() (*session, *LongCommand) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cur, p.long
@@ -376,7 +336,7 @@ func (p *Puppet) close() {
 	longs := p.longs
 	p.mu.Unlock()
 	for _, l := range longs {
-		l.unblock()
+		l.Unblock()
 	}
 	_ = p.listener.Close()
 	_ = os.RemoveAll(p.dir)
@@ -414,9 +374,4 @@ func tail(s string, n int) string {
 		return s
 	}
 	return "..." + s[len(s)-n:]
-}
-
-// shellQuote is s as one POSIX shell word.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,8 @@ type harness struct {
 	home, runtime string
 	// config is a slop-bot-config.yaml under home naming a fixed user.
 	config string
+	// built is the daemon startDaemon last ran.
+	built atomic.Pointer[daemon.Daemon]
 }
 
 func newHarness(t *testing.T) *harness {
@@ -111,12 +114,22 @@ func startDaemon(t *testing.T, h *harness) (stop func()) {
 	t.Helper()
 	ready := make(chan *daemon.Daemon, 1)
 	daemonDeps := *h.deps
-	daemonDeps.daemonBuilt = func(d *daemon.Daemon) { ready <- d }
+	daemonDeps.daemonBuilt = func(d *daemon.Daemon) {
+		h.built.Store(d)
+		ready <- d
+	}
 	daemonDeps.Stdout, daemonDeps.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
 	go func() { done <- Execute(ctx, &daemonDeps, []string{"--config", h.config, "daemon"}) }()
-	d := <-ready
+	// A daemon that fails before it is built (a config it refuses) never
+	// reports one.
+	var d *daemon.Daemon
+	select {
+	case d = <-ready:
+	case code := <-done:
+		require.FailNowf(t, "daemon exited", "code %d: %s", code, daemonDeps.Stderr)
+	}
 	select {
 	case <-d.Ready():
 	case code := <-done:
