@@ -98,6 +98,10 @@ quality_parse_args() {
     echo "quality.sh: --prune, --rebaseline and --report are exclusive" >&2
     return 2
   }
+  [[ -z "${QUALITY_RUNS}" || ${#QUALITY_PROFILES[@]} -eq 0 ]] || {
+    echo "quality.sh: --runs runs the suite, and --coverprofile stands in for it: give one" >&2
+    return 2
+  }
 }
 
 # quality_positive S: whether S is a positive whole number.
@@ -108,10 +112,14 @@ quality_positive() {
 # quality_runs: how many times to run the suite. --runs says, or else, for
 # the modes that write a baseline, the project's quality_baseline/coverage_runs
 # (its first line that isn't a comment): a project whose coverage some timing
-# moves keeps out of its baseline what only some runs reach. Otherwise once.
+# moves keeps out of its baseline what only some runs reach. Otherwise once,
+# and always once when coverage isn't measured: only coverage reads the
+# other runs.
 quality_runs() {
   local f=quality_baseline/coverage_runs n
-  if [[ -n "${QUALITY_RUNS}" ]]; then
+  if [[ ",${QUALITY_ONLY}," != *,coverage,* ]]; then
+    echo 1
+  elif [[ -n "${QUALITY_RUNS}" ]]; then
     echo "${QUALITY_RUNS}"
   elif [[ "${QUALITY_MODE}" =~ ^(prune|rebaseline)$ && -f "${f}" ]]; then
     n="$(grep -v -e '^#' -e '^[[:space:]]*$' "${f}" | head -n 1 | tr -d '[:space:]')"

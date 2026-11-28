@@ -116,7 +116,10 @@ A check's single run usually beats such a baseline a little, so it prints
 an improvement; a prune from the reruns then moves only what all of them
 cover. `--runs=N` does the same for one invocation, in any mode
 (`--report --runs=5` shows the stable coverage). Without the file, every
-mode runs the suite once, as before.
+mode runs the suite once, as before. Runs only matter to coverage, so
+without it (`--only=testtime`) the suite runs once. A `--coverprofile`
+stands in for the suite's runs: it is measured as given, so `coverage_runs`
+doesn't apply to it, and `--runs` with it is refused.
 
 To find the blocks that flip, run the measure a few times with
 `-coverprofile` and compare which blocks each run covers; cover the ones

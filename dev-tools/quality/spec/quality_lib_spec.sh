@@ -69,6 +69,12 @@ Describe 'quality_lib.sh'
       The variable QUALITY_RUNS should eq 3
     End
 
+    It 'refuses --runs with a cover profile, which stands in for the runs'
+      When call quality_parse_args --runs=2 --coverprofile=c.out
+      The status should eq 2
+      The stderr should include 'give one'
+    End
+
     Describe 'a bad --runs'
     Parameters
       --runs=0
@@ -294,6 +300,15 @@ Describe 'quality_lib.sh'
       The status should be success
       The stderr should include '(run 2)'
       The result of function fresh_runs should eq 2
+    End
+
+    It 'runs the suite once for test time alone, whatever coverage_runs says'
+      mkdir -p "$(project)/quality_baseline" && echo 3 > "$(project)/quality_baseline/coverage_runs"
+      When call quality_go "$(project)" --rebaseline --only=testtime
+      The status should be success
+      The stderr should include 'go test'
+      The result of function quality_calls should include '--coverprofile'
+      The result of function quality_calls should not include '--rerun-profile'
     End
 
     It 'lets --runs override coverage_runs'
