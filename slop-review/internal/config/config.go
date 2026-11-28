@@ -691,8 +691,8 @@ func (cfg *Config) loadIntent(path string) error {
 	return nil
 }
 
-// localFallback is the fallback the local settings name: flags over the
-// environment over the .env file.
+// localFallback is the fallback the local settings name: the command
+// line's, or else the environment's over the .env file's.
 type localFallback struct {
 	choice providerconfig.Choice
 	// on is SLOP_REVIEW_FALLBACK_ON, comma-separated; empty is

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,6 +62,9 @@ func TestRun_ALocalFallbackRedoesASessionThePrimaryFailsWithATrigger(t *testing.
 	assert.Equal(t, "claude", got.Meta.FellBack.From)
 	assert.Equal(t, "openrouter", got.Meta.FellBack.To)
 	assert.Equal(t, "usage_limit", got.Meta.FellBack.Class)
+	fellBack, err := json.Marshal(got.Meta.FellBack)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"from":"claude","to":"openrouter","class":"usage_limit"}`, string(fellBack), "snake_case like the rest of the output")
 	require.Len(t, got.Sessions, 1)
 	assert.Equal(t, "openrouter", got.Sessions[0].Provider)
 	assert.Equal(t, "fallback-model", got.Sessions[0].Model)
