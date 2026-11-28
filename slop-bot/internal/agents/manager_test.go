@@ -508,3 +508,19 @@ func (w testWriter) Write(p []byte) (int, error) {
 	w.t.Log(string(p))
 	return len(p), nil
 }
+
+func TestCancellingATicketEndsItsAgentMidTurn(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, "")
+	tk := f.file("t", nil)
+	s := f.session()
+	f.user(s)
+	f.do(s, fake.Command{Cmd: fake.CmdTurnStart})
+	f.await(agents.EventState, toState(state.StateRefining))
+	st := tickets.StatusCancelled
+	_, err := f.tickets.Update(context.Background(), ident.UserPrincipal(), tk.ID, &tickets.TicketChange{Status: &st})
+	require.NoError(t, err)
+	// The turn never ends: the cancel cuts it off rather than waiting.
+	f.await(agents.EventFinished, nil)
+	assert.Equal(t, []ident.TicketID{tk.ID}, f.wts.cleanups)
+}

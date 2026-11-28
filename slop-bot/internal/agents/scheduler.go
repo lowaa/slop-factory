@@ -62,7 +62,7 @@ func (m *Manager) onTicketEvent(ctx context.Context, ev *tickets.TicketEvent) {
 			fmt.Sprintf("Your ticket is still blocked by %s: don't start the work yet. End your turn; you'll be told when the blockers are done.", refs(t.BlockedBy)), false)
 	case t.Status == tickets.StatusCancelled:
 		if r, ok := m.runner(a.ID); ok {
-			m.finish(ctx, r, "")
+			m.cancel(ctx, r)
 		}
 	}
 }

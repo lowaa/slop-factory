@@ -149,8 +149,19 @@ func (m *Manager) SetNote(ctx context.Context, p ident.Principal, note string) e
 
 // finish ends an agent whose ticket is done: the summary goes on the
 // ticket, the conversation stops, and the worktrees are cleaned up, except
-// any holding work no remote has.
+// any holding work no remote has. It returns at once: stopping and cleaning
+// up run on their own goroutine, so a caller on the scheduler or the
+// runner's own loop is never held up.
 func (m *Manager) finish(ctx context.Context, r *runner, summary string) {
+	m.end(ctx, r, summary, false)
+}
+
+// cancel ends an agent whose ticket was cancelled: its turn is cut off.
+func (m *Manager) cancel(ctx context.Context, r *runner) {
+	m.end(ctx, r, "", true)
+}
+
+func (m *Manager) end(ctx context.Context, r *runner, summary string, force bool) {
 	r.mu.Lock()
 	r.stopping = true
 	r.mu.Unlock()
@@ -160,13 +171,20 @@ func (m *Manager) finish(ctx context.Context, r *runner, summary string) {
 			m.opts.Logger.Warn("agents: posting the summary", "agent", r.id, "err", err)
 		}
 	}
-	m.advanceTo(ctx, by, r.ticket, tickets.StatusDone)
-	_ = r.conv.Stop(ctx, false)
+	if !force {
+		m.advanceTo(ctx, by, r.ticket, tickets.StatusDone)
+	}
 	go func() {
+		ctx := context.WithoutCancel(ctx)
+		_ = r.conv.Stop(ctx, force)
 		<-r.exited
-		m.cleanup(context.WithoutCancel(ctx), r)
-		r.setState(context.WithoutCancel(ctx), state.StateDone, "the ticket is done")
-		m.event(context.WithoutCancel(ctx), EventFinished, r.id, r.ticket, nil)
+		m.cleanup(ctx, r)
+		reason := "the ticket is done"
+		if force {
+			reason = "the ticket was cancelled"
+		}
+		r.setState(ctx, state.StateDone, reason)
+		m.event(ctx, EventFinished, r.id, r.ticket, nil)
 		m.forget(r.id)
 	}()
 }
