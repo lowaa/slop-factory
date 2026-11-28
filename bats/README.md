@@ -1,7 +1,9 @@
 # bats
 
-Shell scripts in this repo are tested with [bats-core](https://github.com/bats-core/bats-core),
-pinned as a root devDependency alongside bats-support and bats-assert.
+The repo's existing shell test suites use [bats-core](https://github.com/bats-core/bats-core),
+pinned as a root devDependency alongside bats-support and bats-assert. They
+stay; new shell tests use shellspec (`dev-tools/quality/spec/` is the
+example, `CLAUDE.md` the rule).
 
 ```
 npm ci                                        # once, at the repo root
@@ -44,6 +46,6 @@ leaves it running hangs the whole suite. Start it with `3>&-`, and kill it in
 
 Like the rest of the repo's tests, bats suites run from the component's
 `test.sh` -- by hand, or before a deploy -- not from the pre-commit hooks,
-which stay to fast static checks. A new suite goes in a directory an existing
-`test.sh` already covers, or gets a `test.sh` of its own that calls
+which stay to fast static checks. A bats suite goes in a directory an
+existing `test.sh` already covers, or gets a `test.sh` of its own that calls
 `bats/run.sh`.

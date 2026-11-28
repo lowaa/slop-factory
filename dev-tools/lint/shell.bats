@@ -91,6 +91,21 @@ echo $1'
   refute_output --partial "notes"
 }
 
+@test "shfmt leaves shellspec specs alone; shellcheck still reads them" {
+  script spec/x_spec.sh '# shellcheck shell=bash
+Describe "x"
+  It "y"
+    When call echo $1
+    The output should eq ""
+  End
+End'
+  run "${SHELL_SH}" --only=shfmt
+  assert_success
+  run "${SHELL_SH}" --only=shellcheck
+  assert_failure
+  assert_output --partial "  spec/x_spec.sh SC2086"
+}
+
 @test "a script that does not parse fails as a broken run, not as debt" {
   script broken.sh '#!/usr/bin/env bash
 if then fi'

@@ -22,6 +22,7 @@ updates:
     directories:
       - /artifact-store
       - /dev-tools/lint
+      - /dev-tools/quality
       - /go-auth
       - /go-clock
       - /go-db
@@ -29,6 +30,7 @@ updates:
       - /go-privacy
       - /go-settings
       - /go-web
+      - /slop-bot
       - /slop-haus/server
       - /slop-review
       - /slop-review/report

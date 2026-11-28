@@ -79,7 +79,7 @@ less, so `lint.sh` first checks `node_modules` against the lockfile
 | jscpd | 5.4.2 | MIT | duplicated Go and TypeScript (`/.jscpd.json`) | `repo.sh` |
 | ruff | 0.17.3 | MIT | `ruff.toml`: pyflakes, pycodestyle errors, bugbear, complexity, dead code | `ruff.sh`, from the supervisor's, token's and harness suite's `test.sh`, the server's lint suite (the workspace scripts) and `go-db/test.sh` (its `e2e_test`) |
 | shellcheck | 0.11.0 | GPL-3.0: approved as a dev-only tool, run from its image and never shipped | every check, following `source` (`-x`) | `shell.sh` |
-| shfmt | 3.14.1 | BSD-3-Clause | check-only (`-d`), `-i 2 -ci -sr` | `shell.sh` |
+| shfmt | 3.14.1 | BSD-3-Clause | check-only (`-d`), `-i 2 -ci -sr`; not shellspec specs (`*_spec.sh`) | `shell.sh` |
 | lizard | 1.25.0 | MIT | complexity report, not a gate | `complexity_report.sh`, by hand |
 
 `repo.sh` (knip, jscpd) and `shell.sh` (shellcheck, shfmt) are the
@@ -109,7 +109,9 @@ pyright stays the type checker.
 and extensionless file with a sh/bash shebang, tracked or untracked, less
 linguist-generated ones (the golden scripts under `testdata/golden`) and
 symbolic links. The repo was formatted with shfmt once, so its baseline is
-empty and a script off the style fails. shfmt keeps the syntax tree as it
+empty and a script off the style fails. shfmt skips shellspec specs
+(`*_spec.sh`): their `Describe`/`It`/`End` blocks are plain commands to it,
+so it would flatten their nesting. shellcheck still lints them. shfmt keeps the syntax tree as it
 parses it, which is not always as bash runs it; two lessons from that pass:
 
 - An associative array's keys are arithmetic to shfmt, which cannot know
@@ -185,7 +187,7 @@ which moves whenever code is added anywhere.
 | Baseline | Holds |
 | --- | --- |
 | `<module>/lint_baseline/<tool>.txt` | a Go module's findings, paths relative to it |
-| `<app>/deadcode/baseline.txt`, `allowlist.txt` | deadcode's (`slop-haus/server`, `slop-review`) |
+| `<app>/deadcode/baseline.txt`, `allowlist.txt` | deadcode's (`slop-haus/server`, `slop-review`, `slop-bot`) |
 | `slop-haus/frontend/lint_baseline/oxlint.txt`, `js-components/lint_baseline/oxlint.txt` | oxlint's per area |
 | `<project>/lint_baseline/ruff.txt` | a Python project's, paths relative to it |
 | `dev-tools/lint/baseline/knip.txt`, `jscpd.txt`, `shellcheck.txt`, `shfmt.txt` | the repo-wide ones, paths from the root |

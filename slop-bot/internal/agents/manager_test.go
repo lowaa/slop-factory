@@ -2,8 +2,8 @@ package agents_test
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"

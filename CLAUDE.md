@@ -3,11 +3,12 @@
 - Don't change git config, remotes or `gh auth`
 
 # Tests
-- Before pushing: `dev-tools/lint/lint.sh --changed` (every linter CI runs on the change, the repo-wide ones included), then the touched project's `test.sh` and `scan.sh`; a new project gets both (`dev-tools/security/README.md`) and a `dev-tools/lint/projects.txt` line
+- Before pushing: `dev-tools/lint/lint.sh --changed` (every linter CI runs on the change, the repo-wide ones included), then the touched project's `test.sh`, `scan.sh` and `quality.sh` (if it has one: `dev-tools/quality/pending.txt` lists those without); a new Go project gets all three (`dev-tools/security/README.md`, `dev-tools/quality/README.md`) and a `dev-tools/lint/projects.txt` line
 - Negative-test non-trivial tests: break the code, watch the test fail
 - Filter runs to the test you're iterating on
 - No timing-based waits: synchronise on events, locks or channels. Override long production timeouts in tests; discuss any test that must be slow
-- Bash tests use bats (`bats/`); `test.sh` entrypoints don't need them
+- Bash tests use shellspec (`dev-tools/quality/spec/` is the example); existing bats suites (`bats/`) stay. `test.sh` entrypoints don't need tests
+- Coverage, complexity and test time are ratcheted by `quality.sh` against `quality_baseline/` (`dev-tools/quality/README.md`): fix a regression; rebaseline only a deliberate one, alone (`--rebaseline --only=<measure>`), saying why in the commit; after an improvement, `--prune`
 - Lint findings are ratcheted, baselines and suppression syntax in `dev-tools/lint/README.md`: fix a new one, don't baseline it; after paying debt, `--prune` the baseline
 
 # Self-review
