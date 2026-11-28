@@ -102,6 +102,17 @@ type attachRun struct {
 	stdout, stderr io.Writer
 	holder         string
 	agent          string
+	// pid is the TUI's, once it runs.
+	pid int
+}
+
+// launched tells the daemon the TUI's pid, so that if this CLI dies the
+// daemon can make sure the TUI is gone before resuming the conversation.
+// A reconnected daemon is told again: it starts knowing nothing.
+func (at *attachRun) launched(ctx context.Context) {
+	if err := at.client.Do(ctx, http.MethodPost, agentPath(api.PathLaunched, at.agent), &api.Launched{Holder: at.holder, PID: at.pid}, nil); err != nil {
+		at.say("slop-bot: couldn't tell the daemon the TUI's pid: %v", err)
+	}
 }
 
 func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequest) error {
@@ -143,9 +154,8 @@ func (at *attachRun) run(ctx context.Context, target string, req *api.AttachRequ
 			}
 		}
 	}
-	if err := at.client.Do(ctx, http.MethodPost, agentPath(api.PathLaunched, at.agent), &api.Launched{Holder: at.holder, PID: tui.cmd.Process.Pid}, nil); err != nil {
-		at.say("slop-bot: couldn't tell the daemon the TUI's pid: %v", err)
-	}
+	at.pid = tui.cmd.Process.Pid
+	at.launched(ctx)
 	frames := make(chan api.AttachFrame)
 	go at.follow(streamCtx, body, frames)
 	if at.supervise(tui, sigs, frames) {
@@ -292,6 +302,7 @@ func (at *attachRun) follow(ctx context.Context, body *scannedBody, out chan<- a
 			return
 		}
 		at.say("\r\nslop-bot: reconnected.")
+		at.launched(ctx)
 	}
 }
 

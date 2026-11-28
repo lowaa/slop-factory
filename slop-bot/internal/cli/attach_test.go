@@ -297,6 +297,8 @@ func TestAnAttachSurvivesADaemonRestart(t *testing.T) {
 
 	// The CLI reconnects to the new daemon; the TUI never noticed.
 	e.await("agent.reattached", nil)
+	// The new daemon learns the TUI's pid, for a hang-up from here on.
+	e.await("agent.tui_launched", nil)
 	term.typeLine("still here")
 	_, err := tui.Expect(e.ctx(), fake.RepTyped)
 	require.NoError(t, err)
