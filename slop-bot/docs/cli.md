@@ -1,8 +1,8 @@
 # CLI reference
 
 Checked against the cobra command tree built from `internal/cli` and each
-command's `--help` output (`go build ./cmd/slop-bot`). `slop-bot <command>
---help` is always the final word.
+command's `--help` output, hidden commands included (`go build
+./cmd/slop-bot`). `slop-bot <command> --help` is always the final word.
 
 ## Global flag
 
@@ -201,7 +201,7 @@ These are the commands the briefing gives agents. Users may run most too.
 | Flag | Meaning |
 | --- | --- |
 | `--all` | every working agent |
-| `--interrupt` | stop the agent's current turn first (user only) |
+| `--interrupt` | stop the agent's current turn first; the message is delivered as the next turn, once the interrupted one ends (user only) |
 | `--merge` | authorise the agent to merge its ticket's work; the text is optional (user only) |
 
 A user's `tell` to an agent with an open `ask` is its answer. A user's
@@ -218,8 +218,16 @@ another agent are information, not instructions.
 | `--log` | the message history (user only) |
 | `--target <agent>` | with `--log`, only messages to or from this agent |
 
-## Not in this build
+## Hidden commands
 
-The design describes `briefing` and `restart --drain`. Neither is a
-command here. `hook pre-tool` exists, hidden: harnesses run it as the
-merge guard, and people and agents don't.
+`hook` is run by harnesses, not by people or agents, and is left out of the
+briefing's CLI reference.
+
+| Command | Meaning |
+| --- | --- |
+| `hook pre-tool` | The merge guard for harnesses with a `PreToolUse` hook (Claude Code, pi): reads the call on stdin and answers allow or deny ([merge_guard.md](merge_guard.md)). |
+| `hook tui <session> <event>` | Relays a TUI harness's (agy's) hook to its conversation in the daemon, which answers it, including the merge guard's verdict. |
+
+Not commands: `briefing` (the built-in briefing is rendered at each agent's
+start into `$XDG_STATE_HOME/slop-bot/agents/<agent>/briefing.md`) and
+`restart --drain`.

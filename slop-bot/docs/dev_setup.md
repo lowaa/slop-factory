@@ -24,7 +24,7 @@ each configured harness: binary, tested version, signed in, model):
 | `claude` (Claude Code) | 2.1.332 up to 2.2 | `curl -fsSL https://claude.ai/install.sh \| bash` | `curl -fsSL https://claude.ai/install.sh \| bash` (or `brew install --cask claude-code`) |
 | `codex` | 0.172.0 up to 0.173 | `npm install -g @openai/codex` | `brew install --cask codex` (or `npm install -g @openai/codex`) |
 | `pi` | 1.4.0 up to 1.5 | install pi (see its own install docs) and put `pi` on `PATH` | the same |
-| `agy` (not runnable in this build) | 1.5.18 up to 1.6 | install the Antigravity CLI, then `agy install` to put it on `PATH` | the same |
+| `agy` | 1.5.18 up to 1.6 | install the Antigravity CLI, then `agy install` to put it on `PATH` | the same |
 
 Needed only in some setups:
 
@@ -32,9 +32,6 @@ Needed only in some setups:
 | --- | --- | --- | --- |
 | tmux 3.4 or later | a harness configured with the `tui` driver (`agy`); `doctor` skips the check otherwise | `sudo apt install tmux` (or your distribution's package manager) | `brew install tmux` |
 | any binary in `doctor.require` | your workflow's tools, for example `gh` | `sudo apt install <tool>`, or drop it from `doctor.require` | `brew install <tool>`, or drop it from `doctor.require` |
-
-A harness a build can't run (today `agy`) only warns; listing it as
-`default_harness` fails.
 
 Providing an API key: `api_key_opt_in` lets a harness's key through to
 agents, and the service doesn't read your shell profile. When `doctor` says

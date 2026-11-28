@@ -1,16 +1,19 @@
 # The merge guard
 
-Defence in depth behind the briefing (plan task 4.10). An agent on a ticket
-without `AutoMerge` is told to stop at `slop-bot ready-to-merge`. Where its
-harness has a pre-tool hook, slop-bot also refuses the obvious merge commands
-until the user says go. Codex has no hook that runs under app-server, so there
-the daemon answers Codex's command approvals instead (see
-[Codex](#codex-approvals-not-hooks)).
+Defence in depth behind the briefing. An agent on a ticket without
+`AutoMerge` is told to stop at `slop-bot ready-to-merge`. Where its harness
+has a pre-tool hook (Claude Code, pi, agy), slop-bot also refuses the
+obvious merge commands until the user says go. Codex has no hook that runs
+under app-server, so there the daemon answers Codex's command approvals
+instead (see [Codex](#codex-approvals-not-hooks)). All four harnesses are
+guarded; see [Per harness](#per-harness) for what each leaves open.
 
 ## How it works
 
 1. The harness runs `slop-bot hook pre-tool` before each shell (or MCP) tool
    call. The call arrives on stdin as a Claude Code `PreToolUse` payload.
+   (agy's hook runs `slop-bot hook tui` instead, which reaches the same
+   guard through the TUI kit; see the table below.)
 2. The hook asks the daemon (`POST /v1/guard/pre-tool`) with the agent's
    token. The daemon classifies the command (`internal/mergeguard`). A merge
    is allowed only when the ticket has `AutoMerge` or the user has authorised
@@ -38,7 +41,8 @@ is the exception: there slop-bot is the one asked, and it approves whatever
 isn't a merge.)
 
 For the hook-based harnesses, `attach` hands the session over with the same
-flags, so a person attached to an agent is held to the guard too, because the session still carries the
+flags (agy's joined session is the agent's own), so a person attached to an
+agent is held to the guard too, because the session still carries the
 agent's token. To merge from there, run `slop-bot tell <agent> --merge`
 first. After `attach --no-resume` the session is the person's, but it keeps
 the hook and a token that no longer names a live agent. The hook then can't
@@ -240,13 +244,16 @@ request, the steered reason. What was measured:
 
 - `internal/mergeguard`: the classifier, the daemon-side `Guard`, and the
   hook (`RunHook`)
-- `internal/cli/hook.go`: `slop-bot hook pre-tool`. It is hidden, and not in
-  the briefing's CLI reference, because the harness runs it, not the agent
+- `internal/cli/hook.go`: `slop-bot hook pre-tool` and `slop-bot hook tui`.
+  Both are hidden, and not in the briefing's CLI reference, because the
+  harness runs them, not the agent
 - `internal/daemon/guard_routes.go`: the route, the `merge.refused` event
   (`checkTool`, which Codex is given too), and `tell --merge`
 - `internal/agents/merge.go`: `AuthoriseMerge`, and clearing the grant when
   the ticket ends
 - `internal/state/merge_grants.go`: the `merge_grants` table
 - `internal/harness/claudecode`, `internal/harness/pi`: the hook wiring
+- `internal/harness/agy`, `internal/harness/tuidriver`: agy's sidecar hook
+  and the TUI kit's guard
 - `internal/harness/codex/approvals.go`: Codex's approvals answered with the
   guard's verdict
